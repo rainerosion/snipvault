@@ -101,6 +101,10 @@ function getLangExtension(lang: string) {
 
 // Build the base layout extensions (no theme-gating)
 function buildExtensions(isDark: boolean, lang: string) {
+  const selBg = isDark ? "rgba(56,189,248,0.42)" : "rgba(2,132,199,0.30)";
+  const selBgF = isDark ? "rgba(56,189,248,0.52)" : "rgba(2,132,199,0.38)";
+  const cursor = isDark ? "#38bdf8" : "#0284c7";
+
   // Use position:absolute so the host fills .cm-editor-wrap regardless of flexbox
   // height resolution quirks in Tauri WebView.
   // The parent .cm-editor-wrap needs position:relative.
@@ -122,6 +126,16 @@ function buildExtensions(isDark: boolean, lang: string) {
     },
     ".cm-content": {
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+      caretColor: cursor,
+    },
+    ".cm-cursor, .cm-dropCursor": {
+      borderLeftColor: cursor,
+    },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
+      background: selBg,
+    },
+    "&.cm-focused .cm-selectionBackground": {
+      background: selBgF,
     },
   });
 
@@ -151,8 +165,10 @@ function injectShadowStyles(isDark: boolean) {
     `.cm-scroller{background:${bg}!important;overflow-y:auto!important;overflow-x:auto!important;display:block!important;height:100%!important;}`,
     `.cm-content{caret-color:${cursor}!important;}`,
     `.cm-cursor,.cm-dropCursor{border-left-color:${cursor}!important;}`,
-    `.cm-selectionBackground,.cm-content ::selection{background:${selBg}!important;}`,
-    `&.cm-focused .cm-selectionBackground{background:${selBgF}!important;}`,
+    `.cm-selectionLayer .cm-selectionBackground{background:${selBg}!important;opacity:1!important;}`,
+    `.cm-focused .cm-selectionLayer .cm-selectionBackground{background:${selBgF}!important;opacity:1!important;}`,
+    `.cm-content::selection,.cm-content *::selection{background:${selBg}!important;}`,
+    `.cm-focused .cm-content::selection,.cm-focused .cm-content *::selection{background:${selBgF}!important;}`,
     `.cm-activeLine{background:${activeLine}!important;}`,
     `.cm-activeLineGutter{background:${activeGutter}!important;}`,
     `.cm-gutters{background:${gutterBg}!important;border-right:1px solid ${gutterBorder}!important;color:${gutterColor}!important;}`,
@@ -318,9 +334,41 @@ export function SnippetEditor({
           value={form.content}
           extensions={extensions}
           onChange={(val) => onChange({ content: val })}
-          onCreateEditor={(view) => { cmRef.current = view; }}
+          onCreateEditor={(view) => {
+            cmRef.current = view;
+            requestAnimationFrame(() => {
+              const wrap = editorWrapRef.current;
+              if (!wrap) return;
+              const px = wrap.clientHeight;
+              if (px > 0) {
+                (view.dom as HTMLElement).style.height = `${px}px`;
+              }
+
+              // Apply shadow styles immediately on first mount,
+              // otherwise effect may miss initial paint before cmRef exists.
+              const sr = (view.dom as HTMLElement).shadowRoot;
+              if (!sr) return;
+              const isDark = theme === "dark";
+
+              let s = sr.querySelector("[data-snpt]") as HTMLStyleElement | null;
+              if (!s) {
+                s = document.createElement("style");
+                s.setAttribute("data-snpt", "");
+                sr.appendChild(s);
+              }
+              s.textContent = injectShadowStyles(isDark);
+
+              const scroller = sr.querySelector(".cm-scroller") as HTMLElement | null;
+              if (scroller) {
+                scroller.style.overflowY = "auto";
+                scroller.style.overflowX = "auto";
+                scroller.style.height = "100%";
+              }
+            });
+          }}
           basicSetup={{
             lineNumbers: true,
+            drawSelection: true,
             highlightActiveLine: true,
             highlightSelectionMatches: true,
             autocompletion: true,

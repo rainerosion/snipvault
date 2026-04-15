@@ -105,6 +105,7 @@ body {
   display: flex;
   flex: 1;
   overflow: hidden;
+  min-height: 0;
 }
 
 /* ===========================
@@ -650,6 +651,7 @@ body {
   flex-direction: column;
   overflow: hidden;
   background: var(--bg-primary);
+  min-height: 0;
 }
 
 .editor-empty {
@@ -1280,6 +1282,7 @@ body {
   background: var(--bg-primary);
   min-height: 0;
   height: 100%;
+  position: relative;
 }
 
 .cm-editor-wrap .cm-editor {
