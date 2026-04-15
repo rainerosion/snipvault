@@ -12,11 +12,31 @@
 
 ## English
 
+### Application Overview
+
+SnipVault is a desktop snippet manager designed for developers to quickly capture, edit, and retrieve reusable code fragments.
+
+It follows a focused two-pane workflow:
+- Left pane: snippet list with full-text search, language filter, and favorites filter
+- Right pane: syntax-highlighted editor with title/description, tag chips (Enter to create or choose from suggestions), favorite toggle, and one-click copy
+
+The app is local-first by default (SQLite, fully usable offline). If you need multi-device usage, you can enable WebDAV two-way merge sync.
+
+### Screenshots
+
+| Main View | Editor View |
+|---|---|
+| ![Main View](screenshot/ScreenShot_2026-04-16_010734_111.png) | ![Editor View](screenshot/ScreenShot_2026-04-16_010909_449.png) |
+
+| Settings - General | Settings - WebDAV |
+|---|---|
+| ![Settings General](screenshot/ScreenShot_2026-04-16_010932_851.png) | ![Settings WebDAV](screenshot/ScreenShot_2026-04-16_011002_274.png) |
+
 ### Features
 
 - **Multi-language syntax highlighting** — JavaScript/TypeScript, Python, Rust, Java, C/C++/C#, PHP, SQL, HTML/CSS, JSON, Markdown, YAML, and more
 - **Full-text search** — Search by title, content, description, or tags with language/tag filtering
-- **Tag system** — Organize snippets with comma-separated tags
+- **Tag system** — Organize snippets with tag chips (press Enter to create or pick from suggestions)
 - **Favorites** — Mark important snippets for quick access
 - **Copy to clipboard** — One-click copy with system tray integration
 - **Import/Export** — JSON format for backup and portability
@@ -80,7 +100,7 @@ Download from the [Releases](https://github.com/rainerosion/snipvault/releases) 
 
 | Mode | Location |
 |------|----------|
-| Portable (default) | `%LOCALAPPDATA%/SnipTrace/` (Windows) |
+| Portable (default) | `%LOCALAPPDATA%/SnipVault/` (Windows) |
 | Installed (MSI/NSIS) | `<exe_dir>/data/` |
 
 Files: `snippets.db` (SQLite), `settings.json`
@@ -149,11 +169,31 @@ Issues and pull requests are welcome! Please read the code conventions in `CLAUD
 
 ## 中文
 
+### 应用说明
+
+灵藏 · SnipVault 是一款面向开发者的桌面代码片段管理工具，用于高效沉淀、检索和复用常用代码。
+
+核心使用方式是双栏工作流：
+- 左侧：片段列表，支持全文搜索、语言筛选、收藏筛选
+- 右侧：语法高亮编辑区，支持标题/描述、标签 chip（回车创建或下拉建议选择）、收藏切换、一键复制
+
+应用默认本地优先（SQLite 离线可用）；需要多端同步时可启用 WebDAV 双向合并同步。
+
+### 截图展示
+
+| 主界面 | 编辑区 |
+|---|---|
+| ![主界面](screenshot/ScreenShot_2026-04-16_010734_111.png) | ![编辑区](screenshot/ScreenShot_2026-04-16_010909_449.png) |
+
+| 设置-通用 | 设置-WebDAV |
+|---|---|
+| ![设置通用](screenshot/ScreenShot_2026-04-16_010932_851.png) | ![设置WebDAV](screenshot/ScreenShot_2026-04-16_011002_274.png) |
+
 ### 功能特性
 
 - **多语言语法高亮** — JavaScript/TypeScript、Python、Rust、Java、C/C++/C#、PHP、SQL、HTML/CSS、JSON、Markdown、YAML 等
 - **全文搜索** — 按标题、内容、描述、标签搜索，支持语言/收藏过滤
-- **标签系统** — 逗号分隔的多标签管理
+- **标签系统** — 支持标签 chip（回车创建或下拉建议选择）
 - **收藏功能** — 标记重要片段快速访问
 - **一键复制** — 代码片段复制到剪贴板，配合系统托盘使用
 - **导入/导出** — JSON 格式备份与迁移
@@ -217,7 +257,7 @@ npm run tauri build
 
 | 模式 | 路径 |
 |------|------|
-| 便携模式（默认） | `%LOCALAPPDATA%/SnipTrace/`（Windows）|
+| 便携模式（默认） | `%LOCALAPPDATA%/SnipVault/`（Windows）|
 | 安装模式（MSI/NSIS） | `<exe所在目录>/data/` |
 
 存储文件：`snippets.db`（SQLite 数据库）、`settings.json`（配置文件）
@@ -245,7 +285,7 @@ npm run tauri build
 ### 项目结构
 
 ```
-灵藏 · SnipTrace/
+灵藏 · SnipVault/
 ├── src-tauri/          # Rust 后端（Tauri 2）
 │   ├── src/
 │   │   ├── main.rs      # 入口，托盘，窗口关闭行为，自动同步定时器
