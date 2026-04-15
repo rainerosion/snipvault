@@ -16,7 +16,7 @@ interface SettingsPanelProps {
 export function SettingsPanel({ theme, setTheme, onClose }: SettingsPanelProps) {
   const { t } = useTranslation();
   const { setLanguage } = useContext(LanguageContext);
-  const { settings, loading, load, save, setAutoStart, syncUpload, getSyncVersions, getSystemTheme } = useSettings();
+  const { settings, loading, load, save, syncUpload, getSyncVersions, getSystemTheme } = useSettings();
   const [form, setForm] = useState<Settings | null>(null);
   const [syncing, setSyncing] = useState(false);
 
@@ -52,10 +52,8 @@ export function SettingsPanel({ theme, setTheme, onClose }: SettingsPanelProps) 
   const handleSave = useCallback(async () => {
     if (!form) return;
     try {
+      // save_settings on backend already syncs autostart state when auto_start changes
       await save(form);
-      if (form.auto_start !== settings?.auto_start) {
-        await setAutoStart(form.auto_start);
-      }
       await applyTheme(form.theme);
       if (form.language !== settings?.language) {
         setLanguage(form.language);
@@ -65,7 +63,7 @@ export function SettingsPanel({ theme, setTheme, onClose }: SettingsPanelProps) 
     } catch (e) {
       dialogRef.current?.alert(t("errors.settingsFailed", { error: e }));
     }
-  }, [form, settings, save, setAutoStart, applyTheme, setLanguage, t]);
+  }, [form, settings, save, applyTheme, setLanguage, t]);
 
   const handleSync = useCallback(async () => {
     const ok = await dialogRef.current?.confirm(t("settings.syncConfirm"));

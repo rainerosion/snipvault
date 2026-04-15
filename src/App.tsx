@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useContext } from "rea
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { useSnippets } from "./hooks/useSnippets";
-import { useSettings } from "./hooks/useSettings";
+import { useSettings, Settings as AppSettings } from "./hooks/useSettings";
 import { Toolbar } from "./components/Toolbar";
 import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
@@ -59,12 +59,26 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
 
   const handleSync = useCallback(async () => {
-    if (!settings?.webdav_url) {
+    let effectiveSettings = settings;
+
+    // Settings in this page may still be null/stale before loadSettings finishes.
+    // Read once directly from backend as a fallback.
+    if (!effectiveSettings?.webdav_url?.trim()) {
+      try {
+        effectiveSettings = await invoke<AppSettings>("get_settings");
+      } catch {
+        // keep fallback as null
+      }
+    }
+
+    if (!effectiveSettings?.webdav_url?.trim()) {
       dialogRef.current?.alert(t("errors.noWebdav"));
       return;
     }
+
     const ok = await dialogRef.current?.confirm(t("settings.syncConfirm"));
     if (ok !== true) return;
+
     setSyncing(true);
     try {
       const result = await syncUpload();
