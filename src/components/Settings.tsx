@@ -43,9 +43,16 @@ export function SettingsPanel({ theme, setTheme, onClose }: SettingsPanelProps) 
   const applyTheme = useCallback(async (themeVal: string) => {
     if (themeVal === "dark" || themeVal === "light") {
       setTheme(themeVal);
+      window.dispatchEvent(new CustomEvent("snipvault-theme-pref-changed", {
+        detail: { pref: themeVal, effective: themeVal },
+      }));
     } else if (themeVal === "system") {
       const sys = await getSystemTheme().catch(() => "dark");
-      setTheme(sys as "dark" | "light");
+      const effective = sys === "light" ? "light" : "dark";
+      setTheme(effective);
+      window.dispatchEvent(new CustomEvent("snipvault-theme-pref-changed", {
+        detail: { pref: "system", effective },
+      }));
     }
   }, [setTheme, getSystemTheme]);
 

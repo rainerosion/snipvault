@@ -32,6 +32,7 @@ interface SnippetEditorProps {
   theme: "dark" | "light";
   saving: boolean;
   isDirty: boolean;
+  tagOptions: string[];
 }
 
 // Custom bright syntax colors for dark mode
@@ -185,12 +186,23 @@ export function SnippetEditor({
   theme,
   saving,
   isDirty,
+  tagOptions,
 }: SnippetEditorProps) {
   const { t } = useTranslation();
   const { language } = useContext(LanguageContext);
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const cmRef = useRef<EditorView | null>(null);
   const [copied, setCopied] = useState(false);
+  const [tagInput, setTagInput] = useState("");
+  const [showTagSuggestions, setShowTagSuggestions] = useState(false);
+
+  const filteredTagOptions = useMemo(() => {
+    const q = tagInput.trim().toLowerCase();
+    return tagOptions
+      .filter((tag) => !form.tags.includes(tag))
+      .filter((tag) => q === "" || tag.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [tagOptions, form.tags, tagInput]);
 
   const extensions = useMemo(() => {
     return buildExtensions(theme === "dark", form.language);
@@ -236,6 +248,27 @@ export function SnippetEditor({
     ro.observe(wrap);
     return () => ro.disconnect();
   }, [theme]);
+
+  const addTag = useCallback((raw: string) => {
+    const tag = raw.trim();
+    if (!tag) return;
+    if (form.tags.includes(tag)) {
+      setTagInput("");
+      setShowTagSuggestions(false);
+      return;
+    }
+    onChange({ tags: [...form.tags, tag] });
+    setTagInput("");
+    setShowTagSuggestions(false);
+  }, [form.tags, onChange]);
+
+  const removeTag = useCallback((tag: string) => {
+    onChange({ tags: form.tags.filter((t) => t !== tag) });
+  }, [form.tags, onChange]);
+
+  const commitTagInput = useCallback(() => {
+    addTag(tagInput);
+  }, [addTag, tagInput]);
 
   const handleSave = useCallback(() => {
     onSave();
@@ -317,16 +350,63 @@ export function SnippetEditor({
           <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
           <line x1="7" y1="7" x2="7.01" y2="7"/>
         </svg>
-        <input
-          className="tags-input"
-          placeholder={t("snippet.tags")}
-          value={form.tags.join(", ")}
-          onChange={(e) =>
-            onChange({
-              tags: e.target.value.split(",").map((t) => t.trim()).filter(Boolean),
-            })
-          }
-        />
+
+        <div className="editor-tags">
+          {form.tags.map((tag) => (
+            <span key={tag} className="tag-chip">
+              <span>{tag}</span>
+              <button
+                type="button"
+                className="tag-remove"
+                onClick={() => removeTag(tag)}
+                title={t("snippet.delete")}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+
+          <div className="tag-input-wrap">
+            <input
+              className="tag-input"
+              placeholder={t("snippet.tags")}
+              value={tagInput}
+              onFocus={() => setShowTagSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowTagSuggestions(false), 120)}
+              onChange={(e) => {
+                setTagInput(e.target.value);
+                setShowTagSuggestions(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === ",") {
+                  e.preventDefault();
+                  commitTagInput();
+                }
+                if (e.key === "Backspace" && !tagInput && form.tags.length > 0) {
+                  removeTag(form.tags[form.tags.length - 1]);
+                }
+              }}
+            />
+
+            {showTagSuggestions && filteredTagOptions.length > 0 && (
+              <div className="tag-suggestions">
+                {filteredTagOptions.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    className="tag-suggestion"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      addTag(tag);
+                    }}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="cm-editor-wrap" ref={editorWrapRef}>

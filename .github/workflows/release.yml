@@ -21,9 +21,6 @@ permissions:
   attestations: write
   id-token: write
 
-env:
-  # Reusable version derived from tag or dispatch input
-  VERSION: ${{ github.ref_name || inputs.version }}
 
 jobs:
   # ─── Windows x64 ───────────────────────────────────────────────────────────
@@ -158,13 +155,31 @@ jobs:
       - name: List downloaded files
         run: find artifacts -type f | sort
 
+      - name: Resolve release version
+        id: version
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ "$REF_TYPE" = "tag" ] && [ -n "$REF_NAME" ]; then
+            VERSION="$REF_NAME"
+          elif [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            echo "No tag ref or workflow_dispatch input version provided."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.VERSION }}
-          name: '灵藏 SnipVault ${{ env.VERSION }}'
+          tag_name: ${{ steps.version.outputs.version }}
+          name: '灵藏 SnipVault ${{ steps.version.outputs.version }}'
           draft: true
-          prerelease: ${{ contains(env.VERSION, 'beta') || contains(env.VERSION, 'alpha') || contains(env.VERSION, 'rc') }}
+          prerelease: ${{ contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') || contains(steps.version.outputs.version, 'rc') }}
           generate_release_notes: true
           files: |
             artifacts/**/*.msi

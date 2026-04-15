@@ -17,7 +17,7 @@
     "shortcutHint": "or press Ctrl+N to create",
     "title": "Title...",
     "desc": "Description (optional)...",
-    "tags": "Tags (comma separated)...",
+    "tags": "Type a tag and press Enter, or pick from suggestions...",
     "new": "New",
     "create": "Create",
     "save": "Save",

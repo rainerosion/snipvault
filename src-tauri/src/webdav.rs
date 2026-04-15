@@ -241,23 +241,41 @@ pub fn sync_merge() -> Result<SyncResult, String> {
     let total = local_snippets.len();
     let now = chrono::Utc::now().to_rfc3339();
 
+    let summary_message = if uploaded == 0 && downloaded == 0 && deleted_remote == 0 {
+        format!("同步完成：本地与远程数据一致（当前共 {} 条）", total)
+    } else {
+        format!(
+            "同步完成：上传 {} 条，下载 {} 条，远程删除 {} 条（当前共 {} 条）",
+            uploaded, downloaded, deleted_remote, total
+        )
+    };
+
     // Record sync history
     db::record_sync_version(
         "merge",
         total,
         uploaded,
         downloaded,
-        &format!("上传 {} 条，下载 {} 条，删除远程 {} 条", uploaded, downloaded, deleted_remote)
-    ).ok();
+        &summary_message,
+    )
+    .ok();
 
     // Update last_sync_at
-    settings::update_settings(|s| { s.last_sync_at = now.clone(); }).ok();
+    settings::update_settings(|s| {
+        s.last_sync_at = now.clone();
+    })
+    .ok();
 
-    log::info!("sync_merge: done uploaded={} downloaded={} deleted_remote={}", uploaded, downloaded, deleted_remote);
+    log::info!(
+        "sync_merge: done uploaded={} downloaded={} deleted_remote={}",
+        uploaded,
+        downloaded,
+        deleted_remote
+    );
 
     Ok(SyncResult {
         success: true,
-        message: format!("同步成功！上传 {} 条，下载 {} 条，共 {} 条", uploaded, downloaded, total),
+        message: summary_message,
         uploaded: true,
         uploaded_count: uploaded,
         downloaded_count: downloaded,

@@ -164,6 +164,7 @@ export default function App() {
 
   const [filteredSnippets, setFilteredSnippets] = useState<Snippet[] | null>(null);
   const displaySnippets = filteredSnippets ?? snippets;
+  const allTagOptions = Array.from(new Set(snippets.flatMap((s) => s.tags))).sort((a, b) => a.localeCompare(b));
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -374,6 +375,7 @@ export default function App() {
             theme={theme}
             saving={saving}
             isDirty={isDirty}
+            tagOptions={allTagOptions}
           />
         </div>
       </div>
