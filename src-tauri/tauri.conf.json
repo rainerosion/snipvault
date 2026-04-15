@@ -34,7 +34,7 @@
   "plugins": {},
   "bundle": {
     "active": true,
-    "publisher": "浅语",
+    "publisher": "rainerosion",
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -47,7 +47,7 @@
     "windows": {
       "wix": {
         "language": [
-          "zh-CN"
+          "en-US"
         ]
       },
       "nsis": {
