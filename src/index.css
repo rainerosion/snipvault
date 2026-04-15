@@ -943,39 +943,6 @@ body {
 /* ===========================
    CodeMirror Editor
    =========================== */
-.cm-editor-wrap {
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.cm-editor-wrap .cm-editor {
-  flex: 1;
-  height: 100%;
-  font-family: 'JetBrains Mono', monospace !important;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.cm-editor-wrap .cm-scroller {
-  font-family: 'JetBrains Mono', monospace !important;
-  overflow-y: auto !important;
-  overflow-x: auto !important;
-}
-
-.cm-editor-wrap .cm-gutters {
-  border-right: 1px solid var(--border) !important;
-}
-
-.cm-editor-wrap .cm-activeLineGutter {
-  background: var(--bg-hover) !important;
-}
-
-.cm-editor-wrap .cm-activeLine {
-  background: rgba(56, 189, 248, 0.05) !important;
-}
 
 /* ===========================
    Toast Notification
@@ -1153,7 +1120,7 @@ body {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
-  position: relative; /* anchor the absolute .cm-editor-wrap */
+  position: relative;
 }
 
 .editor-empty {
@@ -1303,7 +1270,7 @@ body {
   color: var(--text-muted);
 }
 
-/* CodeMirror wrapper — position:relative anchors the absolute child .cm-editor */
+/* CodeMirror wrapper — flex child fills remaining space in .editor-form */
 .cm-editor-wrap {
   flex: 1;
   overflow: hidden;
@@ -1313,12 +1280,11 @@ body {
   background: var(--bg-primary);
   min-height: 0;
   height: 100%;
-  position: relative;
 }
 
 .cm-editor-wrap .cm-editor {
-  position: absolute;
-  inset: 0;
+  flex: 1;
+  height: 100%;
   font-size: 13.5px;
   background: var(--bg-primary);
 }

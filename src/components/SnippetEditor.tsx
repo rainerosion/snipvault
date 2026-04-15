@@ -313,11 +313,7 @@ export function SnippetEditor({
         />
       </div>
 
-      <div
-        className="cm-editor-wrap"
-        ref={editorWrapRef}
-        style={{ position: "absolute", inset: 0 }}
-      >
+      <div className="cm-editor-wrap" ref={editorWrapRef}>
         <CodeMirror
           value={form.content}
           extensions={extensions}
