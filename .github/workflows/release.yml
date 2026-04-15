@@ -47,7 +47,7 @@ jobs:
       - name: Setup WiX Toolset
         shell: pwsh
         run: |
-          choco install wixtoolset --version=3.14.1 -y
+          choco install wixtoolset --version=3.14.1 -y --allow-downgrade
           $wixPath = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
           if (!(Test-Path $wixPath)) {
             throw "WiX path not found: $wixPath"
