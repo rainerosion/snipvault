@@ -47,8 +47,7 @@
     "windows": {
       "wix": {
         "language": [
-          "zh-CN",
-          "en-US"
+          "zh-CN"
         ]
       },
       "nsis": {
