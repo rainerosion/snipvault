@@ -24,13 +24,13 @@ The app is local-first by default (SQLite, fully usable offline). If you need mu
 
 ### Screenshots
 
-| Main View | Editor View |
+| Home View (Dark Theme) | Home View (Light Theme) |
 |---|---|
-| ![Main View](screenshot/ScreenShot_2026-04-16_010734_111.png) | ![Editor View](screenshot/ScreenShot_2026-04-16_010909_449.png) |
+| ![Home View Dark Theme](screenshot/ScreenShot_2026-04-16_010909_449.png) | ![Home View Light Theme](screenshot/ScreenShot_2026-04-16_010734_111.png) |
 
-| Settings - General | Settings - WebDAV |
+| Settings (Dark Theme) | Settings (Light Theme) |
 |---|---|
-| ![Settings General](screenshot/ScreenShot_2026-04-16_010932_851.png) | ![Settings WebDAV](screenshot/ScreenShot_2026-04-16_011002_274.png) |
+| ![Settings Dark Theme](screenshot/ScreenShot_2026-04-16_010932_851.png) | ![Settings Light Theme](screenshot/ScreenShot_2026-04-16_011002_274.png) |
 
 ### Features
 
@@ -181,13 +181,13 @@ Issues and pull requests are welcome! Please read the code conventions in `CLAUD
 
 ### 截图展示
 
-| 主界面 | 编辑区 |
+| 主页（深色主题） | 主页（浅色主题） |
 |---|---|
-| ![主界面](screenshot/ScreenShot_2026-04-16_010734_111.png) | ![编辑区](screenshot/ScreenShot_2026-04-16_010909_449.png) |
+| ![主页深色主题](screenshot/ScreenShot_2026-04-16_010909_449.png) | ![主页浅色主题](screenshot/ScreenShot_2026-04-16_010734_111.png) |
 
-| 设置-通用 | 设置-WebDAV |
+| 设置（深色主题） | 设置（浅色主题） |
 |---|---|
-| ![设置通用](screenshot/ScreenShot_2026-04-16_010932_851.png) | ![设置WebDAV](screenshot/ScreenShot_2026-04-16_011002_274.png) |
+| ![设置深色主题](screenshot/ScreenShot_2026-04-16_010932_851.png) | ![设置浅色主题](screenshot/ScreenShot_2026-04-16_011002_274.png) |
 
 ### 功能特性
 
