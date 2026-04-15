@@ -1304,7 +1304,7 @@ body {
   background: #0d1117 !important;
 }
 [data-theme="dark"] .cm-editor .cm-content {
-  background: #0d1117 !important;
+  background: transparent !important;
 }
 [data-theme="dark"] .cm-editor .cm-gutters {
   background: #0d1117 !important;
@@ -1334,7 +1334,7 @@ body {
   background: #ffffff !important;
 }
 [data-theme="light"] .cm-editor .cm-content {
-  background: #ffffff !important;
+  background: transparent !important;
 }
 [data-theme="light"] .cm-editor .cm-gutters {
   background: #f6f8fa !important;

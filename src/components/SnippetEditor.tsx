@@ -101,8 +101,8 @@ function getLangExtension(lang: string) {
 
 // Build the base layout extensions (no theme-gating)
 function buildExtensions(isDark: boolean, lang: string) {
-  const selBg = isDark ? "rgba(56,189,248,0.42)" : "rgba(2,132,199,0.30)";
-  const selBgF = isDark ? "rgba(56,189,248,0.52)" : "rgba(2,132,199,0.38)";
+  const selBg = isDark ? "rgba(56,189,248,0.62)" : "rgba(2,132,199,0.42)";
+  const selBgF = isDark ? "rgba(56,189,248,0.74)" : "rgba(2,132,199,0.56)";
   const cursor = isDark ? "#38bdf8" : "#0284c7";
 
   // Use position:absolute so the host fills .cm-editor-wrap regardless of flexbox
@@ -151,8 +151,8 @@ function buildExtensions(isDark: boolean, lang: string) {
 // Inject per-theme CSS directly into the shadow DOM (always applied, not gated)
 function injectShadowStyles(isDark: boolean) {
   const bg = isDark ? "#0d1117" : "#ffffff";
-  const selBg = isDark ? "rgba(56,189,248,0.42)" : "rgba(2,132,199,0.30)";
-  const selBgF = isDark ? "rgba(56,189,248,0.52)" : "rgba(2,132,199,0.38)";
+  const selBg = isDark ? "rgba(56,189,248,0.62)" : "rgba(2,132,199,0.42)";
+  const selBgF = isDark ? "rgba(56,189,248,0.74)" : "rgba(2,132,199,0.56)";
   const cursor = isDark ? "#38bdf8" : "#0284c7";
   const gutterBg = isDark ? "#0d1117" : "#f6f8fa";
   const gutterBorder = isDark ? "#21262d" : "#d0d7de";
