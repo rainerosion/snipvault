@@ -45,6 +45,12 @@
     ],
     "resources": [],
     "windows": {
+      "wix": {
+        "language": [
+          "zh-CN",
+          "en-US"
+        ]
+      },
       "nsis": {
         "installMode": "currentUser"
       }
