@@ -18,7 +18,6 @@ import { json } from "@codemirror/lang-json";
 import { css } from "@codemirror/lang-css";
 import { markdown } from "@codemirror/lang-markdown";
 import { yaml } from "@codemirror/lang-yaml";
-import { showMinimap } from "@replit/codemirror-minimap";
 import { Snippet, SnippetForm } from "../types";
 import { LANGUAGES } from "../utils/languages";
 import { LanguageContext } from "../context/LanguageContext";
@@ -35,10 +34,6 @@ interface SnippetEditorProps {
   isDirty: boolean;
   tagOptions: string[];
 }
-
-const DEFAULT_CODEGLANCE_WIDTH = 120;
-const MIN_CODEGLANCE_WIDTH = 80;
-const MAX_CODEGLANCE_WIDTH = 420;
 
 // ─── Syntax palettes ─────────────────────────────────────────────────────────
 
@@ -130,36 +125,67 @@ function buildMainExtensions(isDark: boolean, lang: string) {
     "&.cm-focused .cm-selectionBackground": { background: selBgF },
   });
 
-  const minimapTheme = EditorView.theme({
-    ".cm-minimap-container": {
-      background: isDark ? "#0d1117" : "#ffffff",
-      borderLeft: `1px solid ${isDark ? "#21262d" : "#d0d7de"}`,
-    },
-    ".cm-minimap-overlay": {
-      background: isDark ? "rgba(56,189,248,0.15)" : "rgba(2,132,199,0.15)",
-      border: `1px solid ${isDark ? "rgba(56,189,248,0.5)" : "rgba(2,132,199,0.5)"}`,
-    },
-    ".cm-minimap-viewport": {
-      background: isDark ? "rgba(56,189,248,0.08)" : "rgba(2,132,199,0.08)",
-      border: `1px solid ${isDark ? "rgba(56,189,248,0.4)" : "rgba(2,132,199,0.4)"}`,
-    },
-  });
-
   return [
     EditorView.lineWrapping,
     getLangExtension(lang),
     isDark ? githubDark : githubLight,
     cmLayout,
     isDark ? darkHighlight : lightHighlight,
-    showMinimap.of({
-      displayText: "blocks",
-      showOverlay: "always",
-    }),
-    minimapTheme,
   ];
 }
 
-// ─── Shadow DOM injection ────────────────────────────────────────────────────
+// ─── Glance (minimap) extensions ────────────────────────────────────────────
+
+function buildGlanceExtensions(isDark: boolean, lang: string) {
+  const bg = isDark ? "#0d1117" : "#ffffff";
+  const fg = isDark ? "#8b949e" : "#6e7781";
+  const cursor = isDark ? "#38bdf8" : "#0284c7";
+  const selBg = isDark ? "rgba(56,189,248,0.35)" : "rgba(2,132,199,0.3)";
+
+  const glanceLayout = EditorView.theme({
+    "&": {
+      position: "absolute", top: "0", bottom: "0", left: "0", right: "0",
+      background: `${bg} !important`,
+      fontSize: "13.5px",
+    },
+    ".cm-scroller": {
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+      overflowY: "auto !important",
+      overflowX: "auto !important",
+      height: "100%",
+      display: "block",
+    },
+    ".cm-content": {
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+      caretColor: cursor,
+    },
+    ".cm-cursor, .cm-dropCursor": { borderLeftColor: cursor },
+    ".cm-selectionBackground": { background: `${selBg} !important` },
+    "&.cm-focused .cm-selectionBackground": { background: `${selBg} !important` },
+    ".cm-gutters": {
+      background: `${bg} !important`,
+      borderRight: `1px solid ${isDark ? "#21262d" : "#d0d7de"}`,
+      color: `${fg} !important`,
+    },
+    ".cm-activeLineGutter": { background: "transparent !important" },
+    ".cm-activeLine": { background: "transparent !important" },
+    // Hide fold gutter, line numbers too cluttering for minimap
+    ".cm-gutterElement": { display: "none !important" },
+    ".cm-lineNumbers .cm-gutterElement": { display: "none !important" },
+    ".cm-foldGutter .cm-gutterElement": { display: "none !important" },
+  }, { dark: isDark });
+
+  return [
+    EditorView.editable.of(false),
+    EditorView.lineWrapping,
+    getLangExtension(lang),
+    isDark ? githubDark : githubLight,
+    glanceLayout,
+    isDark ? darkHighlight : lightHighlight,
+  ];
+}
+
+// ─── Shadow DOM injection (main editor) ────────────────────────────────────
 
 function injectShadowStyles(isDark: boolean) {
   const bg = isDark ? "#0d1117" : "#ffffff";
@@ -198,17 +224,25 @@ export function SnippetEditor({
   // ── Refs ──────────────────────────────────────────────────────────────────
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const cmRef = useRef<EditorView | null>(null);
+  const glanceRef = useRef<EditorView | null>(null);
+  const mainScrollerRef = useRef<HTMLElement | null>(null);
 
   // ── State ─────────────────────────────────────────────────────────────────
   const [copied, setCopied] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
-  const [editorReadyTick, setEditorReadyTick] = useState(0);
+  const [glanceWidth, setGlanceWidth] = useState(150);
+  const [isDragging, setIsDragging] = useState(false);
 
   // ── Derived ───────────────────────────────────────────────────────────────
+  const isDark = theme === "dark";
   const mainExtensions = useMemo(
-    () => buildMainExtensions(theme === "dark", form.language),
-    [theme, form.language]
+    () => buildMainExtensions(isDark, form.language),
+    [isDark, form.language]
+  );
+  const glanceExtensions = useMemo(
+    () => buildGlanceExtensions(isDark, form.language),
+    [isDark, form.language]
   );
 
   // ── Main editor height fixup ───────────────────────────────────────────────
@@ -223,12 +257,16 @@ export function SnippetEditor({
       (view.dom as HTMLElement).style.height = `${px}px`;
       const sr = (view.dom as HTMLElement).shadowRoot;
       if (!sr) return;
-      const isDark = theme === "dark";
       let s = sr.querySelector("[data-snpt]") as HTMLStyleElement | null;
       if (!s) { s = document.createElement("style"); s.setAttribute("data-snpt", ""); sr.appendChild(s); }
       s.textContent = injectShadowStyles(isDark);
       const sc = sr.querySelector(".cm-scroller") as HTMLElement | null;
-      if (sc) { sc.style.overflowY = "auto"; sc.style.overflowX = "auto"; sc.style.height = "100%"; }
+      if (sc) {
+        sc.style.overflowY = "auto";
+        sc.style.overflowX = "auto";
+        sc.style.height = "100%";
+        mainScrollerRef.current = sc;
+      }
     };
     apply();
     requestAnimationFrame(apply);
@@ -236,6 +274,59 @@ export function SnippetEditor({
     ro.observe(wrap);
     return () => ro.disconnect();
   }, [theme]);
+
+  // ── Glance height fixup ────────────────────────────────────────────────────
+  useEffect(() => {
+    const wrap = editorWrapRef.current;
+    if (!wrap) return;
+    const apply = () => {
+      const view = glanceRef.current;
+      if (!view) return;
+      const px = wrap.clientHeight;
+      if (px <= 0) return;
+      (view.dom as HTMLElement).style.height = `${px}px`;
+    };
+    apply();
+    requestAnimationFrame(apply);
+  }, [glanceWidth]);
+
+  // ── Scroll sync: main → glance ─────────────────────────────────────────────
+  const syncGlanceScroll = useCallback(() => {
+    const main = mainScrollerRef.current;
+    const glance = glanceRef.current;
+    if (!main || !glance) return;
+
+    const mainScrollable = main.scrollHeight - main.clientHeight;
+    const glanceScrollable = glance.scrollHeight - glance.clientHeight;
+
+    if (mainScrollable <= 0 || glanceScrollable <= 0) return;
+
+    const ratio = main.scrollTop / mainScrollable;
+    glance.scrollTop = ratio * glanceScrollable;
+  }, []);
+
+  // ── Glance divider drag ───────────────────────────────────────────────────
+  const handleDividerPointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    const startX = e.clientX;
+    const startWidth = glanceWidth;
+    const wrap = editorWrapRef.current;
+    if (!wrap) return;
+
+    const onMove = (ev: PointerEvent) => {
+      const delta = startX - ev.clientX;
+      const newWidth = Math.min(420, Math.max(80, startWidth + delta));
+      setGlanceWidth(newWidth);
+    };
+    const onUp = () => {
+      setIsDragging(false);
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  }, [glanceWidth]);
 
   // ── Tag helpers ────────────────────────────────────────────────────────────
   const filteredTagOptions = useMemo(() => {
@@ -364,8 +455,9 @@ export function SnippetEditor({
         </div>
       </div>
 
-      {/* Editor (minimap integrated via @replit/codemirror-minimap in extensions) */}
-      <div className="cm-editor-wrap">
+      {/* Editor + CodeGlance split */}
+      <div className="cm-editor-split">
+        {/* Main editor */}
         <div className="cm-main-pane" ref={editorWrapRef}>
           <CodeMirror
             value={form.content}
@@ -373,27 +465,50 @@ export function SnippetEditor({
             onChange={(val) => onChange({ content: val })}
             onCreateEditor={(view) => {
               cmRef.current = view;
-              setEditorReadyTick((v) => v + 1);
-              requestAnimationFrame(() => {
-                const wrap = editorWrapRef.current;
-                if (!wrap) return;
-                const px = wrap.clientHeight;
-                if (px > 0) (view.dom as HTMLElement).style.height = `${px}px`;
-                const sr = (view.dom as HTMLElement).shadowRoot;
-                if (!sr) return;
-                const isDark = theme === "dark";
-                let s = sr.querySelector("[data-snpt]") as HTMLStyleElement | null;
-                if (!s) { s = document.createElement("style"); s.setAttribute("data-snpt", ""); sr.appendChild(s); }
-                s.textContent = injectShadowStyles(isDark);
-                const sc = sr.querySelector(".cm-scroller") as HTMLElement | null;
-                if (sc) { sc.style.overflowY = "auto"; sc.style.overflowX = "auto"; sc.style.height = "100%"; }
-              });
+              const sr = (view.dom as HTMLElement).shadowRoot;
+              if (!sr) return;
+              let s = sr.querySelector("[data-snpt]") as HTMLStyleElement | null;
+              if (!s) { s = document.createElement("style"); s.setAttribute("data-snpt", ""); sr.appendChild(s); }
+              s.textContent = injectShadowStyles(isDark);
+              const sc = sr.querySelector(".cm-scroller") as HTMLElement | null;
+              if (sc) {
+                sc.style.overflowY = "auto";
+                sc.style.overflowX = "auto";
+                sc.style.height = "100%";
+                mainScrollerRef.current = sc;
+                sc.addEventListener("scroll", syncGlanceScroll, { passive: true });
+              }
             }}
             basicSetup={{
               lineNumbers: true, drawSelection: true, highlightActiveLine: true,
               highlightSelectionMatches: true, autocompletion: true,
               bracketMatching: true, closeBrackets: true, foldGutter: true, indentOnInput: true,
             }}
+          />
+        </div>
+
+        {/* Draggable divider */}
+        <div
+          className={`codeglance-divider ${isDragging ? "active" : ""}`}
+          onPointerDown={handleDividerPointerDown}
+        />
+
+        {/* CodeGlance (minimap) */}
+        <div className="codeglance-pane" style={{ width: glanceWidth }}>
+          <CodeMirror
+            value={form.content}
+            extensions={glanceExtensions}
+            onCreateEditor={(view) => {
+              glanceRef.current = view;
+              const sr = (view.dom as HTMLElement).shadowRoot;
+              if (!sr) return;
+              let s = sr.querySelector("[data-snpt-glance]") as HTMLStyleElement | null;
+              if (!s) { s = document.createElement("style"); s.setAttribute("data-snpt-glance", ""); sr.appendChild(s); }
+              s.textContent = injectShadowStyles(isDark);
+              const sc = sr.querySelector(".cm-scroller") as HTMLElement | null;
+              if (sc) { sc.style.overflowY = "auto"; sc.style.overflowX = "hidden"; sc.style.height = "100%"; }
+            }}
+            basicSetup={false}
           />
         </div>
       </div>
