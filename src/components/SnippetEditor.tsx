@@ -213,32 +213,6 @@ function buildMainExtensions(isDark: boolean, lang: string) {
   ];
 }
 
-// ─── Shadow DOM injection ────────────────────────────────────────────────────
-
-function injectShadowStyles(isDark: boolean) {
-  const bg = isDark ? "#0d1117" : "#ffffff";
-  const selBg = isDark ? "rgba(56,189,248,0.62)" : "rgba(2,132,199,0.42)";
-  const selBgF = isDark ? "rgba(56,189,248,0.74)" : "rgba(2,132,199,0.56)";
-  const cursor = isDark ? "#38bdf8" : "#0284c7";
-  const gutterBg = isDark ? "#0d1117" : "#f6f8fa";
-  const gutterBorder = isDark ? "#21262d" : "#d0d7de";
-  const gutterColor = isDark ? "#6e7681" : "#6e7781";
-  const activeGutter = isDark ? "#161b22" : "#f6f8fa";
-  const activeLine = isDark ? "rgba(56,189,248,0.05)" : "rgba(2,132,199,0.04)";
-  return [
-    `.cm-editor{background:${bg}!important;position:relative!important;}`,
-    `.cm-scroller{background:${bg}!important;overflow-y:auto!important;overflow-x:auto!important;display:block!important;height:100%!important;}`,
-    `.cm-content{caret-color:${cursor}!important;}`,
-    `.cm-cursor,.cm-dropCursor{border-left-color:${cursor}!important;}`,
-    `.cm-selectionLayer .cm-selectionBackground{background:${selBg}!important;opacity:1!important;}`,
-    `.cm-focused .cm-selectionLayer .cm-selectionBackground{background:${selBgF}!important;opacity:1!important;}`,
-    `.cm-content::selection,.cm-content *::selection{background:${selBg}!important;}`,
-    `.cm-focused .cm-content::selection,.cm-focused .cm-content *::selection{background:${selBgF}!important;}`,
-    `.cm-activeLine{background:${activeLine}!important;}`,
-    `.cm-activeLineGutter{background:${activeGutter}!important;}`,
-    `.cm-gutters{background:${gutterBg}!important;border-right:1px solid ${gutterBorder}!important;color:${gutterColor}!important;}`,
-  ].join("");
-}
 
 // ─── MiniMap component (Canvas-based) ───────────────────────────────────────
 
@@ -564,9 +538,6 @@ export function SnippetEditor({
       if (!view) return;
       const sr = (view.dom as HTMLElement).shadowRoot;
       if (!sr) return;
-      let s = sr.querySelector("[data-snpt]") as HTMLStyleElement | null;
-      if (!s) { s = document.createElement("style"); s.setAttribute("data-snpt", ""); sr.appendChild(s); }
-      s.textContent = injectShadowStyles(isDark);
       const sc = sr.querySelector(".cm-scroller") as HTMLElement | null;
       if (sc) {
         // Hand off the scroller element to MiniMap
