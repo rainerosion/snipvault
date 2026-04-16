@@ -1,9 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Detects whether the app is running in "installed" or "portable" mode.
 /// Returns "installed" if the app has an MSI/NSIS uninstall entry in the registry,
 /// or if the exe path is under a standard Program Files directory.
-/// Returns "portable" otherwise (data stays in %LOCALAPPDATA%).
+/// Returns "portable" otherwise (data stays in %APPDATA% / Roaming).
 pub fn get_app_mode() -> &'static str {
     if is_installed() {
         "installed"
@@ -89,31 +89,67 @@ fn is_registered_install() -> bool {
     false
 }
 
+fn roaming_app_data_dir() -> PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("SnipVault")
+}
+
+fn can_write_dir(dir: &Path) -> bool {
+    if std::fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+
+    let probe = dir.join(format!(
+        ".snipvault-write-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+
+    match std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 /// Returns the data directory for the current app mode.
-/// - Installed: <exe_dir>/data/  (portable alongside exe)
-/// - Portable: %LOCALAPPDATA%/SnipVault/
+/// - Installed: prefer <exe_dir>/data, fallback to %APPDATA%/SnipVault/ (Roaming) when not writable
+/// - Portable: %APPDATA%/SnipVault/ (Roaming)
 pub fn get_data_dir() -> PathBuf {
     let mode = get_app_mode();
+    let app_data_dir = roaming_app_data_dir();
+
     log::info!("get_data_dir: app_mode = {}", mode);
-    let dir = if mode == "installed" {
-        // Installed: store data next to the exe in a "data" subfolder
+
+    if mode == "installed" {
         if let Ok(exe_path) = std::env::current_exe() {
             if let Some(exe_dir) = exe_path.parent() {
-                return exe_dir.join("data");
+                let installed_data_dir = exe_dir.join("data");
+                if can_write_dir(&installed_data_dir) {
+                    log::info!("get_data_dir: resolved installed path = {:?}", installed_data_dir);
+                    return installed_data_dir;
+                }
+
+                log::warn!(
+                    "get_data_dir: installed path not writable, fallback to appdata: {:?}",
+                    installed_data_dir
+                );
             }
         }
-        // Fallback
-        dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("SnipVault")
-    } else {
-        // Portable: use %LOCALAPPDATA%/SnipVault/
-        dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("SnipVault")
-    };
-    log::info!("get_data_dir: resolved = {:?}", dir);
-    dir
+    }
+
+    log::info!("get_data_dir: resolved appdata path = {:?}", app_data_dir);
+    app_data_dir
 }
 
 pub fn get_db_path() -> PathBuf {
