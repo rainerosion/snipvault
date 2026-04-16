@@ -1,6 +1,6 @@
 [package]
 name = "snipvault"
-version = "1.0.8"
+version = "1.0.9"
 description = "灵藏 SnipVault - A local code snippet manager"
 authors = ["浅语"]
 edition = "2021"
@@ -13,6 +13,7 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-shell = "2"
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
