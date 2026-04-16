@@ -184,11 +184,16 @@ function buildMainExtensions(isDark: boolean, lang: string) {
   const cursor = isDark ? "#38bdf8" : "#0284c7";
   const cmLayout = EditorView.theme({
     "&": {
-      position: "absolute", top: "0", bottom: "0", left: "0", right: "0", fontSize: "13.5px",
+      flex: "1 1 auto",
+      minHeight: "0",
+      fontSize: "13.5px",
     },
     ".cm-scroller": {
+      flex: "1 1 auto",
+      minHeight: "0",
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
-      overflowY: "auto !important", overflowX: "auto !important", height: "100%", display: "block",
+      overflowY: "auto !important",
+      overflowX: "auto !important",
     },
     ".cm-content": {
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
@@ -557,9 +562,6 @@ export function SnippetEditor({
     const apply = () => {
       const view = cmRef.current;
       if (!view) return;
-      const px = wrap.clientHeight;
-      if (px <= 0) return;
-      (view.dom as HTMLElement).style.height = `${px}px`;
       const sr = (view.dom as HTMLElement).shadowRoot;
       if (!sr) return;
       let s = sr.querySelector("[data-snpt]") as HTMLStyleElement | null;
@@ -567,9 +569,6 @@ export function SnippetEditor({
       s.textContent = injectShadowStyles(isDark);
       const sc = sr.querySelector(".cm-scroller") as HTMLElement | null;
       if (sc) {
-        sc.style.overflowY = "auto";
-        sc.style.overflowX = "auto";
-        sc.style.height = "100%";
         // Hand off the scroller element to MiniMap
         if (minimapScrollSetRef.current && mainScrollerRef.current !== sc) {
           mainScrollerRef.current = sc;
@@ -748,13 +747,6 @@ export function SnippetEditor({
               let s = sr.querySelector("[data-snpt]") as HTMLStyleElement | null;
               if (!s) { s = document.createElement("style"); s.setAttribute("data-snpt", ""); sr.appendChild(s); }
               s.textContent = injectShadowStyles(isDark);
-              const sc = sr.querySelector(".cm-scroller") as HTMLElement | null;
-              if (sc) {
-                sc.style.overflowY = "auto";
-                sc.style.overflowX = "auto";
-                sc.style.height = "100%";
-                mainScrollerRef.current = sc;
-              }
             }}
             basicSetup={{
               lineNumbers: true, drawSelection: true, highlightActiveLine: true,
