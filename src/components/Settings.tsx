@@ -291,7 +291,7 @@ export function SettingsPanel({ theme, setTheme, onClose }: SettingsPanelProps) 
             </div>
             <div className="about-row">
               <span className="about-label">{t("settings.aboutAuthor")}</span>
-              <span className="about-value">浅语</span>
+              <span className="about-value">浅语 & AI</span>
             </div>
             <div className="about-row">
               <span className="about-label">{t("settings.aboutDesc")}</span>

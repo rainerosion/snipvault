@@ -18,6 +18,7 @@ import { json } from "@codemirror/lang-json";
 import { css } from "@codemirror/lang-css";
 import { markdown } from "@codemirror/lang-markdown";
 import { yaml } from "@codemirror/lang-yaml";
+import { showMinimap } from "@replit/codemirror-minimap";
 import { Snippet, SnippetForm } from "../types";
 import { LANGUAGES } from "../utils/languages";
 import { LanguageContext } from "../context/LanguageContext";
@@ -35,7 +36,12 @@ interface SnippetEditorProps {
   tagOptions: string[];
 }
 
-// Custom bright syntax colors for dark mode
+const DEFAULT_CODEGLANCE_WIDTH = 120;
+const MIN_CODEGLANCE_WIDTH = 80;
+const MAX_CODEGLANCE_WIDTH = 420;
+
+// ─── Syntax palettes ─────────────────────────────────────────────────────────
+
 const darkHighlight = syntaxHighlighting(HighlightStyle.define([
   { tag: t.keyword, color: "#ff7b72" },
   { tag: [t.name, t.deleted, t.character, t.propertyName, t.macroName], color: "#ffa657" },
@@ -57,7 +63,6 @@ const darkHighlight = syntaxHighlighting(HighlightStyle.define([
   { tag: t.invalid, color: "#ff7b72" },
 ]));
 
-// Custom syntax colors for light mode
 const lightHighlight = syntaxHighlighting(HighlightStyle.define([
   { tag: t.keyword, color: "#cf222e" },
   { tag: [t.name, t.deleted, t.character, t.propertyName, t.macroName], color: "#953800" },
@@ -78,6 +83,8 @@ const lightHighlight = syntaxHighlighting(HighlightStyle.define([
   { tag: t.number, color: "#0550ae" },
   { tag: t.invalid, color: "#cf222e" },
 ]));
+
+// ─── Language extension ─────────────────────────────────────────────────────
 
 function getLangExtension(lang: string) {
   switch (lang) {
@@ -100,43 +107,41 @@ function getLangExtension(lang: string) {
   }
 }
 
-// Build the base layout extensions (no theme-gating)
-function buildExtensions(isDark: boolean, lang: string) {
+// ─── Main editor extensions ─────────────────────────────────────────────────
+
+function buildMainExtensions(isDark: boolean, lang: string) {
   const selBg = isDark ? "rgba(56,189,248,0.62)" : "rgba(2,132,199,0.42)";
   const selBgF = isDark ? "rgba(56,189,248,0.74)" : "rgba(2,132,199,0.56)";
   const cursor = isDark ? "#38bdf8" : "#0284c7";
-
-  // Use position:absolute so the host fills .cm-editor-wrap regardless of flexbox
-  // height resolution quirks in Tauri WebView.
-  // The parent .cm-editor-wrap needs position:relative.
   const cmLayout = EditorView.theme({
     "&": {
-      position: "absolute",
-      top: "0",
-      bottom: "0",
-      left: "0",
-      right: "0",
-      fontSize: "13.5px",
+      position: "absolute", top: "0", bottom: "0", left: "0", right: "0", fontSize: "13.5px",
     },
     ".cm-scroller": {
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
-      overflowY: "auto !important",
-      overflowX: "auto !important",
-      height: "100%",
-      display: "block",
+      overflowY: "auto !important", overflowX: "auto !important", height: "100%", display: "block",
     },
     ".cm-content": {
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
       caretColor: cursor,
     },
-    ".cm-cursor, .cm-dropCursor": {
-      borderLeftColor: cursor,
+    ".cm-cursor, .cm-dropCursor": { borderLeftColor: cursor },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { background: selBg },
+    "&.cm-focused .cm-selectionBackground": { background: selBgF },
+  });
+
+  const minimapTheme = EditorView.theme({
+    ".cm-minimap-container": {
+      background: isDark ? "#0d1117" : "#ffffff",
+      borderLeft: `1px solid ${isDark ? "#21262d" : "#d0d7de"}`,
     },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
-      background: selBg,
+    ".cm-minimap-overlay": {
+      background: isDark ? "rgba(56,189,248,0.15)" : "rgba(2,132,199,0.15)",
+      border: `1px solid ${isDark ? "rgba(56,189,248,0.5)" : "rgba(2,132,199,0.5)"}`,
     },
-    "&.cm-focused .cm-selectionBackground": {
-      background: selBgF,
+    ".cm-minimap-viewport": {
+      background: isDark ? "rgba(56,189,248,0.08)" : "rgba(2,132,199,0.08)",
+      border: `1px solid ${isDark ? "rgba(56,189,248,0.4)" : "rgba(2,132,199,0.4)"}`,
     },
   });
 
@@ -146,10 +151,16 @@ function buildExtensions(isDark: boolean, lang: string) {
     isDark ? githubDark : githubLight,
     cmLayout,
     isDark ? darkHighlight : lightHighlight,
+    showMinimap.of({
+      displayText: "blocks",
+      showOverlay: "always",
+    }),
+    minimapTheme,
   ];
 }
 
-// Inject per-theme CSS directly into the shadow DOM (always applied, not gated)
+// ─── Shadow DOM injection ────────────────────────────────────────────────────
+
 function injectShadowStyles(isDark: boolean) {
   const bg = isDark ? "#0d1117" : "#ffffff";
   const selBg = isDark ? "rgba(56,189,248,0.62)" : "rgba(2,132,199,0.42)";
@@ -160,7 +171,6 @@ function injectShadowStyles(isDark: boolean) {
   const gutterColor = isDark ? "#6e7681" : "#6e7781";
   const activeGutter = isDark ? "#161b22" : "#f6f8fa";
   const activeLine = isDark ? "rgba(56,189,248,0.05)" : "rgba(2,132,199,0.04)";
-
   return [
     `.cm-editor{background:${bg}!important;position:relative!important;}`,
     `.cm-scroller{background:${bg}!important;overflow-y:auto!important;overflow-x:auto!important;display:block!important;height:100%!important;}`,
@@ -176,103 +186,73 @@ function injectShadowStyles(isDark: boolean) {
   ].join("");
 }
 
+// ─── Component ──────────────────────────────────────────────────────────────
+
 export function SnippetEditor({
-  snippet,
-  isNew,
-  form,
-  onChange,
-  onSave,
-  onCancel,
-  theme,
-  saving,
-  isDirty,
-  tagOptions,
+  snippet, isNew, form, onChange, onSave, onCancel,
+  theme, saving, isDirty, tagOptions,
 }: SnippetEditorProps) {
   const { t } = useTranslation();
   const { language } = useContext(LanguageContext);
+
+  // ── Refs ──────────────────────────────────────────────────────────────────
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const cmRef = useRef<EditorView | null>(null);
+
+  // ── State ─────────────────────────────────────────────────────────────────
   const [copied, setCopied] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
+  const [editorReadyTick, setEditorReadyTick] = useState(0);
 
-  const filteredTagOptions = useMemo(() => {
-    const q = tagInput.trim().toLowerCase();
-    return tagOptions
-      .filter((tag) => !form.tags.includes(tag))
-      .filter((tag) => q === "" || tag.toLowerCase().includes(q))
-      .slice(0, 8);
-  }, [tagOptions, form.tags, tagInput]);
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const mainExtensions = useMemo(
+    () => buildMainExtensions(theme === "dark", form.language),
+    [theme, form.language]
+  );
 
-  const extensions = useMemo(() => {
-    return buildExtensions(theme === "dark", form.language);
-  }, [theme, form.language]);
-
-  // Force CodeMirror host + shadow DOM to correct pixel height so scroll works.
-  // Two effects: (1) applies styles whenever theme changes, (2) ResizeObserver
-  // handles first-mount / layout-change cases.
+  // ── Main editor height fixup ───────────────────────────────────────────────
   useEffect(() => {
     const wrap = editorWrapRef.current;
-    const view = cmRef.current;
-    if (!wrap || !view) return;
-
+    if (!wrap) return;
     const apply = () => {
+      const view = cmRef.current;
+      if (!view) return;
       const px = wrap.clientHeight;
       if (px <= 0) return;
       (view.dom as HTMLElement).style.height = `${px}px`;
-
       const sr = (view.dom as HTMLElement).shadowRoot;
       if (!sr) return;
       const isDark = theme === "dark";
-
       let s = sr.querySelector("[data-snpt]") as HTMLStyleElement | null;
-      if (!s) {
-        s = document.createElement("style");
-        s.setAttribute("data-snpt", "");
-        sr.appendChild(s);
-      }
+      if (!s) { s = document.createElement("style"); s.setAttribute("data-snpt", ""); sr.appendChild(s); }
       s.textContent = injectShadowStyles(isDark);
-
-      const scroller = sr.querySelector(".cm-scroller") as HTMLElement | null;
-      if (scroller) {
-        scroller.style.overflowY = "auto";
-        scroller.style.overflowX = "auto";
-        scroller.style.height = "100%";
-      }
+      const sc = sr.querySelector(".cm-scroller") as HTMLElement | null;
+      if (sc) { sc.style.overflowY = "auto"; sc.style.overflowX = "auto"; sc.style.height = "100%"; }
     };
-
     apply();
-    requestAnimationFrame(apply); // double-apply after paint
-
-    const ro = new ResizeObserver(() => apply());
+    requestAnimationFrame(apply);
+    const ro = new ResizeObserver(apply);
     ro.observe(wrap);
     return () => ro.disconnect();
   }, [theme]);
 
+  // ── Tag helpers ────────────────────────────────────────────────────────────
+  const filteredTagOptions = useMemo(() => {
+    const q = tagInput.trim().toLowerCase();
+    return tagOptions.filter((tag) => !form.tags.includes(tag) && (q === "" || tag.toLowerCase().includes(q))).slice(0, 8);
+  }, [tagOptions, form.tags, tagInput]);
+
   const addTag = useCallback((raw: string) => {
     const tag = raw.trim();
     if (!tag) return;
-    if (form.tags.includes(tag)) {
-      setTagInput("");
-      setShowTagSuggestions(false);
-      return;
-    }
+    if (form.tags.includes(tag)) { setTagInput(""); setShowTagSuggestions(false); return; }
     onChange({ tags: [...form.tags, tag] });
-    setTagInput("");
-    setShowTagSuggestions(false);
+    setTagInput(""); setShowTagSuggestions(false);
   }, [form.tags, onChange]);
 
-  const removeTag = useCallback((tag: string) => {
-    onChange({ tags: form.tags.filter((t) => t !== tag) });
-  }, [form.tags, onChange]);
-
-  const commitTagInput = useCallback(() => {
-    addTag(tagInput);
-  }, [addTag, tagInput]);
-
-  const handleSave = useCallback(() => {
-    onSave();
-  }, [onSave]);
+  const removeTag = useCallback((tag: string) => onChange({ tags: form.tags.filter((t) => t !== tag) }), [form.tags, onChange]);
+  const commitTagInput = useCallback(() => addTag(tagInput), [addTag, tagInput]);
 
   const handleCopy = useCallback(async () => {
     if (!form.content) return;
@@ -280,17 +260,15 @@ export function SnippetEditor({
       await writeText(form.content);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (e) {
-      console.error("Copy failed:", e);
-    }
+    } catch (e) { console.error("Copy failed:", e); }
   }, [form.content]);
 
   const formatDate = (iso: string) => {
-    try {
-      return new Date(iso).toLocaleString(language === "zh" ? "zh-CN" : "en-US", { hour12: false });
-    } catch { return iso; }
+    try { return new Date(iso).toLocaleString(language === "zh" ? "zh-CN" : "en-US", { hour12: false }); }
+    catch { return iso; }
   };
 
+  // ── Empty state ───────────────────────────────────────────────────────────
   if (!snippet && !isNew) {
     return (
       <div className="editor-empty">
@@ -303,8 +281,10 @@ export function SnippetEditor({
     );
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="editor-form">
+      {/* Header */}
       <div className="editor-header">
         <input
           className="title-input"
@@ -320,9 +300,7 @@ export function SnippetEditor({
             value={form.language}
             onChange={(e) => onChange({ language: e.target.value })}
           >
-            {LANGUAGES.map((l) => (
-              <option key={l.id} value={l.id}>{l.name}</option>
-            ))}
+            {LANGUAGES.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
           <button
             className={`fav-toggle ${form.is_favorite ? "active" : ""}`}
@@ -338,6 +316,7 @@ export function SnippetEditor({
         </div>
       </div>
 
+      {/* Description */}
       <input
         className="desc-input"
         placeholder={t("snippet.desc")}
@@ -345,27 +324,19 @@ export function SnippetEditor({
         onChange={(e) => onChange({ description: e.target.value })}
       />
 
+      {/* Tags */}
       <div className="tags-row">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
           <line x1="7" y1="7" x2="7.01" y2="7"/>
         </svg>
-
         <div className="editor-tags">
           {form.tags.map((tag) => (
             <span key={tag} className="tag-chip">
               <span>{tag}</span>
-              <button
-                type="button"
-                className="tag-remove"
-                onClick={() => removeTag(tag)}
-                title={t("snippet.delete")}
-              >
-                ×
-              </button>
+              <button type="button" className="tag-remove" onClick={() => removeTag(tag)} title={t("snippet.delete")}>×</button>
             </span>
           ))}
-
           <div className="tag-input-wrap">
             <input
               className="tag-input"
@@ -373,33 +344,17 @@ export function SnippetEditor({
               value={tagInput}
               onFocus={() => setShowTagSuggestions(true)}
               onBlur={() => setTimeout(() => setShowTagSuggestions(false), 120)}
-              onChange={(e) => {
-                setTagInput(e.target.value);
-                setShowTagSuggestions(true);
-              }}
+              onChange={(e) => { setTagInput(e.target.value); setShowTagSuggestions(true); }}
               onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === ",") {
-                  e.preventDefault();
-                  commitTagInput();
-                }
-                if (e.key === "Backspace" && !tagInput && form.tags.length > 0) {
-                  removeTag(form.tags[form.tags.length - 1]);
-                }
+                if (e.key === "Enter" || e.key === ",") { e.preventDefault(); commitTagInput(); }
+                if (e.key === "Backspace" && !tagInput && form.tags.length > 0) removeTag(form.tags[form.tags.length - 1]);
               }}
             />
-
             {showTagSuggestions && filteredTagOptions.length > 0 && (
               <div className="tag-suggestions">
                 {filteredTagOptions.map((tag) => (
-                  <button
-                    key={tag}
-                    type="button"
-                    className="tag-suggestion"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      addTag(tag);
-                    }}
-                  >
+                  <button key={tag} type="button" className="tag-suggestion"
+                    onMouseDown={(e) => { e.preventDefault(); addTag(tag); }}>
                     {tag}
                   </button>
                 ))}
@@ -409,57 +364,41 @@ export function SnippetEditor({
         </div>
       </div>
 
-      <div className="cm-editor-wrap" ref={editorWrapRef}>
-        <CodeMirror
-          value={form.content}
-          extensions={extensions}
-          onChange={(val) => onChange({ content: val })}
-          onCreateEditor={(view) => {
-            cmRef.current = view;
-            requestAnimationFrame(() => {
-              const wrap = editorWrapRef.current;
-              if (!wrap) return;
-              const px = wrap.clientHeight;
-              if (px > 0) {
-                (view.dom as HTMLElement).style.height = `${px}px`;
-              }
-
-              // Apply shadow styles immediately on first mount,
-              // otherwise effect may miss initial paint before cmRef exists.
-              const sr = (view.dom as HTMLElement).shadowRoot;
-              if (!sr) return;
-              const isDark = theme === "dark";
-
-              let s = sr.querySelector("[data-snpt]") as HTMLStyleElement | null;
-              if (!s) {
-                s = document.createElement("style");
-                s.setAttribute("data-snpt", "");
-                sr.appendChild(s);
-              }
-              s.textContent = injectShadowStyles(isDark);
-
-              const scroller = sr.querySelector(".cm-scroller") as HTMLElement | null;
-              if (scroller) {
-                scroller.style.overflowY = "auto";
-                scroller.style.overflowX = "auto";
-                scroller.style.height = "100%";
-              }
-            });
-          }}
-          basicSetup={{
-            lineNumbers: true,
-            drawSelection: true,
-            highlightActiveLine: true,
-            highlightSelectionMatches: true,
-            autocompletion: true,
-            bracketMatching: true,
-            closeBrackets: true,
-            foldGutter: true,
-            indentOnInput: true,
-          }}
-        />
+      {/* Editor (minimap integrated via @replit/codemirror-minimap in extensions) */}
+      <div className="cm-editor-wrap">
+        <div className="cm-main-pane" ref={editorWrapRef}>
+          <CodeMirror
+            value={form.content}
+            extensions={mainExtensions}
+            onChange={(val) => onChange({ content: val })}
+            onCreateEditor={(view) => {
+              cmRef.current = view;
+              setEditorReadyTick((v) => v + 1);
+              requestAnimationFrame(() => {
+                const wrap = editorWrapRef.current;
+                if (!wrap) return;
+                const px = wrap.clientHeight;
+                if (px > 0) (view.dom as HTMLElement).style.height = `${px}px`;
+                const sr = (view.dom as HTMLElement).shadowRoot;
+                if (!sr) return;
+                const isDark = theme === "dark";
+                let s = sr.querySelector("[data-snpt]") as HTMLStyleElement | null;
+                if (!s) { s = document.createElement("style"); s.setAttribute("data-snpt", ""); sr.appendChild(s); }
+                s.textContent = injectShadowStyles(isDark);
+                const sc = sr.querySelector(".cm-scroller") as HTMLElement | null;
+                if (sc) { sc.style.overflowY = "auto"; sc.style.overflowX = "auto"; sc.style.height = "100%"; }
+              });
+            }}
+            basicSetup={{
+              lineNumbers: true, drawSelection: true, highlightActiveLine: true,
+              highlightSelectionMatches: true, autocompletion: true,
+              bracketMatching: true, closeBrackets: true, foldGutter: true, indentOnInput: true,
+            }}
+          />
+        </div>
       </div>
 
+      {/* Toolbar */}
       <div className="editor-toolbar">
         <div className="footer-hint">
           {snippet && (
@@ -480,7 +419,7 @@ export function SnippetEditor({
               {isNew ? t("snippet.cancel") : t("snippet.cancelEdit")}
             </button>
           )}
-          <button className="btn-save" onClick={handleSave} disabled={saving}>
+          <button className="btn-save" onClick={onSave} disabled={saving}>
             {saving ? t("snippet.saveInProgress") : isNew ? t("snippet.create") : t("snippet.save")}
           </button>
         </div>

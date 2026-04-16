@@ -193,6 +193,13 @@ export default function App() {
     originalFormRef.current = EMPTY_FORM;
   }, []);
 
+  const startNewSnippetDraft = useCallback(() => {
+    setSelected(null);
+    setIsNew(true);
+    setForm(EMPTY_FORM);
+    originalFormRef.current = EMPTY_FORM;
+  }, []);
+
   const loadSnippet = useCallback((s: Snippet) => {
     const loaded: SnippetForm = {
       title: s.title,
@@ -207,20 +214,6 @@ export default function App() {
     setForm(loaded);
     originalFormRef.current = loaded;
   }, []);
-
-  const handleNew = useCallback(() => {
-    if (isDirty) {
-      dialogRef.current?.ask(t("dialog.unsavedChanges")).then((action) => {
-        if (action === "save") {
-          handleSave().then(() => resetToEmpty());
-        } else if (action === "discard") {
-          resetToEmpty();
-        }
-      });
-      return;
-    }
-    resetToEmpty();
-  }, [isDirty, t]);
 
   const handleSelect = useCallback((s: Snippet) => {
     if (selected?.id === s.id) return;
@@ -261,6 +254,20 @@ export default function App() {
       setSaving(false);
     }
   }, [isNew, form, selected, create, update, load, t]);
+
+  const handleNew = useCallback(() => {
+    if (isDirty) {
+      dialogRef.current?.ask(t("dialog.unsavedChanges")).then((action) => {
+        if (action === "save") {
+          handleSave().then(() => startNewSnippetDraft());
+        } else if (action === "discard") {
+          startNewSnippetDraft();
+        }
+      });
+      return;
+    }
+    startNewSnippetDraft();
+  }, [isDirty, t, handleSave, startNewSnippetDraft]);
 
   const handleCancel = useCallback(() => {
     if (isDirty) {
