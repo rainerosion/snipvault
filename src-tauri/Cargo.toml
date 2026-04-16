@@ -1,6 +1,6 @@
 [package]
 name = "snipvault"
-version = "1.0.9"
+version = "2.0.0"
 description = "灵藏 SnipVault - A local code snippet manager"
 authors = ["浅语"]
 edition = "2021"

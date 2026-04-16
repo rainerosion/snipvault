@@ -22,7 +22,18 @@ import { Snippet, SnippetForm } from "../types";
 import { LANGUAGES } from "../utils/languages";
 import { LanguageContext } from "../context/LanguageContext";
 
-// ─── Syntax palettes ─────────────────────────────────────────────────────────
+interface SnippetEditorProps {
+  snippet: Snippet | null;
+  isNew: boolean;
+  form: SnippetForm;
+  onChange: (f: Partial<SnippetForm>) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  theme: "dark" | "light";
+  saving: boolean;
+  isDirty: boolean;
+  tagOptions: string[];
+}
 
 const darkHighlight = syntaxHighlighting(HighlightStyle.define([
   { tag: t.keyword, color: "#ff7b72" },
@@ -66,95 +77,6 @@ const lightHighlight = syntaxHighlighting(HighlightStyle.define([
   { tag: t.invalid, color: "#cf222e" },
 ]));
 
-// ─── Token → color mapping (for Canvas minimap) ─────────────────────────────
-
-// Build a flat tag→color map from the HighlightStyle definitions
-const DARK_TOKEN_COLORS: Record<string, string> = {
-  keyword: "#ff7b72",
-  name: "#ffa657",
-  deleted: "#ffa657",
-  character: "#ffa657",
-  propertyName: "#ffa657",
-  macroName: "#ffa657",
-  function: "#d2a8ff",
-  labelName: "#7ee787",
-  color: "#ffa657",
-  constant: "#ffa657",
-  separator: "#c9d1d9",
-  typeName: "#79c0ff",
-  className: "#79c0ff",
-  number: "#79c0ff",
-  changed: "#79c0ff",
-  annotation: "#79c0ff",
-  modifier: "#79c0ff",
-  self: "#79c0ff",
-  namespace: "#79c0ff",
-  operator: "#ff7b72",
-  operatorKeyword: "#ff7b72",
-  url: "#ff7b72",
-  escape: "#ff7b72",
-  regexp: "#ff7b72",
-  link: "#ff7b72",
-  meta: "#8b949e",
-  comment: "#8b949e",
-  atom: "#ff7b72",
-  bool: "#ff7b72",
-  processingInstruction: "#a5d6ff",
-  string: "#a5d6ff",
-  inserted: "#a5d6ff",
-  invalid: "#ff7b72",
-  heading: "#79c0ff",
-  strong: "#c9d1d9",
-  emphasis: "#c9d1d9",
-  strikethrough: "#c9d1d9",
-};
-
-const LIGHT_TOKEN_COLORS: Record<string, string> = {
-  keyword: "#cf222e",
-  name: "#953800",
-  deleted: "#953800",
-  character: "#953800",
-  propertyName: "#953800",
-  macroName: "#953800",
-  function: "#8250df",
-  labelName: "#116329",
-  color: "#953800",
-  constant: "#953800",
-  separator: "#24292f",
-  typeName: "#0550ae",
-  className: "#0550ae",
-  number: "#0550ae",
-  changed: "#0550ae",
-  annotation: "#0550ae",
-  modifier: "#0550ae",
-  self: "#0550ae",
-  namespace: "#0550ae",
-  operator: "#cf222e",
-  operatorKeyword: "#cf222e",
-  url: "#cf222e",
-  escape: "#cf222e",
-  regexp: "#cf222e",
-  link: "#cf222e",
-  meta: "#6e7781",
-  comment: "#6e7781",
-  atom: "#cf222e",
-  bool: "#cf222e",
-  processingInstruction: "#0a3069",
-  string: "#0a3069",
-  inserted: "#0a3069",
-  invalid: "#cf222e",
-  heading: "#0550ae",
-  strong: "#24292f",
-  emphasis: "#24292f",
-  strikethrough: "#24292f",
-};
-
-// Default line color when no token matches
-const DEFAULT_DARK_LINE = "#30363d";
-const DEFAULT_LIGHT_LINE = "#d0d7de";
-
-// ─── Language extension ─────────────────────────────────────────────────────
-
 function getLangExtension(lang: string) {
   switch (lang) {
     case "javascript": return javascript({ jsx: true, typescript: false });
@@ -164,10 +86,13 @@ function getLangExtension(lang: string) {
     case "python": return python();
     case "rust": return rust();
     case "java": return java();
-    case "cpp": case "c": case "csharp": return cpp();
+    case "cpp":
+    case "c":
+    case "csharp": return cpp();
     case "php": return php();
     case "sql": return sql();
-    case "xml": case "html": return xml();
+    case "xml":
+    case "html": return xml();
     case "json": return json();
     case "css": return css();
     case "markdown": return markdown();
@@ -176,24 +101,28 @@ function getLangExtension(lang: string) {
   }
 }
 
-// ─── Main editor extensions ─────────────────────────────────────────────────
-
 function buildMainExtensions(isDark: boolean, lang: string) {
   const selBg = isDark ? "rgba(56,189,248,0.62)" : "rgba(2,132,199,0.42)";
   const selBgF = isDark ? "rgba(56,189,248,0.74)" : "rgba(2,132,199,0.56)";
   const cursor = isDark ? "#38bdf8" : "#0284c7";
+
   const cmLayout = EditorView.theme({
     "&": {
-      flex: "1 1 auto",
+      height: "100%",
       minHeight: "0",
       fontSize: "13.5px",
     },
     ".cm-scroller": {
-      flex: "1 1 auto",
+      height: "100%",
       minHeight: "0",
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
       overflowY: "auto !important",
       overflowX: "auto !important",
+      scrollbarWidth: "none",
+    },
+    ".cm-scroller::-webkit-scrollbar": {
+      width: "0px",
+      height: "0px",
     },
     ".cm-content": {
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
@@ -213,29 +142,20 @@ function buildMainExtensions(isDark: boolean, lang: string) {
   ];
 }
 
-
-// ─── MiniMap component (Canvas-based) ───────────────────────────────────────
-
 interface MiniMapProps {
   content: string;
   isDark: boolean;
   width: number;
-  // MiniMap calls this with its internal scroll-set callback;
-  // parent stores it so the editor can call it when the scroller is ready
-  onMainScrollSetRef: (setter: (el: HTMLElement | null) => void) => void;
-  // Called with the scroll container element so minimap can attach listeners
-  onMainScrollRef: (el: HTMLElement | null) => void;
-  // Scroll the main editor to a given scrollTop
+  mainScrollEl: HTMLElement | null;
   scrollMainTo: (scrollTop: number) => void;
   t?: (key: string) => string;
 }
 
-const GLANCE_LINE_H = 4; // line height in px in the minimap
-const GLANCE_PADDING_X = 4; // horizontal padding inside minimap
+const GLANCE_LINE_H = 4;
+const GLANCE_PADDING_X = 4;
 
-// Color a line segment based on character type
 function getColorByChar(ch: string, isDark: boolean): string {
-  if (/[\s]/.test(ch)) return isDark ? DEFAULT_DARK_LINE : DEFAULT_LIGHT_LINE;
+  if (/[\s]/.test(ch)) return isDark ? "#30363d" : "#d0d7de";
   if (/[{}()\[\]]/.test(ch)) return isDark ? "#ff7b72" : "#cf222e";
   if (/[=+\-*/<>!&|?:;,.]/.test(ch)) return isDark ? "#ff7b72" : "#cf222e";
   if (/['"`]/.test(ch)) return isDark ? "#a5d6ff" : "#0a3069";
@@ -249,6 +169,7 @@ function tokenizeForMinimap(lineText: string, isDark: boolean): { text: string; 
   const segments: { text: string; color: string }[] = [];
   let currentColor = "";
   let currentText = "";
+
   for (let i = 0; i < lineText.length; i++) {
     const ch = lineText[i];
     const color = getColorByChar(ch, isDark);
@@ -261,44 +182,40 @@ function tokenizeForMinimap(lineText: string, isDark: boolean): { text: string; 
     }
   }
   if (currentText) segments.push({ text: currentText, color: currentColor });
-  return segments.length > 0 ? segments : [{ text: lineText, color: isDark ? DEFAULT_DARK_LINE : DEFAULT_LIGHT_LINE }];
+  return segments;
 }
 
-function MiniMap({ content, isDark, width, onMainScrollRef, onMainScrollSetRef, scrollMainTo, t }: MiniMapProps) {
+function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo, t }: MiniMapProps) {
+  const paneRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const paneRef = useRef<HTMLDivElement>(null);
-  const mainRef = useRef<HTMLElement | null>(null);
-  const vpTopRef = useRef(0);
-  const vpHRef = useRef(0);
+  const syncingFromMainRef = useRef(false);
+  const syncingFromMiniRef = useRef(false);
+  const draggingViewportRef = useRef<{ pointerId: number; startClientY: number; startRatio: number } | null>(null);
+  const suppressClickRef = useRef(false);
+
+  const [isViewportDragging, setIsViewportDragging] = useState(false);
 
   const bg = isDark ? "#0d1117" : "#ffffff";
-  const viewportBg = isDark ? "rgba(56,189,248,0.12)" : "rgba(2,132,199,0.10)";
-  const viewportBorder = isDark ? "rgba(56,189,248,0.45)" : "rgba(2,132,199,0.40)";
-  const cursorLineBg = isDark ? "rgba(56,189,248,0.15)" : "rgba(2,132,199,0.12)";
-  const cursorLineBorder = isDark ? "rgba(56,189,248,0.6)" : "rgba(2,132,199,0.55)";
+  const viewportBg = isDark ? "rgba(56,189,248,0.26)" : "rgba(2,132,199,0.22)";
+  const viewportBorder = isDark ? "rgba(56,189,248,0.95)" : "rgba(2,132,199,0.90)";
 
-  // Lines derived once per content change
-  const lines = content.split("\n");
-  const totalH = lines.length * GLANCE_LINE_H;
-
-  // Compute max line length for scaling
-  const maxLen = lines.reduce((m, l) => Math.max(m, l.length), 1);
-  const availW = width - GLANCE_PADDING_X * 2;
+  const lines = useMemo(() => content.split("\n"), [content]);
+  const totalH = Math.max(lines.length * GLANCE_LINE_H, 1);
+  const maxLen = useMemo(() => Math.max(...lines.map((l) => l.length), 1), [lines]);
+  const availW = Math.max(1, width - GLANCE_PADDING_X * 2);
   const scaleX = availW / maxLen;
 
-  // Draw the minimap canvas
   const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
-    const pane = paneRef.current;
-    if (!canvas || !pane) return;
-
-    const paneH = pane.clientHeight;
+    if (!canvas) return;
 
     canvas.width = width;
-    canvas.height = Math.max(totalH, paneH);
-    const ctx = canvas.getContext("2d")!;
-    ctx.clearRect(0, 0, width, canvas.height);
+    canvas.height = totalH;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, width, totalH);
 
     lines.forEach((lineText, i) => {
       const y = i * GLANCE_LINE_H;
@@ -321,176 +238,200 @@ function MiniMap({ content, isDark, width, onMainScrollRef, onMainScrollSetRef, 
         }
       }
     });
-  }, [lines, width, bg, isDark, totalH, scaleX]);
+  }, [lines, width, totalH, bg, isDark, scaleX]);
 
-  // Draw + update viewport
-  const updateViewport = useCallback(() => {
-    const vp = viewportRef.current;
+  const syncViewportFromMain = useCallback(() => {
     const pane = paneRef.current;
-    const main = mainRef.current;
-    if (!vp || !pane) return;
+    const viewport = viewportRef.current;
+    const main = mainScrollEl;
+    if (!pane || !viewport || !main) return;
 
-    const paneH = pane.clientHeight;
+    const mainScrollable = Math.max(0, main.scrollHeight - main.clientHeight);
+    const ratio = mainScrollable > 0 ? main.scrollTop / mainScrollable : 0;
 
-    if (!main || main.scrollHeight <= main.clientHeight) {
-      vp.style.display = "none";
-      vpTopRef.current = 0;
-      vpHRef.current = 0;
+    const miniScrollable = Math.max(0, pane.scrollHeight - pane.clientHeight);
+    if (miniScrollable > 0 && !syncingFromMiniRef.current) {
+      syncingFromMainRef.current = true;
+      pane.scrollTop = ratio * miniScrollable;
+      requestAnimationFrame(() => { syncingFromMainRef.current = false; });
+    }
+
+    if (main.scrollHeight <= main.clientHeight) {
+      viewport.style.display = "none";
       return;
     }
 
-    const mainScrollable = main.scrollHeight - main.clientHeight;
-    const ratio = main.scrollTop / mainScrollable;
-    const vpTotalH = Math.max(totalH, paneH);
-    const vpScrollable = vpTotalH - paneH;
-    if (vpScrollable <= 0) { vp.style.display = "none"; return; }
+    const vpH = Math.max(24, (main.clientHeight / main.scrollHeight) * totalH);
+    const vpTop = ratio * Math.max(0, totalH - vpH);
 
-    const vpH = Math.max(24, (main.clientHeight / main.scrollHeight) * vpTotalH);
-    const vpTop = ratio * vpScrollable;
+    viewport.style.display = "";
+    viewport.style.height = `${vpH}px`;
+    viewport.style.top = `${vpTop}px`;
+  }, [mainScrollEl, totalH]);
 
-    vp.style.display = "";
-    vp.style.top = `${vpTop}px`;
-    vp.style.height = `${vpH}px`;
-    vpTopRef.current = vpTop;
-    vpHRef.current = vpH;
-  }, [totalH]);
-
-  // ── Register the scroll-set callback with parent (two-step handoff) ────────
   useEffect(() => {
-    onMainScrollSetRef((el) => {
-      if (mainRef.current === el) return;
-      if (mainRef.current) {
-        mainRef.current.removeEventListener("scroll", onMainScroll);
-      }
-      mainRef.current = el;
-      onMainScrollRef(el);
-      if (el) {
-        el.addEventListener("scroll", onMainScroll, { passive: true });
-        updateViewport();
-      }
-    });
-  }, [onMainScrollSetRef, onMainScrollRef, updateViewport]);
+    drawCanvas();
+    syncViewportFromMain();
+  }, [drawCanvas, syncViewportFromMain]);
 
-  const onMainScroll = useCallback(() => {
-    updateViewport();
-  }, [updateViewport]);
-
-  // ── ResizeObserver: redraw when pane resizes ──────────────────────────────
   useEffect(() => {
     const pane = paneRef.current;
     if (!pane) return;
-    const ro = new ResizeObserver(() => { drawCanvas(); updateViewport(); });
+    const ro = new ResizeObserver(() => syncViewportFromMain());
     ro.observe(pane);
     return () => ro.disconnect();
-  }, [drawCanvas, updateViewport]);
+  }, [syncViewportFromMain]);
 
-  // ── Redraw on content/theme/width change ──────────────────────────────────
-  useEffect(() => { drawCanvas(); }, [drawCanvas]);
-  useEffect(() => { updateViewport(); }, [updateViewport]);
+  useEffect(() => {
+    const main = mainScrollEl;
+    if (!main) return;
+    const onMainScroll = () => {
+      syncViewportFromMain();
+    };
+    main.addEventListener("scroll", onMainScroll, { passive: true });
+    syncViewportFromMain();
+    return () => main.removeEventListener("scroll", onMainScroll);
+  }, [mainScrollEl, syncViewportFromMain]);
 
-  // ── Click to jump ──────────────────────────────────────────────────────────
-  const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const main = mainRef.current;
+  const onMiniScroll = useCallback(() => {
     const pane = paneRef.current;
-    if (!main || !pane) return;
+    const main = mainScrollEl;
+    if (!pane || !main) return;
+    if (syncingFromMainRef.current || draggingViewportRef.current) return;
+
+    const miniScrollable = Math.max(0, pane.scrollHeight - pane.clientHeight);
+    if (miniScrollable <= 0) return;
+
+    const ratio = pane.scrollTop / miniScrollable;
+    const mainScrollable = Math.max(0, main.scrollHeight - main.clientHeight);
+
+    syncingFromMiniRef.current = true;
+    scrollMainTo(ratio * mainScrollable);
+    syncViewportFromMain();
+    requestAnimationFrame(() => { syncingFromMiniRef.current = false; });
+  }, [mainScrollEl, scrollMainTo, syncViewportFromMain]);
+
+  const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+
+    const pane = paneRef.current;
+    const main = mainScrollEl;
+    if (!pane || !main) return;
 
     const rect = pane.getBoundingClientRect();
     const clickY = e.clientY - rect.top;
-    const paneH = pane.clientHeight;
-    const vpTotalH = Math.max(totalH, paneH);
-    const vpScrollable = vpTotalH - paneH;
+    const mainScrollable = Math.max(0, main.scrollHeight - main.clientHeight);
+    if (mainScrollable <= 0) {
+      scrollMainTo(0);
+      syncViewportFromMain();
+      return;
+    }
 
-    if (vpScrollable <= 0) return;
+    const vpH = Math.max(24, (main.clientHeight / main.scrollHeight) * totalH);
+    const visibleTrackH = Math.max(1, pane.clientHeight - Math.min(vpH, pane.clientHeight));
+    const ratio = Math.max(0, Math.min(1, (clickY - vpH / 2) / visibleTrackH));
+    scrollMainTo(ratio * mainScrollable);
+    syncViewportFromMain();
+  }, [mainScrollEl, scrollMainTo, syncViewportFromMain, totalH]);
 
-    // Map click Y → line index → scroll main editor
-    const lineIndex = Math.floor((clickY / paneH) * lines.length);
-    const clampedLine = Math.max(0, Math.min(lines.length - 1, lineIndex));
+  const handleViewportPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const main = mainScrollEl;
+    if (!main) return;
+    e.preventDefault();
+    e.stopPropagation();
+    suppressClickRef.current = false;
+    const mainScrollable = Math.max(0, main.scrollHeight - main.clientHeight);
+    const startRatio = mainScrollable > 0 ? main.scrollTop / mainScrollable : 0;
+    draggingViewportRef.current = {
+      pointerId: e.pointerId,
+      startClientY: e.clientY,
+      startRatio,
+    };
+    setIsViewportDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, [mainScrollEl]);
 
-    // Scroll main: use line height approximation
-    const mainScrollable = main.scrollHeight - main.clientHeight;
-    const targetRatio = clampedLine / lines.length;
-    const targetScrollTop = targetRatio * mainScrollable;
-    scrollMainTo(targetScrollTop);
-  }, [lines, totalH, scrollMainTo]);
-
-  // ── Hover: show cursor line indicator ────────────────────────────────────
-  const [hoverLine, setHoverLine] = useState(-1);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const pane = paneRef.current;
-    if (!pane) return;
-    const rect = pane.getBoundingClientRect();
-    const y = e.clientY - rect.top;
-    const line = Math.floor(y / GLANCE_LINE_H);
-    setHoverLine(line);
-  }, []);
-
-  const handleMouseLeave = useCallback(() => { setHoverLine(-1); }, []);
-
-  // Draw hover line indicator on top of canvas
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    if (hoverLine < 0 || hoverLine >= lines.length) return;
+    const onPointerMove = (ev: PointerEvent) => {
+      const drag = draggingViewportRef.current;
+      const main = mainScrollEl;
+      const pane = paneRef.current;
+      if (!drag || !main || !pane || ev.pointerId !== drag.pointerId) return;
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const y = hoverLine * GLANCE_LINE_H;
-    ctx.save();
-    ctx.fillStyle = cursorLineBg;
-    ctx.strokeStyle = cursorLineBorder;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(0.5, y + 0.5, width - 1, GLANCE_LINE_H - 1, 1);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-  }, [hoverLine, lines.length, width, cursorLineBg, cursorLineBorder]);
+      const deltaY = ev.clientY - drag.startClientY;
+      if (Math.abs(deltaY) > 2) {
+        suppressClickRef.current = true;
+      }
+
+      const mainScrollable = Math.max(0, main.scrollHeight - main.clientHeight);
+      if (mainScrollable <= 0) {
+        scrollMainTo(0);
+        pane.scrollTop = 0;
+        syncViewportFromMain();
+        return;
+      }
+
+      const vpH = Math.max(24, (main.clientHeight / main.scrollHeight) * totalH);
+      const visibleTrackH = Math.max(1, pane.clientHeight - Math.min(vpH, pane.clientHeight));
+      const deltaRatio = deltaY / visibleTrackH;
+      const nextRatio = Math.max(0, Math.min(1, drag.startRatio + deltaRatio));
+      const targetTop = nextRatio * mainScrollable;
+
+      syncingFromMiniRef.current = true;
+      scrollMainTo(targetTop);
+
+      const miniScrollable = Math.max(0, pane.scrollHeight - pane.clientHeight);
+      if (miniScrollable > 0) {
+        pane.scrollTop = nextRatio * miniScrollable;
+      }
+
+      syncViewportFromMain();
+      requestAnimationFrame(() => { syncingFromMiniRef.current = false; });
+    };
+
+    const endDrag = (ev: PointerEvent) => {
+      const drag = draggingViewportRef.current;
+      if (!drag || ev.pointerId !== drag.pointerId) return;
+      draggingViewportRef.current = null;
+      setIsViewportDragging(false);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", endDrag);
+    };
+  }, [mainScrollEl, scrollMainTo, syncViewportFromMain, totalH]);
 
   return (
     <div
       ref={paneRef}
       className="minimap-pane"
       style={{ width, background: bg }}
+      onScroll={onMiniScroll}
       onClick={handleClick}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={handleMouseLeave}
       title={t ? t("minimap.clickToJump") : "点击跳转"}
     >
-      {/* Canvas: drawn underneath */}
-      <canvas
-        ref={canvasRef}
-        className="minimap-canvas"
-        style={{ display: "block" }}
-      />
-      {/* Viewport overlay: shows current visible region */}
-      <div
-        ref={viewportRef}
-        className="minimap-viewport"
-        style={{ background: viewportBg, borderColor: viewportBorder }}
-      />
-      {/* Hover cursor line indicator */}
-      {hoverLine >= 0 && (
+      <div className="minimap-content" style={{ height: totalH, minHeight: "100%" }}>
+        <canvas ref={canvasRef} className="minimap-canvas" style={{ display: "block" }} />
+
         <div
-          className="minimap-hover-line"
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            top: hoverLine * GLANCE_LINE_H,
-            height: GLANCE_LINE_H,
-            background: cursorLineBg,
-            borderTop: `1px solid ${cursorLineBorder}`,
-            borderBottom: `1px solid ${cursorLineBorder}`,
-            pointerEvents: "none",
-          }}
+          ref={viewportRef}
+          className={`minimap-viewport ${isViewportDragging ? "dragging" : ""}`}
+          style={{ background: viewportBg, borderColor: viewportBorder }}
+          onPointerDown={handleViewportPointerDown}
         />
-      )}
+      </div>
     </div>
   );
 }
-
-// ─── Component ──────────────────────────────────────────────────────────────
 
 export function SnippetEditor({
   snippet, isNew, form, onChange, onSave, onCancel,
@@ -499,62 +440,28 @@ export function SnippetEditor({
   const { t } = useTranslation();
   const { language } = useContext(LanguageContext);
 
-  // ── Refs ──────────────────────────────────────────────────────────────────
-  const editorWrapRef = useRef<HTMLDivElement>(null);
   const cmRef = useRef<EditorView | null>(null);
-  // Stable reference to the main scroller — updated without triggering re-renders
-  const mainScrollerRef = useRef<HTMLElement | null>(null);
-  // Stable reference to MiniMap's scroll-set callback
-  const minimapScrollSetRef = useRef<((el: HTMLElement | null) => void) | null>(null);
+  const [mainScrollEl, setMainScrollEl] = useState<HTMLElement | null>(null);
 
-  // ── State ─────────────────────────────────────────────────────────────────
+  const splitRef = useRef<HTMLDivElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
   const [minimapWidth, setMinimapWidth] = useState(120);
   const [isDragging, setIsDragging] = useState(false);
 
-  // ── Derived ───────────────────────────────────────────────────────────────
   const isDark = theme === "dark";
   const mainExtensions = useMemo(
     () => buildMainExtensions(isDark, form.language),
     [isDark, form.language]
   );
 
-  // ── Scroll main editor to a given scrollTop ────────────────────────────────
   const scrollMainTo = useCallback((scrollTop: number) => {
     if (cmRef.current) {
       cmRef.current.scrollDOM.scrollTop = scrollTop;
     }
   }, []);
 
-  // ── Main editor height fixup + scroller handoff ─────────────────────────────
-  useEffect(() => {
-    const wrap = editorWrapRef.current;
-    if (!wrap) return;
-    let rafId: number;
-    const apply = () => {
-      const view = cmRef.current;
-      if (!view) return;
-      const sr = (view.dom as HTMLElement).shadowRoot;
-      if (!sr) return;
-      const sc = sr.querySelector(".cm-scroller") as HTMLElement | null;
-      if (sc) {
-        // Hand off the scroller element to MiniMap
-        if (minimapScrollSetRef.current && mainScrollerRef.current !== sc) {
-          mainScrollerRef.current = sc;
-          minimapScrollSetRef.current(sc);
-        }
-      }
-    };
-    apply();
-    rafId = requestAnimationFrame(apply);
-    const ro = new ResizeObserver(apply);
-    ro.observe(wrap);
-    return () => { cancelAnimationFrame(rafId); ro.disconnect(); };
-  }, [theme]);
-
-  // ── Minimap divider drag ───────────────────────────────────────────────────
   const handleDividerPointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -563,21 +470,27 @@ export function SnippetEditor({
 
     const onMove = (ev: PointerEvent) => {
       const delta = startX - ev.clientX;
-      setMinimapWidth((w) => Math.min(420, Math.max(80, startWidth + delta)));
+      const next = startWidth + delta;
+      const splitWidth = splitRef.current?.clientWidth ?? 0;
+      const dynamicMax = splitWidth > 0 ? Math.floor(splitWidth * 0.5) : 420;
+      const maxWidth = Math.max(120, Math.min(420, dynamicMax));
+      setMinimapWidth(Math.min(maxWidth, Math.max(120, next)));
     };
     const onUp = () => {
       setIsDragging(false);
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
     };
+
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
   }, [minimapWidth]);
 
-  // ── Tag helpers ────────────────────────────────────────────────────────────
   const filteredTagOptions = useMemo(() => {
     const q = tagInput.trim().toLowerCase();
-    return tagOptions.filter((tag) => !form.tags.includes(tag) && (q === "" || tag.toLowerCase().includes(q))).slice(0, 8);
+    return tagOptions
+      .filter((tag) => !form.tags.includes(tag) && (q === "" || tag.toLowerCase().includes(q)))
+      .slice(0, 8);
   }, [tagOptions, form.tags, tagInput]);
 
   const addTag = useCallback((raw: string) => {
@@ -585,10 +498,14 @@ export function SnippetEditor({
     if (!tag) return;
     if (form.tags.includes(tag)) { setTagInput(""); setShowTagSuggestions(false); return; }
     onChange({ tags: [...form.tags, tag] });
-    setTagInput(""); setShowTagSuggestions(false);
+    setTagInput("");
+    setShowTagSuggestions(false);
   }, [form.tags, onChange]);
 
-  const removeTag = useCallback((tag: string) => onChange({ tags: form.tags.filter((t) => t !== tag) }), [form.tags, onChange]);
+  const removeTag = useCallback((tag: string) => {
+    onChange({ tags: form.tags.filter((x) => x !== tag) });
+  }, [form.tags, onChange]);
+
   const commitTagInput = useCallback(() => addTag(tagInput), [addTag, tagInput]);
 
   const handleCopy = useCallback(async () => {
@@ -597,20 +514,24 @@ export function SnippetEditor({
       await writeText(form.content);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (e) { console.error("Copy failed:", e); }
+    } catch (e) {
+      console.error("Copy failed:", e);
+    }
   }, [form.content]);
 
   const formatDate = (iso: string) => {
-    try { return new Date(iso).toLocaleString(language === "zh" ? "zh-CN" : "en-US", { hour12: false }); }
-    catch { return iso; }
+    try {
+      return new Date(iso).toLocaleString(language === "zh" ? "zh-CN" : "en-US", { hour12: false });
+    } catch {
+      return iso;
+    }
   };
 
-  // ── Empty state ───────────────────────────────────────────────────────────
   if (!snippet && !isNew) {
     return (
       <div className="editor-empty">
         <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
-          <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+          <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
         </svg>
         <p>{t("snippet.selectHint")}</p>
         <p className="hint">{t("snippet.shortcutHint")}</p>
@@ -618,10 +539,8 @@ export function SnippetEditor({
     );
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="editor-form">
-      {/* Header */}
       <div className="editor-header">
         <input
           className="title-input"
@@ -632,11 +551,7 @@ export function SnippetEditor({
         />
         <div className="editor-header-right">
           {isDirty && <span className="unsaved-dot" title={t("snippet.unsaved")} />}
-          <select
-            className="lang-select-sm"
-            value={form.language}
-            onChange={(e) => onChange({ language: e.target.value })}
-          >
+          <select className="lang-select-sm" value={form.language} onChange={(e) => onChange({ language: e.target.value })}>
             {LANGUAGES.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
           <button
@@ -644,16 +559,13 @@ export function SnippetEditor({
             onClick={() => onChange({ is_favorite: !form.is_favorite })}
             title={form.is_favorite ? t("snippet.unfavorite") : t("snippet.favorite")}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24"
-              fill={form.is_favorite ? "currentColor" : "none"}
-              stroke="currentColor" strokeWidth="2">
-              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill={form.is_favorite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
             </svg>
           </button>
         </div>
       </div>
 
-      {/* Description */}
       <input
         className="desc-input"
         placeholder={t("snippet.desc")}
@@ -661,11 +573,10 @@ export function SnippetEditor({
         onChange={(e) => onChange({ description: e.target.value })}
       />
 
-      {/* Tags */}
       <div className="tags-row">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
-          <line x1="7" y1="7" x2="7.01" y2="7"/>
+          <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+          <line x1="7" y1="7" x2="7.01" y2="7" />
         </svg>
         <div className="editor-tags">
           {form.tags.map((tag) => (
@@ -690,8 +601,7 @@ export function SnippetEditor({
             {showTagSuggestions && filteredTagOptions.length > 0 && (
               <div className="tag-suggestions">
                 {filteredTagOptions.map((tag) => (
-                  <button key={tag} type="button" className="tag-suggestion"
-                    onMouseDown={(e) => { e.preventDefault(); addTag(tag); }}>
+                  <button key={tag} type="button" className="tag-suggestion" onMouseDown={(e) => { e.preventDefault(); addTag(tag); }}>
                     {tag}
                   </button>
                 ))}
@@ -701,52 +611,46 @@ export function SnippetEditor({
         </div>
       </div>
 
-      {/* Editor + MiniMap split */}
-      <div className="cm-editor-split">
-        {/* Main editor */}
-        <div className="cm-main-pane" ref={editorWrapRef}>
+      <div ref={splitRef} className="cm-editor-split">
+        <div className="cm-main-pane">
           <CodeMirror
             value={form.content}
+            className="snippet-codemirror"
+            style={{ height: "100%" }}
+            height="100%"
             extensions={mainExtensions}
-            onChange={(val) => {
-              onChange({ content: val });
-            }}
+            onChange={(val) => onChange({ content: val })}
             onCreateEditor={(view) => {
               cmRef.current = view;
-              const sr = (view.dom as HTMLElement).shadowRoot;
-              if (!sr) return;
-              let s = sr.querySelector("[data-snpt]") as HTMLStyleElement | null;
-              if (!s) { s = document.createElement("style"); s.setAttribute("data-snpt", ""); sr.appendChild(s); }
-              s.textContent = injectShadowStyles(isDark);
+              setMainScrollEl(view.scrollDOM as HTMLElement);
             }}
             basicSetup={{
-              lineNumbers: true, drawSelection: true, highlightActiveLine: true,
-              highlightSelectionMatches: true, autocompletion: true,
-              bracketMatching: true, closeBrackets: true, foldGutter: true, indentOnInput: true,
+              lineNumbers: true,
+              drawSelection: true,
+              highlightActiveLine: true,
+              highlightSelectionMatches: true,
+              autocompletion: true,
+              bracketMatching: true,
+              closeBrackets: true,
+              foldGutter: true,
+              indentOnInput: true,
             }}
           />
         </div>
 
-        {/* Draggable divider */}
-        <div
-          className={`codeglance-divider ${isDragging ? "active" : ""}`}
-          onPointerDown={handleDividerPointerDown}
-        />
+        <div className={`codeglance-divider ${isDragging ? "active" : ""}`} onPointerDown={handleDividerPointerDown} />
 
-        {/* MiniMap */}
         <MiniMap
           key={`${minimapWidth}-${form.content.length}`}
           content={form.content}
           isDark={isDark}
           width={minimapWidth}
-          onMainScrollRef={(el) => { mainScrollerRef.current = el; }}
-          onMainScrollSetRef={(setter) => { minimapScrollSetRef.current = setter; }}
+          mainScrollEl={mainScrollEl}
           scrollMainTo={scrollMainTo}
           t={t}
         />
       </div>
 
-      {/* Toolbar */}
       <div className="editor-toolbar">
         <div className="footer-hint">
           {snippet && (
