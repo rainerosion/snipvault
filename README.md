@@ -18,7 +18,7 @@ SnipVault is a desktop snippet manager designed for developers to quickly captur
 
 It follows a focused two-pane workflow:
 - Left pane: snippet list with full-text search, language filter, and favorites filter
-- Right pane: syntax-highlighted editor with title/description, tag chips (Enter to create or choose from suggestions), favorite toggle, and one-click copy
+- Right pane: syntax-highlighted editor with title/description, tag chips (Enter to create or choose from suggestions), favorite toggle, one-click copy, and an IDE-style codeglance minimap (click-to-jump + draggable viewport)
 
 The app is local-first by default (SQLite, fully usable offline). If you need multi-device usage, you can enable WebDAV two-way merge sync.
 
@@ -39,6 +39,7 @@ The app is local-first by default (SQLite, fully usable offline). If you need mu
 - **Tag system** — Organize snippets with tag chips (press Enter to create or pick from suggestions)
 - **Favorites** — Mark important snippets for quick access
 - **Copy to clipboard** — One-click copy with system tray integration
+- **Codeglance minimap** — Right-side canvas minimap with click-to-jump and draggable viewport, using the editor as the single source of scroll behavior
 - **Import/Export** — JSON format for backup and portability
 - **Dark/Light/System theme** — Follow system preference or pick manually
 - **WebDAV sync** — Bi-directional merge sync with any WebDAV-compatible cloud storage (Nextcloud, Synology, Nutstore, etc.)
@@ -175,7 +176,7 @@ Issues and pull requests are welcome! Please read the code conventions in `CLAUD
 
 核心使用方式是双栏工作流：
 - 左侧：片段列表，支持全文搜索、语言筛选、收藏筛选
-- 右侧：语法高亮编辑区，支持标题/描述、标签 chip（回车创建或下拉建议选择）、收藏切换、一键复制
+- 右侧：语法高亮编辑区，支持标题/描述、标签 chip（回车创建或下拉建议选择）、收藏切换、一键复制，以及 IDE 风格 codeglance（点击跳转 + 视窗拖拽）
 
 应用默认本地优先（SQLite 离线可用）；需要多端同步时可启用 WebDAV 双向合并同步。
 
@@ -196,6 +197,7 @@ Issues and pull requests are welcome! Please read the code conventions in `CLAUD
 - **标签系统** — 支持标签 chip（回车创建或下拉建议选择）
 - **收藏功能** — 标记重要片段快速访问
 - **一键复制** — 代码片段复制到剪贴板，配合系统托盘使用
+- **Codeglance 预览** — 右侧 Canvas 代码预览，支持点击跳转与视窗拖拽，并以编辑器滚动条作为唯一滚动逻辑来源
 - **导入/导出** — JSON 格式备份与迁移
 - **暗色/亮色/跟随系统** — 三种主题模式
 - **WebDAV 同步** — 与任意 WebDAV 兼容云盘双向合并同步（Nextcloud、群晖、坚果云等）
