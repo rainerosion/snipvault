@@ -240,14 +240,17 @@ function injectShadowStyles(isDark: boolean) {
 interface MiniMapProps {
   content: string;
   isDark: boolean;
-  mainScrollEl: HTMLElement | null;
   width: number;
+  // Called with the scroll container element so minimap can attach listeners
+  onMainScrollRef: (el: HTMLElement | null) => void;
+  // Scroll the main editor to a given scrollTop
+  scrollMainTo: (scrollTop: number) => void;
 }
 
 const GLANCE_LINE_H = 4; // line height in px in the minimap
 const GLANCE_PADDING_X = 4; // horizontal padding inside minimap
 
-// Color a line segment based on character type (no full parser needed for minimap)
+// Color a line segment based on character type
 function getColorByChar(ch: string, isDark: boolean): string {
   if (/[\s]/.test(ch)) return isDark ? DEFAULT_DARK_LINE : DEFAULT_LIGHT_LINE;
   if (/[{}()\[\]]/.test(ch)) return isDark ? "#ff7b72" : "#cf222e";
@@ -278,34 +281,36 @@ function tokenizeForMinimap(lineText: string, isDark: boolean): { text: string; 
   return segments.length > 0 ? segments : [{ text: lineText, color: isDark ? DEFAULT_DARK_LINE : DEFAULT_LIGHT_LINE }];
 }
 
-function MiniMap({ content, isDark, mainScrollEl, width }: MiniMapProps) {
+function MiniMap({ content, isDark, width, onMainScrollRef, scrollMainTo }: MiniMapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLElement | null>(null);
+  const vpTopRef = useRef(0);
+  const vpHRef = useRef(0);
 
   const bg = isDark ? "#0d1117" : "#ffffff";
   const viewportBg = isDark ? "rgba(56,189,248,0.12)" : "rgba(2,132,199,0.10)";
   const viewportBorder = isDark ? "rgba(56,189,248,0.45)" : "rgba(2,132,199,0.40)";
+  const cursorLineBg = isDark ? "rgba(56,189,248,0.15)" : "rgba(2,132,199,0.12)";
+  const cursorLineBorder = isDark ? "rgba(56,189,248,0.6)" : "rgba(2,132,199,0.55)";
+
+  // Lines derived once per content change
+  const lines = content.split("\n");
+  const totalH = lines.length * GLANCE_LINE_H;
+
+  // Compute max line length for scaling
+  const maxLen = lines.reduce((m, l) => Math.max(m, l.length), 1);
+  const availW = width - GLANCE_PADDING_X * 2;
+  const scaleX = availW / maxLen;
 
   // Draw the minimap canvas
-  useEffect(() => {
+  const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     const pane = paneRef.current;
     if (!canvas || !pane) return;
 
-    const lines = content.split("\n");
-    if (lines.length === 1 && !lines[0].trim()) {
-      // Empty content — just clear
-      const ctx = canvas.getContext("2d")!;
-      ctx.clearRect(0, 0, width, pane.clientHeight);
-      return;
-    }
-
-    const totalH = lines.length * GLANCE_LINE_H;
     const paneH = pane.clientHeight;
-    const availW = width - GLANCE_PADDING_X * 2;
-    const maxLen = lines.reduce((m, l) => Math.max(m, l.length), 1);
-    const scaleX = availW / maxLen;
 
     canvas.width = width;
     canvas.height = Math.max(totalH, paneH);
@@ -325,53 +330,177 @@ function MiniMap({ content, isDark, mainScrollEl, width }: MiniMapProps) {
         const segW = Math.min(seg.text.length * scaleX, width - x - 1);
         if (segW > 0.5) {
           ctx.fillStyle = seg.color;
-          const barH = GLANCE_LINE_H - 1;
           ctx.beginPath();
-          ctx.roundRect(x, y + 0.5, segW, barH, 1);
+          ctx.roundRect(x, y + 0.5, segW, GLANCE_LINE_H - 1, 1);
           ctx.fill();
           x += segW;
           if (x >= width - GLANCE_PADDING_X) break;
         }
       }
     });
+  }, [lines, width, bg, isDark, totalH, scaleX]);
 
-    // Update viewport overlay
+  // Draw + update viewport
+  const updateViewport = useCallback(() => {
     const vp = viewportRef.current;
-    const main = mainScrollEl;
-    if (vp && main && main.scrollHeight > main.clientHeight) {
-      const scrollable = main.scrollHeight - main.clientHeight;
-      const ratio = main.scrollTop / scrollable;
-      const vpTotalH = Math.max(totalH, paneH);
-      const vpPaneH = paneH;
-      const vpScrollable = vpTotalH - vpPaneH;
-      if (vpScrollable > 0) {
-        vp.style.top = `${ratio * vpScrollable}px`;
-        vp.style.height = `${Math.max(20, (main.clientHeight / main.scrollHeight) * vpPaneH)}px`;
-        vp.style.display = "";
-      } else {
-        vp.style.display = "none";
-      }
-    } else if (viewportRef.current) {
-      viewportRef.current.style.display = "none";
+    const pane = paneRef.current;
+    const main = mainRef.current;
+    if (!vp || !pane) return;
+
+    const paneH = pane.clientHeight;
+
+    if (!main || main.scrollHeight <= main.clientHeight) {
+      vp.style.display = "none";
+      vpTopRef.current = 0;
+      vpHRef.current = 0;
+      return;
     }
-  }, [content, width, bg, isDark, mainScrollEl]);
+
+    const mainScrollable = main.scrollHeight - main.clientHeight;
+    const ratio = main.scrollTop / mainScrollable;
+    const vpTotalH = Math.max(totalH, paneH);
+    const vpScrollable = vpTotalH - paneH;
+    if (vpScrollable <= 0) { vp.style.display = "none"; return; }
+
+    const vpH = Math.max(24, (main.clientHeight / main.scrollHeight) * vpTotalH);
+    const vpTop = ratio * vpScrollable;
+
+    vp.style.display = "";
+    vp.style.top = `${vpTop}px`;
+    vp.style.height = `${vpH}px`;
+    vpTopRef.current = vpTop;
+    vpHRef.current = vpH;
+  }, [totalH]);
+
+  // ── Attach to main scroll container via callback ref ───────────────────────
+  const setMainRef = useCallback((el: HTMLElement | null) => {
+    if (mainRef.current === el) return;
+    if (mainRef.current) {
+      mainRef.current.removeEventListener("scroll", onMainScroll);
+    }
+    mainRef.current = el;
+    onMainScrollRef(el);
+    if (el) {
+      el.addEventListener("scroll", onMainScroll, { passive: true });
+      updateViewport();
+    }
+  }, [onMainScrollRef, updateViewport]);
+
+  const onMainScroll = useCallback(() => {
+    updateViewport();
+  }, [updateViewport]);
+
+  // ── ResizeObserver: redraw when pane resizes ──────────────────────────────
+  useEffect(() => {
+    const pane = paneRef.current;
+    if (!pane) return;
+    const ro = new ResizeObserver(() => { drawCanvas(); updateViewport(); });
+    ro.observe(pane);
+    return () => ro.disconnect();
+  }, [drawCanvas, updateViewport]);
+
+  // ── Redraw on content/theme/width change ──────────────────────────────────
+  useEffect(() => { drawCanvas(); }, [drawCanvas]);
+  useEffect(() => { updateViewport(); }, [updateViewport]);
+
+  // ── Click to jump ──────────────────────────────────────────────────────────
+  const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const main = mainRef.current;
+    const pane = paneRef.current;
+    if (!main || !pane) return;
+
+    const rect = pane.getBoundingClientRect();
+    const clickY = e.clientY - rect.top;
+    const paneH = pane.clientHeight;
+    const vpTotalH = Math.max(totalH, paneH);
+    const vpScrollable = vpTotalH - paneH;
+
+    if (vpScrollable <= 0) return;
+
+    // Map click Y → line index → scroll main editor
+    const lineIndex = Math.floor((clickY / paneH) * lines.length);
+    const clampedLine = Math.max(0, Math.min(lines.length - 1, lineIndex));
+
+    // Scroll main: use line height approximation
+    const mainScrollable = main.scrollHeight - main.clientHeight;
+    const targetRatio = clampedLine / lines.length;
+    const targetScrollTop = targetRatio * mainScrollable;
+    scrollMainTo(targetScrollTop);
+  }, [lines, totalH, scrollMainTo]);
+
+  // ── Hover: show cursor line indicator ────────────────────────────────────
+  const [hoverLine, setHoverLine] = useState(-1);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const pane = paneRef.current;
+    if (!pane) return;
+    const rect = pane.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const line = Math.floor(y / GLANCE_LINE_H);
+    setHoverLine(line);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => { setHoverLine(-1); }, []);
+
+  // Draw hover line indicator on top of canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (hoverLine < 0 || hoverLine >= lines.length) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const y = hoverLine * GLANCE_LINE_H;
+    ctx.save();
+    ctx.fillStyle = cursorLineBg;
+    ctx.strokeStyle = cursorLineBorder;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(0.5, y + 0.5, width - 1, GLANCE_LINE_H - 1, 1);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }, [hoverLine, lines.length, width, cursorLineBg, cursorLineBorder]);
 
   return (
     <div
       ref={paneRef}
       className="minimap-pane"
       style={{ width, background: bg }}
+      onClick={handleClick}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      title={t ? t("minimap.clickToJump") : ""}
     >
+      {/* Canvas: drawn underneath */}
       <canvas
         ref={canvasRef}
         className="minimap-canvas"
         style={{ display: "block" }}
       />
+      {/* Viewport overlay: shows current visible region */}
       <div
         ref={viewportRef}
         className="minimap-viewport"
         style={{ background: viewportBg, borderColor: viewportBorder }}
       />
+      {/* Hover cursor line indicator */}
+      {hoverLine >= 0 && (
+        <div
+          className="minimap-hover-line"
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: hoverLine * GLANCE_LINE_H,
+            height: GLANCE_LINE_H,
+            background: cursorLineBg,
+            borderTop: `1px solid ${cursorLineBorder}`,
+            borderBottom: `1px solid ${cursorLineBorder}`,
+            pointerEvents: "none",
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -389,7 +518,6 @@ export function SnippetEditor({
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const cmRef = useRef<EditorView | null>(null);
   const mainScrollerRef = useRef<HTMLElement | null>(null);
-  const minimapTriggerRef = useRef(0); // increments to force minimap redraw
 
   // ── State ─────────────────────────────────────────────────────────────────
   const [copied, setCopied] = useState(false);
@@ -397,6 +525,7 @@ export function SnippetEditor({
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
   const [minimapWidth, setMinimapWidth] = useState(120);
   const [isDragging, setIsDragging] = useState(false);
+  const [minimapKey, setMinimapKey] = useState(0); // force re-mount when scroller changes
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const isDark = theme === "dark";
@@ -404,6 +533,21 @@ export function SnippetEditor({
     () => buildMainExtensions(isDark, form.language),
     [isDark, form.language]
   );
+
+  // ── Scroll main editor to a given scrollTop ────────────────────────────────
+  const scrollMainTo = useCallback((scrollTop: number) => {
+    if (cmRef.current) {
+      cmRef.current.scrollDOM.scrollTop = scrollTop;
+    }
+  }, []);
+
+  // ── Minimap scroll-el callback: store it and bump key so MiniMap re-inits ──
+  const handleMinimapScrollRef = useCallback((el: HTMLElement | null) => {
+    if (mainScrollerRef.current !== el) {
+      mainScrollerRef.current = el;
+      setMinimapKey((k) => k + 1);
+    }
+  }, []);
 
   // ── Main editor height fixup ───────────────────────────────────────────────
   useEffect(() => {
@@ -425,11 +569,6 @@ export function SnippetEditor({
         sc.style.overflowY = "auto";
         sc.style.overflowX = "auto";
         sc.style.height = "100%";
-        if (mainScrollerRef.current !== sc) {
-          mainScrollerRef.current = sc;
-          // Force minimap redraw when scroller reference stabilizes
-          minimapTriggerRef.current++;
-        }
       }
     };
     apply();
@@ -627,12 +766,12 @@ export function SnippetEditor({
 
         {/* MiniMap */}
         <MiniMap
-          key={`${minimapWidth}-${form.content.length}`}
+          key={`${minimapWidth}-${form.content.length}-${minimapKey}`}
           content={form.content}
-          language={form.language}
           isDark={isDark}
-          mainScrollEl={mainScrollerRef.current}
           width={minimapWidth}
+          onMainScrollRef={handleMinimapScrollRef}
+          scrollMainTo={scrollMainTo}
         />
       </div>
 
