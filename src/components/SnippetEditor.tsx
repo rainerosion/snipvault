@@ -241,6 +241,9 @@ interface MiniMapProps {
   content: string;
   isDark: boolean;
   width: number;
+  // MiniMap calls this with its internal scroll-set callback;
+  // parent stores it so the editor can call it when the scroller is ready
+  onMainScrollSetRef: (setter: (el: HTMLElement | null) => void) => void;
   // Called with the scroll container element so minimap can attach listeners
   onMainScrollRef: (el: HTMLElement | null) => void;
   // Scroll the main editor to a given scrollTop
@@ -282,7 +285,7 @@ function tokenizeForMinimap(lineText: string, isDark: boolean): { text: string; 
   return segments.length > 0 ? segments : [{ text: lineText, color: isDark ? DEFAULT_DARK_LINE : DEFAULT_LIGHT_LINE }];
 }
 
-function MiniMap({ content, isDark, width, onMainScrollRef, scrollMainTo, t }: MiniMapProps) {
+function MiniMap({ content, isDark, width, onMainScrollRef, onMainScrollSetRef, scrollMainTo, t }: MiniMapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
@@ -373,19 +376,21 @@ function MiniMap({ content, isDark, width, onMainScrollRef, scrollMainTo, t }: M
     vpHRef.current = vpH;
   }, [totalH]);
 
-  // ── Attach to main scroll container via callback ref ───────────────────────
-  const setMainRef = useCallback((el: HTMLElement | null) => {
-    if (mainRef.current === el) return;
-    if (mainRef.current) {
-      mainRef.current.removeEventListener("scroll", onMainScroll);
-    }
-    mainRef.current = el;
-    onMainScrollRef(el);
-    if (el) {
-      el.addEventListener("scroll", onMainScroll, { passive: true });
-      updateViewport();
-    }
-  }, [onMainScrollRef, updateViewport]);
+  // ── Register the scroll-set callback with parent (two-step handoff) ────────
+  useEffect(() => {
+    onMainScrollSetRef((el) => {
+      if (mainRef.current === el) return;
+      if (mainRef.current) {
+        mainRef.current.removeEventListener("scroll", onMainScroll);
+      }
+      mainRef.current = el;
+      onMainScrollRef(el);
+      if (el) {
+        el.addEventListener("scroll", onMainScroll, { passive: true });
+        updateViewport();
+      }
+    });
+  }, [onMainScrollSetRef, onMainScrollRef, updateViewport]);
 
   const onMainScroll = useCallback(() => {
     updateViewport();
@@ -518,7 +523,10 @@ export function SnippetEditor({
   // ── Refs ──────────────────────────────────────────────────────────────────
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const cmRef = useRef<EditorView | null>(null);
+  // Stable reference to the main scroller — updated without triggering re-renders
   const mainScrollerRef = useRef<HTMLElement | null>(null);
+  // Stable reference to MiniMap's scroll-set callback
+  const minimapScrollSetRef = useRef<((el: HTMLElement | null) => void) | null>(null);
 
   // ── State ─────────────────────────────────────────────────────────────────
   const [copied, setCopied] = useState(false);
@@ -526,7 +534,6 @@ export function SnippetEditor({
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
   const [minimapWidth, setMinimapWidth] = useState(120);
   const [isDragging, setIsDragging] = useState(false);
-  const [minimapKey, setMinimapKey] = useState(0); // force re-mount when scroller changes
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const isDark = theme === "dark";
@@ -542,18 +549,11 @@ export function SnippetEditor({
     }
   }, []);
 
-  // ── Minimap scroll-el callback: store it and bump key so MiniMap re-inits ──
-  const handleMinimapScrollRef = useCallback((el: HTMLElement | null) => {
-    if (mainScrollerRef.current !== el) {
-      mainScrollerRef.current = el;
-      setMinimapKey((k) => k + 1);
-    }
-  }, []);
-
-  // ── Main editor height fixup ───────────────────────────────────────────────
+  // ── Main editor height fixup + scroller handoff ─────────────────────────────
   useEffect(() => {
     const wrap = editorWrapRef.current;
     if (!wrap) return;
+    let rafId: number;
     const apply = () => {
       const view = cmRef.current;
       if (!view) return;
@@ -570,13 +570,18 @@ export function SnippetEditor({
         sc.style.overflowY = "auto";
         sc.style.overflowX = "auto";
         sc.style.height = "100%";
+        // Hand off the scroller element to MiniMap
+        if (minimapScrollSetRef.current && mainScrollerRef.current !== sc) {
+          mainScrollerRef.current = sc;
+          minimapScrollSetRef.current(sc);
+        }
       }
     };
     apply();
-    requestAnimationFrame(apply);
+    rafId = requestAnimationFrame(apply);
     const ro = new ResizeObserver(apply);
     ro.observe(wrap);
-    return () => ro.disconnect();
+    return () => { cancelAnimationFrame(rafId); ro.disconnect(); };
   }, [theme]);
 
   // ── Minimap divider drag ───────────────────────────────────────────────────
@@ -767,11 +772,12 @@ export function SnippetEditor({
 
         {/* MiniMap */}
         <MiniMap
-          key={`${minimapWidth}-${form.content.length}-${minimapKey}`}
+          key={`${minimapWidth}-${form.content.length}`}
           content={form.content}
           isDark={isDark}
           width={minimapWidth}
-          onMainScrollRef={handleMinimapScrollRef}
+          onMainScrollRef={(el) => { mainScrollerRef.current = el; }}
+          onMainScrollSetRef={(setter) => { minimapScrollSetRef.current = setter; }}
           scrollMainTo={scrollMainTo}
           t={t}
         />

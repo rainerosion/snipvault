@@ -1303,7 +1303,7 @@ body {
   min-height: 0;
   position: relative;
   background: var(--bg-primary);
-  overflow: hidden;
+  /* Do NOT set overflow here — shadow DOM scroller handles its own scroll */
 }
 
 .cm-main-pane .cm-editor {
