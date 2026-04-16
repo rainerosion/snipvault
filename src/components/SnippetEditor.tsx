@@ -245,6 +245,7 @@ interface MiniMapProps {
   onMainScrollRef: (el: HTMLElement | null) => void;
   // Scroll the main editor to a given scrollTop
   scrollMainTo: (scrollTop: number) => void;
+  t?: (key: string) => string;
 }
 
 const GLANCE_LINE_H = 4; // line height in px in the minimap
@@ -281,7 +282,7 @@ function tokenizeForMinimap(lineText: string, isDark: boolean): { text: string; 
   return segments.length > 0 ? segments : [{ text: lineText, color: isDark ? DEFAULT_DARK_LINE : DEFAULT_LIGHT_LINE }];
 }
 
-function MiniMap({ content, isDark, width, onMainScrollRef, scrollMainTo }: MiniMapProps) {
+function MiniMap({ content, isDark, width, onMainScrollRef, scrollMainTo, t }: MiniMapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
@@ -470,7 +471,7 @@ function MiniMap({ content, isDark, width, onMainScrollRef, scrollMainTo }: Mini
       onClick={handleClick}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      title={t ? t("minimap.clickToJump") : ""}
+      title={t ? t("minimap.clickToJump") : "点击跳转"}
     >
       {/* Canvas: drawn underneath */}
       <canvas
@@ -772,6 +773,7 @@ export function SnippetEditor({
           width={minimapWidth}
           onMainScrollRef={handleMinimapScrollRef}
           scrollMainTo={scrollMainTo}
+          t={t}
         />
       </div>
 
