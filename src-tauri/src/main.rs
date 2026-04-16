@@ -2,6 +2,8 @@
 
 use once_cell::sync::OnceCell;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tauri::{
     image::Image,
     menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder},
@@ -34,6 +36,8 @@ fn build_tray_menu(app: &AppHandle, auto_start: bool) -> tauri::Result<tauri::me
 }
 
 fn reveal_main_window(app: &AppHandle) {
+    snipvault::commands::WINDOW_SHOWN.store(true, Ordering::SeqCst);
+    snipvault::commands::boot_log("reveal_main_window", "manual_reveal");
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
@@ -138,6 +142,9 @@ fn main() {
         .format_timestamp_millis()
         .init();
 
+    let _ = snipvault::commands::BOOT_START.set(std::time::Instant::now());
+    snipvault::commands::boot_log("main_start", "process_begin");
+
     // Check if started with --minimized flag (from autostart)
     let start_minimized = std::env::args().any(|arg| arg == "--minimized");
     if start_minimized {
@@ -145,21 +152,7 @@ fn main() {
     }
 
     log::info!("Starting 灵藏 SnipVault");
-
-    if let Err(e) = snipvault::db::init_db() {
-        log::error!("Failed to initialize database: {e}");
-        std::process::exit(1);
-    }
-    log::info!("Database initialized");
-
-    snipvault::settings::init_settings();
-    log::info!("Settings initialized");
-
-    log::info!(
-        "App mode: {} | Data dir: {:?}",
-        snipvault::paths::get_app_mode(),
-        snipvault::paths::get_data_dir()
-    );
+    snipvault::commands::boot_log("builder_start", "tauri_builder_default");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -172,19 +165,52 @@ fn main() {
             Some(vec!["--minimized"]),
         ))
         .setup(move |app| {
+            snipvault::commands::boot_log("setup_enter", "start");
+            log::info!(
+                "App mode: {} | Data dir: {:?}",
+                snipvault::paths::get_app_mode(),
+                snipvault::paths::get_data_dir()
+            );
+
+            // Warm-up DB/settings in background so first paint is not blocked
+            std::thread::spawn(|| {
+                if let Err(e) = snipvault::db::init_db() {
+                    log::error!("Background database init failed: {e}");
+                } else {
+                    log::info!("Background database init completed");
+                }
+                snipvault::settings::init_settings();
+                log::info!("Background settings init completed");
+            });
+
             // Initialize global tray storage
             let tray_store = Arc::new(Mutex::new(None::<TrayIcon>));
             TRAY.set(tray_store.clone()).ok();
 
+            snipvault::commands::boot_log("setup_before_get_settings", "for_tray");
             let settings = snipvault::settings::get_settings();
+            snipvault::commands::boot_log("setup_after_get_settings", "for_tray");
+            snipvault::commands::boot_log("setup_before_build_tray", "start");
             let tray = build_tray(app.handle(), settings.auto_start)?;
+            snipvault::commands::boot_log("setup_after_build_tray", "done");
             *tray_store.lock().unwrap() = Some(tray);
 
-            // Hide window on startup if started with --minimized flag
             if start_minimized {
+                snipvault::commands::WINDOW_SHOWN.store(true, Ordering::SeqCst);
+                snipvault::commands::boot_log("startup_mode", "minimized");
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.hide();
                 }
+            } else {
+                snipvault::commands::boot_log("startup_mode", "deferred_show_wait_frontend_ready");
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(2500));
+                    if !snipvault::commands::WINDOW_SHOWN.load(Ordering::SeqCst) {
+                        snipvault::commands::boot_log("fallback_show_fired", "timeout_ms=2500");
+                        snipvault::commands::show_main_window_if_needed(&app_handle, "fallback_timeout");
+                    }
+                });
             }
 
             // Handle main window close -> minimize to tray
@@ -234,6 +260,7 @@ fn main() {
                 });
             }
 
+            snipvault::commands::boot_log("setup_exit", "done");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -254,7 +281,11 @@ fn main() {
             snipvault::commands::get_sync_versions,
             snipvault::commands::get_system_theme,
             snipvault::commands::get_system_locale,
+            snipvault::commands::frontend_ready,
+            snipvault::commands::boot_mark,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+
+    snipvault::commands::boot_log("run_exit", "tauri_run_returned");
 }

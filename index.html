@@ -4,8 +4,96 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>灵藏 SnipVault</title>
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #0d0d12;
+        color: #e8e8ed;
+      }
+      #root {
+        height: 100%;
+      }
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: inherit;
+        z-index: 9999;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }
+      .boot-inner {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        opacity: 0.9;
+      }
+      .boot-spinner {
+        width: 22px;
+        height: 22px;
+        border: 2px solid rgba(255, 255, 255, 0.18);
+        border-top-color: #38bdf8;
+        border-radius: 50%;
+        animation: bootSpin 0.8s linear infinite;
+      }
+      .boot-text {
+        font-size: 12px;
+        letter-spacing: 0.02em;
+      }
+      html[data-theme="light"] body {
+        background: #f8f8fc;
+        color: #1a1a2a;
+      }
+      html[data-theme="light"] .boot-spinner {
+        border: 2px solid rgba(0, 0, 0, 0.12);
+        border-top-color: #0284c7;
+      }
+      @keyframes bootSpin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
+    <script>
+      (() => {
+        window.__bootT0 = performance.now();
+        window.__bootMark = (stage) => {
+          const t = performance.now() - window.__bootT0;
+          console.info(`[BOOT][web] ${stage} +${t.toFixed(2)}ms`);
+        };
+
+        window.__bootMark("html_inline_start");
+
+        const pref = localStorage.getItem("snipvault-theme-pref");
+        const cached = localStorage.getItem("snipvault-theme-effective");
+        let theme = "dark";
+        if (pref === "dark" || pref === "light") {
+          theme = pref;
+        } else if (cached === "dark" || cached === "light") {
+          theme = cached;
+        } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+          theme = "dark";
+        } else {
+          theme = "light";
+        }
+        document.documentElement.setAttribute("data-theme", theme);
+        window.__bootMark("theme_applied");
+      })();
+    </script>
   </head>
   <body>
+    <div id="boot-splash">
+      <div class="boot-inner">
+        <div class="boot-spinner"></div>
+        <div class="boot-text">正在启动 SnipVault...</div>
+      </div>
+    </div>
+    <script>
+      if (window.__bootMark) {
+        window.__bootMark("splash_dom_ready");
+      }
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

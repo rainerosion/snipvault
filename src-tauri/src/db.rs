@@ -6,47 +6,47 @@ use std::sync::Mutex;
 static DB: OnceCell<Mutex<Connection>> = OnceCell::new();
 
 pub fn init_db() -> SqliteResult<()> {
-    let db_path = get_db_path();
-    log::info!("Initializing database at: {:?}", db_path);
-    std::fs::create_dir_all(db_path.parent().unwrap()).ok();
-    let conn = Connection::open(&db_path)?;
+    let _ = DB.get_or_try_init(|| {
+        let db_path = get_db_path();
+        log::info!("Initializing database at: {:?}", db_path);
+        std::fs::create_dir_all(db_path.parent().unwrap()).ok();
+        let conn = Connection::open(&db_path)?;
 
-    conn.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS snippets (
-            id TEXT PRIMARY KEY,
-            title TEXT NOT NULL DEFAULT '',
-            content TEXT NOT NULL DEFAULT '',
-            language TEXT NOT NULL DEFAULT 'plaintext',
-            description TEXT NOT NULL DEFAULT '',
-            tags TEXT NOT NULL DEFAULT '[]',
-            is_favorite INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS snippets (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                language TEXT NOT NULL DEFAULT 'plaintext',
+                description TEXT NOT NULL DEFAULT '',
+                tags TEXT NOT NULL DEFAULT '[]',
+                is_favorite INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
 
-        CREATE TABLE IF NOT EXISTS sync_versions (
-            id TEXT PRIMARY KEY,
-            synced_at TEXT NOT NULL,
-            direction TEXT NOT NULL,
-            snippet_count INTEGER NOT NULL DEFAULT 0,
-            uploaded_count INTEGER NOT NULL DEFAULT 0,
-            downloaded_count INTEGER NOT NULL DEFAULT 0,
-            message TEXT NOT NULL DEFAULT ''
-        );
-        ",
-    )?;
+            CREATE TABLE IF NOT EXISTS sync_versions (
+                id TEXT PRIMARY KEY,
+                synced_at TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                snippet_count INTEGER NOT NULL DEFAULT 0,
+                uploaded_count INTEGER NOT NULL DEFAULT 0,
+                downloaded_count INTEGER NOT NULL DEFAULT 0,
+                message TEXT NOT NULL DEFAULT ''
+            );
+            ",
+        )?;
 
-    // Insert sample data if empty
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM snippets", [], |row| row.get(0))?;
-    if count == 0 {
-        insert_samples(&conn)?;
-    }
+        // Insert sample data if empty
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM snippets", [], |row| row.get(0))?;
+        if count == 0 {
+            insert_samples(&conn)?;
+        }
 
-    DB.set(Mutex::new(conn)).map_err(|_| {
-        rusqlite::Error::InvalidParameterName("DB already initialized".into())
+        log::info!("Database initialized successfully");
+        Ok::<Mutex<Connection>, rusqlite::Error>(Mutex::new(conn))
     })?;
-    log::info!("Database initialized successfully");
     Ok(())
 }
 
@@ -77,6 +77,7 @@ pub fn with_db<F, T>(f: F) -> SqliteResult<T>
 where
     F: FnOnce(&Connection) -> SqliteResult<T>,
 {
+    init_db()?;
     let db = DB.get().expect("DB not initialized");
     let conn = db.lock().unwrap();
     f(&conn)

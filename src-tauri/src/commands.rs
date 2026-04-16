@@ -1,7 +1,61 @@
 use crate::db::{self, Snippet};
 use crate::settings::{self, Settings};
 use crate::webdav::{self, SyncResult};
+use once_cell::sync::OnceCell;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 use tauri::{command, AppHandle, Manager};
+
+pub static BOOT_START: OnceCell<Instant> = OnceCell::new();
+pub static WINDOW_SHOWN: AtomicBool = AtomicBool::new(false);
+
+pub fn boot_log(stage: &str, meta: &str) {
+    let elapsed_ms = BOOT_START
+        .get()
+        .map(|t| t.elapsed().as_millis())
+        .unwrap_or(0);
+    log::info!(
+        "BOOT|side=native|t_ms={}|stage={}|meta={}",
+        elapsed_ms,
+        stage,
+        meta
+    );
+}
+
+pub fn show_main_window_if_needed(app: &AppHandle, reason: &str) {
+    if WINDOW_SHOWN.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    if let Some(window) = app.get_webview_window("main") {
+        boot_log("window_show_requested", reason);
+        if let Err(e) = window.show() {
+            boot_log("window_show_error", &format!("reason={} err={}", reason, e));
+            return;
+        }
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        boot_log("window_show_ok", reason);
+    } else {
+        boot_log("window_show_error", &format!("reason={} err=no_main_window", reason));
+    }
+}
+
+#[command]
+pub fn frontend_ready(app: AppHandle, phase: Option<String>) {
+    let phase = phase.unwrap_or_else(|| "from_web".to_string());
+    boot_log("frontend_ready_received", &phase);
+    show_main_window_if_needed(&app, &format!("frontend_ready:{phase}"));
+}
+
+#[command]
+pub fn boot_mark(stage: String, t_ms: f64, app: AppHandle) {
+    boot_log("web_mark", &format!("stage={} web_t_ms={:.2}", stage, t_ms));
+
+    if stage == "main_eval_start" {
+        show_main_window_if_needed(&app, "boot_mark:main_eval_start");
+    }
+}
 
 #[command]
 pub fn get_snippets() -> Result<Vec<Snippet>, String> {

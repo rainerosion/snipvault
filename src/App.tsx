@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useContext } from "react";
+import { useState, useEffect, useCallback, useRef, useContext, lazy, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useTranslation } from "react-i18next";
@@ -7,7 +7,7 @@ import { useSettings, Settings as AppSettings } from "./hooks/useSettings";
 import { Toolbar } from "./components/Toolbar";
 import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
-import { SnippetEditor } from "./components/SnippetEditor";
+const SnippetEditor = lazy(() => import("./components/SnippetEditor").then((m) => ({ default: m.SnippetEditor })));
 import { SettingsPanel } from "./components/Settings";
 import { Dialog, DialogHandle } from "./components/Dialog";
 import { Snippet, SnippetForm } from "./types";
@@ -136,6 +136,23 @@ export default function App() {
   useEffect(() => {
     document.getElementById("root")!.setAttribute("data-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    const schedule = () => import("./components/SnippetEditor").catch(() => {});
+    const win = window as Window & { requestIdleCallback?: (cb: () => void) => number; cancelIdleCallback?: (id: number) => void };
+
+    if (typeof win.requestIdleCallback === "function") {
+      const id = win.requestIdleCallback(schedule);
+      return () => {
+        if (typeof win.cancelIdleCallback === "function") {
+          win.cancelIdleCallback(id);
+        }
+      };
+    }
+
+    const timer = window.setTimeout(schedule, 800);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     clearTimeout(searchTimer.current);
@@ -532,18 +549,37 @@ export default function App() {
         />
 
         <div className="editor-pane">
-          <SnippetEditor
-            snippet={selected}
-            isNew={isNew}
-            form={form}
-            onChange={(f) => setForm((prev) => ({ ...prev, ...f }))}
-            onSave={handleSave}
-            onCancel={handleCancel}
-            theme={theme}
-            saving={saving}
-            isDirty={isDirty}
-            tagOptions={allTagOptions}
-          />
+          {!selected && !isNew ? (
+            <div className="editor-empty">
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
+                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+              </svg>
+              <p>{t("snippet.selectHint")}</p>
+              <p className="hint">{t("snippet.shortcutHint")}</p>
+            </div>
+          ) : (
+            <Suspense
+              fallback={
+                <div className="editor-empty">
+                  <div className="spinner" />
+                  <p>{t("sidebar.loading")}</p>
+                </div>
+              }
+            >
+              <SnippetEditor
+                snippet={selected}
+                isNew={isNew}
+                form={form}
+                onChange={(f) => setForm((prev) => ({ ...prev, ...f }))}
+                onSave={handleSave}
+                onCancel={handleCancel}
+                theme={theme}
+                saving={saving}
+                isDirty={isDirty}
+                tagOptions={allTagOptions}
+              />
+            </Suspense>
+          )}
         </div>
       </div>
       </div>

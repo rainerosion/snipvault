@@ -40,6 +40,10 @@ impl Default for Settings {
 }
 
 pub fn init_settings() {
+    if SETTINGS.get().is_some() {
+        return;
+    }
+
     let path = get_settings_path();
     log::info!("init_settings: reading settings from {:?}", path);
     std::fs::create_dir_all(path.parent().unwrap()).ok();
@@ -57,6 +61,7 @@ pub fn with_settings<F, T>(f: F) -> T
 where
     F: FnOnce(&Settings) -> T,
 {
+    init_settings();
     let settings = SETTINGS.get().expect("Settings not initialized");
     let guard = settings.lock().unwrap();
     f(&guard)
@@ -66,6 +71,8 @@ pub fn update_settings<F>(f: F) -> Result<(), String>
 where
     F: FnOnce(&mut Settings),
 {
+    init_settings();
+
     let path = get_settings_path();
     log::info!("update_settings: target path = {:?}", path);
 
@@ -97,6 +104,7 @@ where
 }
 
 pub fn get_settings() -> Settings {
+    init_settings();
     let path = get_settings_path();
     log::info!("get_settings: reading from {:?}", path);
     SETTINGS.get().map(|m| m.lock().unwrap().clone()).unwrap_or_default()
