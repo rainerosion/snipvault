@@ -118,11 +118,6 @@ function buildMainExtensions(isDark: boolean, lang: string) {
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
       overflowY: "auto !important",
       overflowX: "auto !important",
-      scrollbarWidth: "none",
-    },
-    ".cm-scroller::-webkit-scrollbar": {
-      width: "0px",
-      height: "0px",
     },
     ".cm-content": {
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
@@ -148,7 +143,6 @@ interface MiniMapProps {
   width: number;
   mainScrollEl: HTMLElement | null;
   scrollMainTo: (scrollTop: number) => void;
-  t?: (key: string) => string;
 }
 
 const GLANCE_LINE_H = 4;
@@ -185,23 +179,31 @@ function tokenizeForMinimap(lineText: string, isDark: boolean): { text: string; 
   return segments;
 }
 
-function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo, t }: MiniMapProps) {
+function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMapProps) {
   const paneRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const syncingFromMainRef = useRef(false);
   const syncingFromMiniRef = useRef(false);
-  const draggingViewportRef = useRef<{ pointerId: number; startClientY: number; startRatio: number } | null>(null);
+  const draggingViewportRef = useRef<{ pointerId: number; pointerOffsetInViewport: number } | null>(null);
   const suppressClickRef = useRef(false);
 
   const [isViewportDragging, setIsViewportDragging] = useState(false);
+  const [paneClientHeight, setPaneClientHeight] = useState(0);
+  const [mainCanScroll, setMainCanScroll] = useState(false);
 
   const bg = isDark ? "#0d1117" : "#ffffff";
   const viewportBg = isDark ? "rgba(56,189,248,0.26)" : "rgba(2,132,199,0.22)";
   const viewportBorder = isDark ? "rgba(56,189,248,0.95)" : "rgba(2,132,199,0.90)";
 
   const lines = useMemo(() => content.split("\n"), [content]);
-  const totalH = Math.max(lines.length * GLANCE_LINE_H, 1);
+  const lineContentH = useMemo(() => Math.max(lines.length * GLANCE_LINE_H, 1), [lines.length]);
+  const totalH = useMemo(() => {
+    if (mainCanScroll && lineContentH <= paneClientHeight) {
+      return paneClientHeight + 1;
+    }
+    return lineContentH;
+  }, [mainCanScroll, lineContentH, paneClientHeight]);
   const maxLen = useMemo(() => Math.max(...lines.map((l) => l.length), 1), [lines]);
   const availW = Math.max(1, width - GLANCE_PADDING_X * 2);
   const scaleX = availW / maxLen;
@@ -246,6 +248,10 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo, t }: Mini
     const main = mainScrollEl;
     if (!pane || !viewport || !main) return;
 
+    const canScroll = main.scrollHeight > main.clientHeight + 0.5;
+    setPaneClientHeight(pane.clientHeight);
+    setMainCanScroll(canScroll);
+
     const mainScrollable = Math.max(0, main.scrollHeight - main.clientHeight);
     const ratio = mainScrollable > 0 ? main.scrollTop / mainScrollable : 0;
 
@@ -256,12 +262,12 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo, t }: Mini
       requestAnimationFrame(() => { syncingFromMainRef.current = false; });
     }
 
-    if (main.scrollHeight <= main.clientHeight) {
+    if (!canScroll) {
       viewport.style.display = "none";
       return;
     }
 
-    const vpH = Math.max(24, (main.clientHeight / main.scrollHeight) * totalH);
+    const vpH = Math.max(24, Math.min(180, (main.clientHeight / main.scrollHeight) * totalH));
     const vpTop = ratio * Math.max(0, totalH - vpH);
 
     viewport.style.display = "";
@@ -330,7 +336,7 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo, t }: Mini
       return;
     }
 
-    const vpH = Math.max(24, (main.clientHeight / main.scrollHeight) * totalH);
+    const vpH = Math.max(24, Math.min(180, (main.clientHeight / main.scrollHeight) * totalH));
     const visibleTrackH = Math.max(1, pane.clientHeight - Math.min(vpH, pane.clientHeight));
     const ratio = Math.max(0, Math.min(1, (clickY - vpH / 2) / visibleTrackH));
     scrollMainTo(ratio * mainScrollable);
@@ -339,16 +345,19 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo, t }: Mini
 
   const handleViewportPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const main = mainScrollEl;
-    if (!main) return;
+    const pane = paneRef.current;
+    const viewport = viewportRef.current;
+    if (!main || !pane || !viewport) return;
     e.preventDefault();
     e.stopPropagation();
     suppressClickRef.current = false;
-    const mainScrollable = Math.max(0, main.scrollHeight - main.clientHeight);
-    const startRatio = mainScrollable > 0 ? main.scrollTop / mainScrollable : 0;
+
+    const viewportRect = viewport.getBoundingClientRect();
+    const pointerOffsetInViewport = Math.max(0, Math.min(viewportRect.height, e.clientY - viewportRect.top));
+
     draggingViewportRef.current = {
       pointerId: e.pointerId,
-      startClientY: e.clientY,
-      startRatio,
+      pointerOffsetInViewport,
     };
     setIsViewportDragging(true);
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -361,10 +370,7 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo, t }: Mini
       const pane = paneRef.current;
       if (!drag || !main || !pane || ev.pointerId !== drag.pointerId) return;
 
-      const deltaY = ev.clientY - drag.startClientY;
-      if (Math.abs(deltaY) > 2) {
-        suppressClickRef.current = true;
-      }
+      suppressClickRef.current = true;
 
       const mainScrollable = Math.max(0, main.scrollHeight - main.clientHeight);
       if (mainScrollable <= 0) {
@@ -374,10 +380,11 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo, t }: Mini
         return;
       }
 
-      const vpH = Math.max(24, (main.clientHeight / main.scrollHeight) * totalH);
+      const vpH = Math.max(24, Math.min(180, (main.clientHeight / main.scrollHeight) * totalH));
       const visibleTrackH = Math.max(1, pane.clientHeight - Math.min(vpH, pane.clientHeight));
-      const deltaRatio = deltaY / visibleTrackH;
-      const nextRatio = Math.max(0, Math.min(1, drag.startRatio + deltaRatio));
+      const pointerYInPane = ev.clientY - pane.getBoundingClientRect().top;
+      const viewportTopInPane = pointerYInPane - drag.pointerOffsetInViewport;
+      const nextRatio = Math.max(0, Math.min(1, viewportTopInPane / visibleTrackH));
       const targetTop = nextRatio * mainScrollable;
 
       syncingFromMiniRef.current = true;
@@ -417,7 +424,6 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo, t }: Mini
       style={{ width, background: bg }}
       onScroll={onMiniScroll}
       onClick={handleClick}
-      title={t ? t("minimap.clickToJump") : "点击跳转"}
     >
       <div className="minimap-content" style={{ height: totalH, minHeight: "100%" }}>
         <canvas ref={canvasRef} className="minimap-canvas" style={{ display: "block" }} />
@@ -588,7 +594,7 @@ export function SnippetEditor({
           <div className="tag-input-wrap">
             <input
               className="tag-input"
-              placeholder={t("snippet.tags")}
+              placeholder={language === "zh" ? "输入后按回车" : "Press Enter"}
               value={tagInput}
               onFocus={() => setShowTagSuggestions(true)}
               onBlur={() => setTimeout(() => setShowTagSuggestions(false), 120)}
@@ -647,7 +653,6 @@ export function SnippetEditor({
           width={minimapWidth}
           mainScrollEl={mainScrollEl}
           scrollMainTo={scrollMainTo}
-          t={t}
         />
       </div>
 

@@ -1385,6 +1385,7 @@ body {
 
 .minimap-viewport.dragging {
   cursor: grabbing;
+  transition: none;
 }
 
 /* Dark mode: editor background, cursor, gutters (via host element - works in shadow DOM) */
@@ -1880,9 +1881,11 @@ body {
 .sync-history-msg {
   color: var(--text-secondary);
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: initial;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.45;
 }
 
 .sync-msg {
@@ -2155,6 +2158,43 @@ body {
   font-weight: 600;
   min-width: 72px;
   order: 3;
+}
+
+.text-context-menu {
+  position: fixed;
+  z-index: 12000;
+  min-width: 132px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.text-context-item {
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  padding: 0 10px;
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.text-context-item:hover {
+  background: var(--bg-hover);
+}
+
+.text-context-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 3px 2px;
 }
 
 .dialog-btn-save:hover {

@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef, useContext } from "react";
+import { useState, useEffect, useCallback, useRef, useContext } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useTranslation } from "react-i18next";
 import { useSnippets } from "./hooks/useSnippets";
 import { useSettings, Settings as AppSettings } from "./hooks/useSettings";
@@ -57,6 +58,9 @@ export default function App() {
   const [favFilter, setFavFilter] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [textMenu, setTextMenu] = useState<{ visible: boolean; x: number; y: number }>({ visible: false, x: 0, y: 0 });
+  const textMenuRef = useRef<HTMLDivElement | null>(null);
+  const textMenuTargetRef = useRef<HTMLElement | null>(null);
 
   const handleSync = useCallback(async () => {
     let effectiveSettings = settings;
@@ -107,8 +111,8 @@ export default function App() {
 
   useEffect(() => {
     import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-      const win = getCurrentWindow();
-      const unlistenSync = win.on("sync-complete", async (event) => {
+      const tauriWindow = getCurrentWindow() as any;
+      const unlistenSync = tauriWindow.on("sync-complete", async (event: any) => {
         const result = event.payload as { success: boolean; message: string };
         setSyncing(false);
         dialogRef.current?.alert(result.message);
@@ -117,11 +121,15 @@ export default function App() {
           await loadSettings();
         }
       });
-      const unlistenSettings = win.on("open-settings", () => { setSettingsOpen(true); });
-      const unlistenAutoStart = win.on("autostart-toggled", async () => {
+      const unlistenSettings = tauriWindow.on("open-settings", () => { setSettingsOpen(true); });
+      const unlistenAutoStart = tauriWindow.on("autostart-toggled", async () => {
         await loadSettings();
       });
-      return () => { unlistenSync.then(f => f()); unlistenSettings.then(f => f()); unlistenAutoStart.then(f => f()); };
+      return () => {
+        unlistenSync.then((f: () => void) => f());
+        unlistenSettings.then((f: () => void) => f());
+        unlistenAutoStart.then((f: () => void) => f());
+      };
     }).catch(() => {});
   }, [setSettingsOpen]);
 
@@ -185,6 +193,68 @@ export default function App() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [form, selected, isNew]);
+
+  useEffect(() => {
+    const onContextMenu = (e: MouseEvent) => {
+      const target = e.composedPath().find((node) => {
+        if (!(node instanceof HTMLElement)) return false;
+        if (node.matches("input, textarea, [contenteditable='true']")) return true;
+        if (node.isContentEditable) return true;
+        if (node.classList.contains("cm-editor")) return true;
+        if (node.closest("input, textarea, [contenteditable='true'], .cm-editor")) return true;
+        return false;
+      }) as HTMLElement | undefined;
+
+      e.preventDefault();
+
+      if (!target) {
+        textMenuTargetRef.current = null;
+        setTextMenu((prev) => ({ ...prev, visible: false }));
+        return;
+      }
+
+      const textTarget = target.matches("input, textarea, [contenteditable='true'], .cm-editor")
+        ? target
+        : target.closest("input, textarea, [contenteditable='true'], .cm-editor") as HTMLElement;
+
+      textMenuTargetRef.current = textTarget;
+
+      const menuW = 132;
+      const menuH = 148;
+      const x = Math.max(8, Math.min(e.clientX, window.innerWidth - menuW - 8));
+      const y = Math.max(8, Math.min(e.clientY, window.innerHeight - menuH - 8));
+
+      setTextMenu({ visible: true, x, y });
+    };
+
+    const hideMenu = () => {
+      setTextMenu((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      const menu = textMenuRef.current;
+      if (menu && e.target instanceof Node && menu.contains(e.target)) return;
+      hideMenu();
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") hideMenu();
+    };
+
+    window.addEventListener("contextmenu", onContextMenu);
+    window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", hideMenu);
+    window.addEventListener("scroll", hideMenu, true);
+
+    return () => {
+      window.removeEventListener("contextmenu", onContextMenu);
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", hideMenu);
+      window.removeEventListener("scroll", hideMenu, true);
+    };
+  }, []);
 
   const resetToEmpty = useCallback(() => {
     setSelected(null);
@@ -332,6 +402,96 @@ export default function App() {
     setSettingsOpen(true);
   }, []);
 
+  const focusTextTarget = useCallback(() => {
+    const target = textMenuTargetRef.current;
+    if (!target) return;
+    target.focus();
+  }, []);
+
+  const runTextAction = useCallback(async (action: "cut" | "copy" | "paste" | "selectAll") => {
+    const target = textMenuTargetRef.current;
+    if (!target) return;
+
+    focusTextTarget();
+
+    const isInput = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+    const isCm = target.classList.contains("cm-editor") || !!target.closest(".cm-editor");
+
+    if (action === "selectAll") {
+      if (isInput) {
+        target.select();
+      } else if (isCm) {
+        const el = target.classList.contains("cm-editor") ? target : target.closest(".cm-editor") as HTMLElement;
+        const cm = (el as any).cmView?.view;
+        if (cm) {
+          cm.dispatch({ selection: { anchor: 0, head: cm.state.doc.length } });
+        }
+      } else {
+        document.execCommand("selectAll");
+      }
+      setTextMenu((prev) => ({ ...prev, visible: false }));
+      return;
+    }
+
+    if (action === "paste") {
+      const txt = await readText().catch(() => "");
+      if (txt) {
+        if (isInput) {
+          const start = target.selectionStart ?? target.value.length;
+          const end = target.selectionEnd ?? target.value.length;
+          target.setRangeText(txt, start, end, "end");
+          target.dispatchEvent(new Event("input", { bubbles: true }));
+        } else if (isCm) {
+          const el = target.classList.contains("cm-editor") ? target : target.closest(".cm-editor") as HTMLElement;
+          const cm = (el as any).cmView?.view;
+          if (cm) cm.dispatch(cm.state.replaceSelection(txt));
+        } else {
+          document.execCommand("insertText", false, txt);
+        }
+      }
+      setTextMenu((prev) => ({ ...prev, visible: false }));
+      return;
+    }
+
+    if (isInput) {
+      const start = target.selectionStart ?? 0;
+      const end = target.selectionEnd ?? 0;
+      const selected = target.value.slice(start, end);
+      if (action === "copy") {
+        if (selected) await writeText(selected).catch(() => {});
+      } else if (action === "cut") {
+        if (selected) {
+          await writeText(selected).catch(() => {});
+          target.setRangeText("", start, end, "start");
+          target.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      }
+      setTextMenu((prev) => ({ ...prev, visible: false }));
+      return;
+    }
+
+    if (isCm) {
+      const el = target.classList.contains("cm-editor") ? target : target.closest(".cm-editor") as HTMLElement;
+      const cm = (el as any).cmView?.view;
+      if (cm) {
+        const selected = cm.state.sliceDoc(cm.state.selection.main.from, cm.state.selection.main.to);
+        if (action === "copy") {
+          if (selected) await writeText(selected).catch(() => {});
+        } else if (action === "cut") {
+          if (selected) {
+            await writeText(selected).catch(() => {});
+            cm.dispatch(cm.state.replaceSelection(""));
+          }
+        }
+      }
+      setTextMenu((prev) => ({ ...prev, visible: false }));
+      return;
+    }
+
+    document.execCommand(action);
+    setTextMenu((prev) => ({ ...prev, visible: false }));
+  }, [focusTextTarget]);
+
   return (
     <>
       <Dialog ref={dialogRef} theme={theme} />
@@ -387,6 +547,21 @@ export default function App() {
         </div>
       </div>
       </div>
+
+      {textMenu.visible && (
+        <div
+          ref={textMenuRef}
+          className="text-context-menu"
+          style={{ left: textMenu.x, top: textMenu.y }}
+          role="menu"
+        >
+          <button type="button" className="text-context-item" onClick={() => runTextAction("cut")}>剪切</button>
+          <button type="button" className="text-context-item" onClick={() => runTextAction("copy")}>复制</button>
+          <button type="button" className="text-context-item" onClick={() => runTextAction("paste")}>粘贴</button>
+          <div className="text-context-divider" />
+          <button type="button" className="text-context-item" onClick={() => runTextAction("selectAll")}>全选</button>
+        </div>
+      )}
     </>
   );
 }
