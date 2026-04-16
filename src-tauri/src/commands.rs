@@ -168,43 +168,26 @@ pub fn get_system_theme(app: AppHandle) -> Result<String, String> {
 
 #[command]
 pub fn get_system_locale() -> String {
-    // Detect Windows system language via environment variable
-    #[cfg(windows)]
-    {
-        use std::process::Command;
-        if let Ok(output) = Command::new("powershell")
-            .args(["-NoProfile", "-Command", "(Get-Culture).TwoLetterISOLanguageName"])
-            .output()
-        {
-            let lang = String::from_utf8_lossy(&output.stdout).trim().to_lowercase();
-            if lang == "zh" {
-                return "zh".to_string();
-            } else if lang == "en" {
-                return "en".to_string();
-            }
+    if let Some(locale) = sys_locale::get_locale() {
+        let locale = locale.to_lowercase();
+        if locale.starts_with("zh") {
+            return "zh".to_string();
         }
-        // Fallback: check LANG environment variable
-        if let Ok(lang) = std::env::var("LANG") {
-            if lang.starts_with("zh") {
-                return "zh".to_string();
-            }
+        if locale.starts_with("en") {
+            return "en".to_string();
         }
-        // Fallback: check LC_ALL
-        if let Ok(lang) = std::env::var("LC_ALL") {
-            if lang.starts_with("zh") {
-                return "zh".to_string();
-            }
-        }
-        "en".to_string()
     }
-    #[cfg(not(windows))]
-    {
-        if let Ok(lang) = std::env::var("LANG") {
-            if lang.starts_with("zh") {
-                return "zh".to_string();
-            }
+
+    if let Ok(lang) = std::env::var("LANG") {
+        let lang = lang.to_lowercase();
+        if lang.starts_with("zh") {
+            return "zh".to_string();
         }
-        "en".to_string()
+        if lang.starts_with("en") {
+            return "en".to_string();
+        }
     }
+
+    "en".to_string()
 }
 

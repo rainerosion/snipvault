@@ -33,6 +33,14 @@ fn build_tray_menu(app: &AppHandle, auto_start: bool) -> tauri::Result<tauri::me
         .build()
 }
 
+fn reveal_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 fn build_tray(app: &AppHandle, auto_start: bool) -> tauri::Result<TrayIcon> {
     let menu = build_tray_menu(app, auto_start)?;
 
@@ -48,25 +56,16 @@ fn build_tray(app: &AppHandle, auto_start: bool) -> tauri::Result<TrayIcon> {
                 ..
             } = event
             {
-                if let Some(window) = tray.app_handle().get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                reveal_main_window(tray.app_handle());
             }
         })
         .on_menu_event(|app, event| {
             match event.id().as_ref() {
                 "show" => {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
+                    reveal_main_window(app);
                 }
                 "sync" => {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
+                    reveal_main_window(app);
                     let app_handle = app.clone();
                     std::thread::spawn(move || {
                         match snipvault::webdav::sync_merge() {
@@ -90,9 +89,8 @@ fn build_tray(app: &AppHandle, auto_start: bool) -> tauri::Result<TrayIcon> {
                 }
                 "settings" => {
                     // Directly open settings panel in the frontend
+                    reveal_main_window(app);
                     if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
                         let _ = window.eval("if(window.__openSettings)window.__openSettings()");
                     }
                 }
@@ -115,9 +113,8 @@ fn build_tray(app: &AppHandle, auto_start: bool) -> tauri::Result<TrayIcon> {
                                         }
                                     }
                                 }
+                                reveal_main_window(&app_handle);
                                 if let Some(window) = app_handle.get_webview_window("main") {
-                                    let _ = window.show();
-                                    let _ = window.set_focus();
                                     let _ = window.emit("autostart-toggled", new_val);
                                 }
                             }

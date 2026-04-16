@@ -1,4 +1,8 @@
+use once_cell::sync::OnceCell;
 use std::path::{Path, PathBuf};
+
+static INSTALLED: OnceCell<bool> = OnceCell::new();
+static DATA_DIR: OnceCell<PathBuf> = OnceCell::new();
 
 /// Detects whether the app is running in "installed" or "portable" mode.
 /// Returns "installed" if the app has an MSI/NSIS uninstall entry in the registry,
@@ -13,6 +17,10 @@ pub fn get_app_mode() -> &'static str {
 }
 
 fn is_installed() -> bool {
+    *INSTALLED.get_or_init(detect_installed)
+}
+
+fn detect_installed() -> bool {
     // Check 1: registry uninstall key (reliable for MSI/NSIS installs)
     if is_registered_install() {
         return true;
@@ -31,57 +39,26 @@ fn is_installed() -> bool {
 
 #[cfg(windows)]
 fn is_registered_install() -> bool {
-    use std::process::Command;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::{HKEY, RegKey};
 
-    // Check the NSIS uninstall location (uses productName from tauri.conf.json)
-    let nsis_check = Command::new("reg")
-        .args([
-            "query",
-            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SnipVault",
-            "/v",
-            "UninstallString",
-        ])
-        .output();
-
-    if let Ok(output) = nsis_check {
-        if output.status.success() {
-            return true;
-        }
+    fn has_uninstall_entry(hkey: HKEY, subkey: &str) -> bool {
+        let root = RegKey::predef(hkey);
+        root.open_subkey(subkey)
+            .and_then(|k| k.get_value::<String, _>("UninstallString"))
+            .is_ok()
     }
 
-    // Check HKCU as well (NSIS sometimes installs per-user here)
-    let nsis_hkcu = Command::new("reg")
-        .args([
-            "query",
-            r"HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SnipVault",
-            "/v",
-            "UninstallString",
-        ])
-        .output();
-
-    if let Ok(output) = nsis_hkcu {
-        if output.status.success() {
-            return true;
-        }
-    }
-
-    // Also check by bundle identifier from tauri.conf.json
-    let bundle_check = Command::new("reg")
-        .args([
-            "query",
-            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\cn.rainss.snipvault",
-            "/v",
-            "UninstallString",
-        ])
-        .output();
-
-    if let Ok(output) = bundle_check {
-        if output.status.success() {
-            return true;
-        }
-    }
-
-    false
+    has_uninstall_entry(
+        HKEY_LOCAL_MACHINE,
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SnipVault",
+    ) || has_uninstall_entry(
+        HKEY_CURRENT_USER,
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SnipVault",
+    ) || has_uninstall_entry(
+        HKEY_LOCAL_MACHINE,
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\cn.rainss.snipvault",
+    )
 }
 
 #[cfg(not(windows))]
@@ -122,14 +99,9 @@ fn can_write_dir(dir: &Path) -> bool {
     }
 }
 
-/// Returns the data directory for the current app mode.
-/// - Installed: prefer <exe_dir>/data, fallback to %APPDATA%/SnipVault/ (Roaming) when not writable
-/// - Portable: %APPDATA%/SnipVault/ (Roaming)
-pub fn get_data_dir() -> PathBuf {
+fn resolve_data_dir() -> PathBuf {
     let mode = get_app_mode();
     let app_data_dir = roaming_app_data_dir();
-
-    log::info!("get_data_dir: app_mode = {}", mode);
 
     if mode == "installed" {
         if let Ok(exe_path) = std::env::current_exe() {
@@ -152,19 +124,22 @@ pub fn get_data_dir() -> PathBuf {
     app_data_dir
 }
 
+/// Returns the data directory for the current app mode.
+/// - Installed: prefer <exe_dir>/data, fallback to %APPDATA%/SnipVault/ (Roaming) when not writable
+/// - Portable: %APPDATA%/SnipVault/ (Roaming)
+pub fn get_data_dir() -> PathBuf {
+    DATA_DIR.get_or_init(resolve_data_dir).clone()
+}
+
 pub fn get_db_path() -> PathBuf {
     get_data_dir().join("snippets.db")
 }
 
 pub fn get_settings_dir() -> PathBuf {
     // Settings always go to the data dir
-    let dir = get_data_dir();
-    log::info!("get_settings_dir() = {:?}", dir);
-    dir
+    get_data_dir()
 }
 
 pub fn get_settings_path() -> PathBuf {
-    let path = get_settings_dir().join("settings.json");
-    log::info!("get_settings_path() = {:?}", path);
-    path
+    get_settings_dir().join("settings.json")
 }
