@@ -22,19 +22,6 @@ import { Snippet, SnippetForm } from "../types";
 import { LANGUAGES } from "../utils/languages";
 import { LanguageContext } from "../context/LanguageContext";
 
-interface SnippetEditorProps {
-  snippet: Snippet | null;
-  isNew: boolean;
-  form: SnippetForm;
-  onChange: (f: Partial<SnippetForm>) => void;
-  onSave: () => void;
-  onCancel: () => void;
-  theme: "dark" | "light";
-  saving: boolean;
-  isDirty: boolean;
-  tagOptions: string[];
-}
-
 // ─── Syntax palettes ─────────────────────────────────────────────────────────
 
 const darkHighlight = syntaxHighlighting(HighlightStyle.define([
@@ -78,6 +65,93 @@ const lightHighlight = syntaxHighlighting(HighlightStyle.define([
   { tag: t.number, color: "#0550ae" },
   { tag: t.invalid, color: "#cf222e" },
 ]));
+
+// ─── Token → color mapping (for Canvas minimap) ─────────────────────────────
+
+// Build a flat tag→color map from the HighlightStyle definitions
+const DARK_TOKEN_COLORS: Record<string, string> = {
+  keyword: "#ff7b72",
+  name: "#ffa657",
+  deleted: "#ffa657",
+  character: "#ffa657",
+  propertyName: "#ffa657",
+  macroName: "#ffa657",
+  function: "#d2a8ff",
+  labelName: "#7ee787",
+  color: "#ffa657",
+  constant: "#ffa657",
+  separator: "#c9d1d9",
+  typeName: "#79c0ff",
+  className: "#79c0ff",
+  number: "#79c0ff",
+  changed: "#79c0ff",
+  annotation: "#79c0ff",
+  modifier: "#79c0ff",
+  self: "#79c0ff",
+  namespace: "#79c0ff",
+  operator: "#ff7b72",
+  operatorKeyword: "#ff7b72",
+  url: "#ff7b72",
+  escape: "#ff7b72",
+  regexp: "#ff7b72",
+  link: "#ff7b72",
+  meta: "#8b949e",
+  comment: "#8b949e",
+  atom: "#ff7b72",
+  bool: "#ff7b72",
+  processingInstruction: "#a5d6ff",
+  string: "#a5d6ff",
+  inserted: "#a5d6ff",
+  invalid: "#ff7b72",
+  heading: "#79c0ff",
+  strong: "#c9d1d9",
+  emphasis: "#c9d1d9",
+  strikethrough: "#c9d1d9",
+};
+
+const LIGHT_TOKEN_COLORS: Record<string, string> = {
+  keyword: "#cf222e",
+  name: "#953800",
+  deleted: "#953800",
+  character: "#953800",
+  propertyName: "#953800",
+  macroName: "#953800",
+  function: "#8250df",
+  labelName: "#116329",
+  color: "#953800",
+  constant: "#953800",
+  separator: "#24292f",
+  typeName: "#0550ae",
+  className: "#0550ae",
+  number: "#0550ae",
+  changed: "#0550ae",
+  annotation: "#0550ae",
+  modifier: "#0550ae",
+  self: "#0550ae",
+  namespace: "#0550ae",
+  operator: "#cf222e",
+  operatorKeyword: "#cf222e",
+  url: "#cf222e",
+  escape: "#cf222e",
+  regexp: "#cf222e",
+  link: "#cf222e",
+  meta: "#6e7781",
+  comment: "#6e7781",
+  atom: "#cf222e",
+  bool: "#cf222e",
+  processingInstruction: "#0a3069",
+  string: "#0a3069",
+  inserted: "#0a3069",
+  invalid: "#cf222e",
+  heading: "#0550ae",
+  strong: "#24292f",
+  emphasis: "#24292f",
+  strikethrough: "#24292f",
+};
+
+// Default line color when no token matches
+const DEFAULT_DARK_LINE = "#30363d";
+const DEFAULT_LIGHT_LINE = "#d0d7de";
 
 // ─── Language extension ─────────────────────────────────────────────────────
 
@@ -134,58 +208,7 @@ function buildMainExtensions(isDark: boolean, lang: string) {
   ];
 }
 
-// ─── Glance (minimap) extensions ────────────────────────────────────────────
-
-function buildGlanceExtensions(isDark: boolean, lang: string) {
-  const bg = isDark ? "#0d1117" : "#ffffff";
-  const fg = isDark ? "#8b949e" : "#6e7781";
-  const cursor = isDark ? "#38bdf8" : "#0284c7";
-  const selBg = isDark ? "rgba(56,189,248,0.35)" : "rgba(2,132,199,0.3)";
-
-  const glanceLayout = EditorView.theme({
-    "&": {
-      position: "absolute", top: "0", bottom: "0", left: "0", right: "0",
-      background: `${bg} !important`,
-      fontSize: "13.5px",
-    },
-    ".cm-scroller": {
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
-      overflowY: "auto !important",
-      overflowX: "auto !important",
-      height: "100%",
-      display: "block",
-    },
-    ".cm-content": {
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
-      caretColor: cursor,
-    },
-    ".cm-cursor, .cm-dropCursor": { borderLeftColor: cursor },
-    ".cm-selectionBackground": { background: `${selBg} !important` },
-    "&.cm-focused .cm-selectionBackground": { background: `${selBg} !important` },
-    ".cm-gutters": {
-      background: `${bg} !important`,
-      borderRight: `1px solid ${isDark ? "#21262d" : "#d0d7de"}`,
-      color: `${fg} !important`,
-    },
-    ".cm-activeLineGutter": { background: "transparent !important" },
-    ".cm-activeLine": { background: "transparent !important" },
-    // Hide fold gutter, line numbers too cluttering for minimap
-    ".cm-gutterElement": { display: "none !important" },
-    ".cm-lineNumbers .cm-gutterElement": { display: "none !important" },
-    ".cm-foldGutter .cm-gutterElement": { display: "none !important" },
-  }, { dark: isDark });
-
-  return [
-    EditorView.editable.of(false),
-    EditorView.lineWrapping,
-    getLangExtension(lang),
-    isDark ? githubDark : githubLight,
-    glanceLayout,
-    isDark ? darkHighlight : lightHighlight,
-  ];
-}
-
-// ─── Shadow DOM injection (main editor) ────────────────────────────────────
+// ─── Shadow DOM injection ────────────────────────────────────────────────────
 
 function injectShadowStyles(isDark: boolean) {
   const bg = isDark ? "#0d1117" : "#ffffff";
@@ -212,6 +235,147 @@ function injectShadowStyles(isDark: boolean) {
   ].join("");
 }
 
+// ─── MiniMap component (Canvas-based) ───────────────────────────────────────
+
+interface MiniMapProps {
+  content: string;
+  isDark: boolean;
+  mainScrollEl: HTMLElement | null;
+  width: number;
+}
+
+const GLANCE_LINE_H = 4; // line height in px in the minimap
+const GLANCE_PADDING_X = 4; // horizontal padding inside minimap
+
+// Color a line segment based on character type (no full parser needed for minimap)
+function getColorByChar(ch: string, isDark: boolean): string {
+  if (/[\s]/.test(ch)) return isDark ? DEFAULT_DARK_LINE : DEFAULT_LIGHT_LINE;
+  if (/[{}()\[\]]/.test(ch)) return isDark ? "#ff7b72" : "#cf222e";
+  if (/[=+\-*/<>!&|?:;,.]/.test(ch)) return isDark ? "#ff7b72" : "#cf222e";
+  if (/['"`]/.test(ch)) return isDark ? "#a5d6ff" : "#0a3069";
+  if (/[0-9]/.test(ch)) return isDark ? "#79c0ff" : "#0550ae";
+  if (/[A-Z]/.test(ch)) return isDark ? "#79c0ff" : "#0550ae";
+  return isDark ? "#c9d1d9" : "#24292f";
+}
+
+function tokenizeForMinimap(lineText: string, isDark: boolean): { text: string; color: string }[] {
+  if (!lineText.trim()) return [];
+  const segments: { text: string; color: string }[] = [];
+  let currentColor = "";
+  let currentText = "";
+  for (let i = 0; i < lineText.length; i++) {
+    const ch = lineText[i];
+    const color = getColorByChar(ch, isDark);
+    if (color !== currentColor) {
+      if (currentText) segments.push({ text: currentText, color: currentColor });
+      currentColor = color;
+      currentText = ch;
+    } else {
+      currentText += ch;
+    }
+  }
+  if (currentText) segments.push({ text: currentText, color: currentColor });
+  return segments.length > 0 ? segments : [{ text: lineText, color: isDark ? DEFAULT_DARK_LINE : DEFAULT_LIGHT_LINE }];
+}
+
+function MiniMap({ content, isDark, mainScrollEl, width }: MiniMapProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const paneRef = useRef<HTMLDivElement>(null);
+
+  const bg = isDark ? "#0d1117" : "#ffffff";
+  const viewportBg = isDark ? "rgba(56,189,248,0.12)" : "rgba(2,132,199,0.10)";
+  const viewportBorder = isDark ? "rgba(56,189,248,0.45)" : "rgba(2,132,199,0.40)";
+
+  // Draw the minimap canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const pane = paneRef.current;
+    if (!canvas || !pane) return;
+
+    const lines = content.split("\n");
+    if (lines.length === 1 && !lines[0].trim()) {
+      // Empty content — just clear
+      const ctx = canvas.getContext("2d")!;
+      ctx.clearRect(0, 0, width, pane.clientHeight);
+      return;
+    }
+
+    const totalH = lines.length * GLANCE_LINE_H;
+    const paneH = pane.clientHeight;
+    const availW = width - GLANCE_PADDING_X * 2;
+    const maxLen = lines.reduce((m, l) => Math.max(m, l.length), 1);
+    const scaleX = availW / maxLen;
+
+    canvas.width = width;
+    canvas.height = Math.max(totalH, paneH);
+    const ctx = canvas.getContext("2d")!;
+    ctx.clearRect(0, 0, width, canvas.height);
+
+    lines.forEach((lineText, i) => {
+      const y = i * GLANCE_LINE_H;
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, y, width, GLANCE_LINE_H);
+      if (!lineText.trim()) return;
+
+      const segments = tokenizeForMinimap(lineText, isDark);
+      let x = GLANCE_PADDING_X;
+
+      for (const seg of segments) {
+        const segW = Math.min(seg.text.length * scaleX, width - x - 1);
+        if (segW > 0.5) {
+          ctx.fillStyle = seg.color;
+          const barH = GLANCE_LINE_H - 1;
+          ctx.beginPath();
+          ctx.roundRect(x, y + 0.5, segW, barH, 1);
+          ctx.fill();
+          x += segW;
+          if (x >= width - GLANCE_PADDING_X) break;
+        }
+      }
+    });
+
+    // Update viewport overlay
+    const vp = viewportRef.current;
+    const main = mainScrollEl;
+    if (vp && main && main.scrollHeight > main.clientHeight) {
+      const scrollable = main.scrollHeight - main.clientHeight;
+      const ratio = main.scrollTop / scrollable;
+      const vpTotalH = Math.max(totalH, paneH);
+      const vpPaneH = paneH;
+      const vpScrollable = vpTotalH - vpPaneH;
+      if (vpScrollable > 0) {
+        vp.style.top = `${ratio * vpScrollable}px`;
+        vp.style.height = `${Math.max(20, (main.clientHeight / main.scrollHeight) * vpPaneH)}px`;
+        vp.style.display = "";
+      } else {
+        vp.style.display = "none";
+      }
+    } else if (viewportRef.current) {
+      viewportRef.current.style.display = "none";
+    }
+  }, [content, width, bg, isDark, mainScrollEl]);
+
+  return (
+    <div
+      ref={paneRef}
+      className="minimap-pane"
+      style={{ width, background: bg }}
+    >
+      <canvas
+        ref={canvasRef}
+        className="minimap-canvas"
+        style={{ display: "block" }}
+      />
+      <div
+        ref={viewportRef}
+        className="minimap-viewport"
+        style={{ background: viewportBg, borderColor: viewportBorder }}
+      />
+    </div>
+  );
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function SnippetEditor({
@@ -224,24 +388,20 @@ export function SnippetEditor({
   // ── Refs ──────────────────────────────────────────────────────────────────
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const cmRef = useRef<EditorView | null>(null);
-  const glanceRef = useRef<EditorView | null>(null);
   const mainScrollerRef = useRef<HTMLElement | null>(null);
+  const minimapTriggerRef = useRef(0); // increments to force minimap redraw
 
   // ── State ─────────────────────────────────────────────────────────────────
   const [copied, setCopied] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
-  const [glanceWidth, setGlanceWidth] = useState(150);
+  const [minimapWidth, setMinimapWidth] = useState(120);
   const [isDragging, setIsDragging] = useState(false);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const isDark = theme === "dark";
   const mainExtensions = useMemo(
     () => buildMainExtensions(isDark, form.language),
-    [isDark, form.language]
-  );
-  const glanceExtensions = useMemo(
-    () => buildGlanceExtensions(isDark, form.language),
     [isDark, form.language]
   );
 
@@ -265,7 +425,11 @@ export function SnippetEditor({
         sc.style.overflowY = "auto";
         sc.style.overflowX = "auto";
         sc.style.height = "100%";
-        mainScrollerRef.current = sc;
+        if (mainScrollerRef.current !== sc) {
+          mainScrollerRef.current = sc;
+          // Force minimap redraw when scroller reference stabilizes
+          minimapTriggerRef.current++;
+        }
       }
     };
     apply();
@@ -275,49 +439,16 @@ export function SnippetEditor({
     return () => ro.disconnect();
   }, [theme]);
 
-  // ── Glance height fixup ────────────────────────────────────────────────────
-  useEffect(() => {
-    const wrap = editorWrapRef.current;
-    if (!wrap) return;
-    const apply = () => {
-      const view = glanceRef.current;
-      if (!view) return;
-      const px = wrap.clientHeight;
-      if (px <= 0) return;
-      (view.dom as HTMLElement).style.height = `${px}px`;
-    };
-    apply();
-    requestAnimationFrame(apply);
-  }, [glanceWidth]);
-
-  // ── Scroll sync: main → glance ─────────────────────────────────────────────
-  const syncGlanceScroll = useCallback(() => {
-    const main = mainScrollerRef.current;
-    const glance = glanceRef.current;
-    if (!main || !glance) return;
-
-    const mainScrollable = main.scrollHeight - main.clientHeight;
-    const glanceScrollable = glance.scrollHeight - glance.clientHeight;
-
-    if (mainScrollable <= 0 || glanceScrollable <= 0) return;
-
-    const ratio = main.scrollTop / mainScrollable;
-    glance.scrollTop = ratio * glanceScrollable;
-  }, []);
-
-  // ── Glance divider drag ───────────────────────────────────────────────────
+  // ── Minimap divider drag ───────────────────────────────────────────────────
   const handleDividerPointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     setIsDragging(true);
     const startX = e.clientX;
-    const startWidth = glanceWidth;
-    const wrap = editorWrapRef.current;
-    if (!wrap) return;
+    const startWidth = minimapWidth;
 
     const onMove = (ev: PointerEvent) => {
       const delta = startX - ev.clientX;
-      const newWidth = Math.min(420, Math.max(80, startWidth + delta));
-      setGlanceWidth(newWidth);
+      setMinimapWidth((w) => Math.min(420, Math.max(80, startWidth + delta)));
     };
     const onUp = () => {
       setIsDragging(false);
@@ -326,7 +457,7 @@ export function SnippetEditor({
     };
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
-  }, [glanceWidth]);
+  }, [minimapWidth]);
 
   // ── Tag helpers ────────────────────────────────────────────────────────────
   const filteredTagOptions = useMemo(() => {
@@ -455,14 +586,16 @@ export function SnippetEditor({
         </div>
       </div>
 
-      {/* Editor + CodeGlance split */}
+      {/* Editor + MiniMap split */}
       <div className="cm-editor-split">
         {/* Main editor */}
         <div className="cm-main-pane" ref={editorWrapRef}>
           <CodeMirror
             value={form.content}
             extensions={mainExtensions}
-            onChange={(val) => onChange({ content: val })}
+            onChange={(val) => {
+              onChange({ content: val });
+            }}
             onCreateEditor={(view) => {
               cmRef.current = view;
               const sr = (view.dom as HTMLElement).shadowRoot;
@@ -476,7 +609,6 @@ export function SnippetEditor({
                 sc.style.overflowX = "auto";
                 sc.style.height = "100%";
                 mainScrollerRef.current = sc;
-                sc.addEventListener("scroll", syncGlanceScroll, { passive: true });
               }
             }}
             basicSetup={{
@@ -493,24 +625,15 @@ export function SnippetEditor({
           onPointerDown={handleDividerPointerDown}
         />
 
-        {/* CodeGlance (minimap) */}
-        <div className="codeglance-pane" style={{ width: glanceWidth }}>
-          <CodeMirror
-            value={form.content}
-            extensions={glanceExtensions}
-            onCreateEditor={(view) => {
-              glanceRef.current = view;
-              const sr = (view.dom as HTMLElement).shadowRoot;
-              if (!sr) return;
-              let s = sr.querySelector("[data-snpt-glance]") as HTMLStyleElement | null;
-              if (!s) { s = document.createElement("style"); s.setAttribute("data-snpt-glance", ""); sr.appendChild(s); }
-              s.textContent = injectShadowStyles(isDark);
-              const sc = sr.querySelector(".cm-scroller") as HTMLElement | null;
-              if (sc) { sc.style.overflowY = "auto"; sc.style.overflowX = "hidden"; sc.style.height = "100%"; }
-            }}
-            basicSetup={false}
-          />
-        </div>
+        {/* MiniMap */}
+        <MiniMap
+          key={`${minimapWidth}-${form.content.length}`}
+          content={form.content}
+          language={form.language}
+          isDark={isDark}
+          mainScrollEl={mainScrollerRef.current}
+          width={minimapWidth}
+        />
       </div>
 
       {/* Toolbar */}
