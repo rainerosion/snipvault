@@ -1352,11 +1352,17 @@ body {
 
 /* ── Canvas MiniMap ───────────────────────────────────────────────────────── */
 
-.minimap-pane {
+.minimap-wrap {
   flex-shrink: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  display: flex;
+  min-height: 0;
   border-left: 1px solid var(--border);
+}
+
+.minimap-pane {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   position: relative;
   user-select: none;
 }

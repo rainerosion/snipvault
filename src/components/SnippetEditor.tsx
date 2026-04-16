@@ -183,7 +183,6 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMap
   const paneRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const syncingFromMainRef = useRef(false);
   const syncingFromMiniRef = useRef(false);
   const draggingViewportRef = useRef<{ pointerId: number; pointerOffsetInViewport: number } | null>(null);
   const suppressClickRef = useRef(false);
@@ -257,9 +256,7 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMap
 
     const miniScrollable = Math.max(0, pane.scrollHeight - pane.clientHeight);
     if (miniScrollable > 0 && !syncingFromMiniRef.current) {
-      syncingFromMainRef.current = true;
       pane.scrollTop = ratio * miniScrollable;
-      requestAnimationFrame(() => { syncingFromMainRef.current = false; });
     }
 
     if (!canScroll) {
@@ -299,24 +296,6 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMap
     return () => main.removeEventListener("scroll", onMainScroll);
   }, [mainScrollEl, syncViewportFromMain]);
 
-  const onMiniScroll = useCallback(() => {
-    const pane = paneRef.current;
-    const main = mainScrollEl;
-    if (!pane || !main) return;
-    if (syncingFromMainRef.current || draggingViewportRef.current) return;
-
-    const miniScrollable = Math.max(0, pane.scrollHeight - pane.clientHeight);
-    if (miniScrollable <= 0) return;
-
-    const ratio = pane.scrollTop / miniScrollable;
-    const mainScrollable = Math.max(0, main.scrollHeight - main.clientHeight);
-
-    syncingFromMiniRef.current = true;
-    scrollMainTo(ratio * mainScrollable);
-    syncViewportFromMain();
-    requestAnimationFrame(() => { syncingFromMiniRef.current = false; });
-  }, [mainScrollEl, scrollMainTo, syncViewportFromMain]);
-
   const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
@@ -340,6 +319,7 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMap
     const visibleTrackH = Math.max(1, pane.clientHeight - Math.min(vpH, pane.clientHeight));
     const ratio = Math.max(0, Math.min(1, (clickY - vpH / 2) / visibleTrackH));
     scrollMainTo(ratio * mainScrollable);
+
     syncViewportFromMain();
   }, [mainScrollEl, scrollMainTo, syncViewportFromMain, totalH]);
 
@@ -418,23 +398,25 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMap
   }, [mainScrollEl, scrollMainTo, syncViewportFromMain, totalH]);
 
   return (
-    <div
-      ref={paneRef}
-      className="minimap-pane"
-      style={{ width, background: bg }}
-      onScroll={onMiniScroll}
-      onClick={handleClick}
-    >
-      <div className="minimap-content" style={{ height: totalH, minHeight: "100%" }}>
-        <canvas ref={canvasRef} className="minimap-canvas" style={{ display: "block" }} />
+    <div className="minimap-wrap" style={{ width }}>
+      <div
+        ref={paneRef}
+        className="minimap-pane"
+        style={{ background: bg }}
+        onClick={handleClick}
+      >
+        <div className="minimap-content" style={{ height: totalH, minHeight: "100%" }}>
+          <canvas ref={canvasRef} className="minimap-canvas" style={{ display: "block" }} />
 
-        <div
-          ref={viewportRef}
-          className={`minimap-viewport ${isViewportDragging ? "dragging" : ""}`}
-          style={{ background: viewportBg, borderColor: viewportBorder }}
-          onPointerDown={handleViewportPointerDown}
-        />
+          <div
+            ref={viewportRef}
+            className={`minimap-viewport ${isViewportDragging ? "dragging" : ""}`}
+            style={{ background: viewportBg, borderColor: viewportBorder }}
+            onPointerDown={handleViewportPointerDown}
+          />
+        </div>
       </div>
+
     </div>
   );
 }
@@ -647,7 +629,6 @@ export function SnippetEditor({
         <div className={`codeglance-divider ${isDragging ? "active" : ""}`} onPointerDown={handleDividerPointerDown} />
 
         <MiniMap
-          key={`${minimapWidth}-${form.content.length}`}
           content={form.content}
           isDark={isDark}
           width={minimapWidth}
