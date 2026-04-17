@@ -116,6 +116,8 @@ Configure any WebDAV-compatible server in **Settings → WebDAV Sync**:
 - **Username** / **Password or API Key**
 - Enable **Auto-sync** and set the interval (5 min / 15 min / 30 min / 1 hour / 2 hours)
 
+> Tip: use a writable WebDAV directory URL (not service homepage URL). On sync, SnipVault will automatically prepare the `snippets/` directory when the provider allows it.
+
 Sync is incremental: only newer snippets (by `updated_at`) are merged from both sides.
 
 ### Keyboard Shortcuts
@@ -273,6 +275,8 @@ npm run tauri build
 - **服务器地址** — 例如 `https://your-server.com/remote.php/dav/files/username/`
 - **用户名** / **密码或 API Key**
 - 开启 **自动同步** 并设置间隔（5 分钟 / 15 分钟 / 30 分钟 / 1 小时 / 2 小时）
+
+> 提示：请填写“可写的 WebDAV 目录 URL”，不要填网盘首页地址。同步时，SnipVault 会在服务端允许的情况下自动准备 `snippets/` 目录。
 
 同步为增量合并：仅传输双方中较新的片段（按 `updated_at` 时间戳判断）。
 

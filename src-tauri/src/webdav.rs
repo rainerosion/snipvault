@@ -43,6 +43,59 @@ fn snippet_path(id: &str) -> String {
     format!("snippets/{}.json", id)
 }
 
+fn snippets_collection_path() -> &'static str {
+    "snippets"
+}
+
+fn with_basic_auth(
+    req: reqwest::blocking::RequestBuilder,
+    user: &str,
+    pass: &str,
+) -> reqwest::blocking::RequestBuilder {
+    if user.is_empty() {
+        req
+    } else {
+        req.basic_auth(user, Some(pass))
+    }
+}
+
+fn format_http_error(op: &str, status: reqwest::StatusCode, url: &str, body: String) -> String {
+    let mut message = format!("{}失败 (HTTP {}): {}", op, status, body);
+
+    if matches!(status.as_u16(), 401 | 403) {
+        message.push_str(&format!(" | URL: {}", url));
+        message.push_str(" | 可能原因: WebDAV 地址不是可写目录，或当前账号对该目录无写权限");
+    }
+
+    message
+}
+
+fn ensure_snippets_collection(
+    client: &reqwest::blocking::Client,
+    base: &str,
+    user: &str,
+    pass: &str,
+) -> Result<(), String> {
+    let collection_url = format!("{}/{}/", base, snippets_collection_path());
+
+    let req = client.request(reqwest::Method::from_bytes(b"MKCOL").expect("valid MKCOL"), &collection_url);
+    let resp = with_basic_auth(req, user, pass)
+        .send()
+        .map_err(|e| format!("创建远端目录失败: {e}"))?;
+
+    let status = resp.status();
+    if status.is_success() || matches!(status.as_u16(), 405 | 409) {
+        return Ok(());
+    }
+
+    Err(format_http_error(
+        "创建远端目录",
+        status,
+        &collection_url,
+        resp.text().unwrap_or_default(),
+    ))
+}
+
 /// Per-snippet manifest entry
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct SnippetMeta {
@@ -61,16 +114,21 @@ pub struct Manifest {
 fn upload_snippet(client: &reqwest::blocking::Client, base: &str, snippet: &Snippet, user: &str, pass: &str) -> Result<(), String> {
     let json = serde_json::to_string_pretty(snippet).map_err(|e| format!("序列化失败: {e}"))?;
     let path = format!("{}/{}", base, snippet_path(&snippet.id));
-    let mut req = client.put(&path)
+    let req = client
+        .put(&path)
         .body(json)
         .header("Content-Type", "application/json");
-    if !user.is_empty() {
-        req = req.basic_auth(user, Some(pass));
-    }
-    let resp = req.send().map_err(|e| format!("上传失败: {e}"))?;
+    let resp = with_basic_auth(req, user, pass)
+        .send()
+        .map_err(|e| format!("上传失败: {e}"))?;
     let status = resp.status();
     if !status.is_success() && status.as_u16() != 201 && status.as_u16() != 204 {
-        return Err(format!("上传失败 (HTTP {}): {}", status, resp.text().unwrap_or_default()));
+        return Err(format_http_error(
+            "上传",
+            status,
+            &path,
+            resp.text().unwrap_or_default(),
+        ));
     }
     Ok(())
 }
@@ -98,16 +156,21 @@ fn download_snippet(client: &reqwest::blocking::Client, base: &str, id: &str, us
 fn upload_manifest(client: &reqwest::blocking::Client, base: &str, manifest: &Manifest, user: &str, pass: &str) -> Result<(), String> {
     let json = serde_json::to_string_pretty(manifest).map_err(|e| format!("序列化失败: {e}"))?;
     let path = format!("{}/{}", base, manifest_path());
-    let mut req = client.put(&path)
+    let req = client
+        .put(&path)
         .body(json)
         .header("Content-Type", "application/json");
-    if !user.is_empty() {
-        req = req.basic_auth(user, Some(pass));
-    }
-    let resp = req.send().map_err(|e| format!("上传清单失败: {e}"))?;
+    let resp = with_basic_auth(req, user, pass)
+        .send()
+        .map_err(|e| format!("上传清单失败: {e}"))?;
     let status = resp.status();
     if !status.is_success() && status.as_u16() != 201 && status.as_u16() != 204 {
-        return Err(format!("上传清单失败 (HTTP {}): {}", status, resp.text().unwrap_or_default()));
+        return Err(format_http_error(
+            "上传清单",
+            status,
+            &path,
+            resp.text().unwrap_or_default(),
+        ));
     }
     Ok(())
 }
@@ -164,6 +227,9 @@ pub fn sync_merge() -> Result<SyncResult, String> {
     let pass = &settings.webdav_password;
 
     log::info!("sync_merge: base_url = {}", base);
+
+    ensure_snippets_collection(&client, &base, user, pass)
+        .map_err(|e| format!("创建 snippets 目录失败: {e}"))?;
 
     // Step 1: Get all local snippets
     let local_snippets = db::get_all_for_upload().map_err(|e| format!("读取本地数据失败: {e}"))?;
