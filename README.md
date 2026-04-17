@@ -104,6 +104,8 @@ Download from the [Releases](https://github.com/rainerosion/snipvault/releases) 
 | Portable (default) | `%LOCALAPPDATA%/SnipVault/` (Windows) |
 | Installed (MSI/NSIS) | `<exe_dir>/data/` |
 
+If `<exe_dir>/data/` is not writable, SnipVault automatically falls back to `%APPDATA%/SnipVault/`.
+
 Files: `snippets.db` (SQLite), `settings.json`
 
 ### Configuration
@@ -116,7 +118,7 @@ Configure any WebDAV-compatible server in **Settings → WebDAV Sync**:
 - **Username** / **Password or API Key**
 - Enable **Auto-sync** and set the interval (5 min / 15 min / 30 min / 1 hour / 2 hours)
 
-> Tip: use a writable WebDAV directory URL (not service homepage URL). On sync, SnipVault will automatically prepare the `snippets/` directory when the provider allows it.
+> Tip: use a writable WebDAV directory URL (not service homepage URL). On sync, SnipVault will automatically prepare the `snipvault/` directory when the provider allows it.
 
 Sync is incremental: only newer snippets (by `updated_at`) are merged from both sides.
 
@@ -264,6 +266,8 @@ npm run tauri build
 | 便携模式（默认） | `%LOCALAPPDATA%/SnipVault/`（Windows）|
 | 安装模式（MSI/NSIS） | `<exe所在目录>/data/` |
 
+如果 `<exe所在目录>/data/` 不可写，SnipVault 会自动回退到 `%APPDATA%/SnipVault/`。
+
 存储文件：`snippets.db`（SQLite 数据库）、`settings.json`（配置文件）
 
 ### 配置说明
@@ -276,7 +280,7 @@ npm run tauri build
 - **用户名** / **密码或 API Key**
 - 开启 **自动同步** 并设置间隔（5 分钟 / 15 分钟 / 30 分钟 / 1 小时 / 2 小时）
 
-> 提示：请填写“可写的 WebDAV 目录 URL”，不要填网盘首页地址。同步时，SnipVault 会在服务端允许的情况下自动准备 `snippets/` 目录。
+> 提示：请填写“可写的 WebDAV 目录 URL”，不要填网盘首页地址。同步时，SnipVault 会在服务端允许的情况下自动准备 `snipvault/` 目录。
 
 同步为增量合并：仅传输双方中较新的片段（按 `updated_at` 时间戳判断）。
 

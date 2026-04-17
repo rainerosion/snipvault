@@ -36,15 +36,15 @@ fn base_url(url: &str) -> String {
 }
 
 fn manifest_path() -> &'static str {
-    "snippets/manifest.json"
+    "snipvault/manifest.json"
 }
 
 fn snippet_path(id: &str) -> String {
-    format!("snippets/{}.json", id)
+    format!("snipvault/{}.json", id)
 }
 
 fn snippets_collection_path() -> &'static str {
-    "snippets"
+    "snipvault"
 }
 
 fn with_basic_auth(
@@ -210,7 +210,7 @@ fn delete_snippet(client: &reqwest::blocking::Client, base: &str, id: &str, user
 }
 
 /// Per-snippet two-way merge sync.
-/// Each snippet lives in snippets/{id}.json, tracked by snippets/manifest.json.
+/// Each snippet lives in snipvault/{id}.json, tracked by snipvault/manifest.json.
 pub fn sync_merge() -> Result<SyncResult, String> {
     let settings = settings::get_settings();
     if settings.webdav_url.is_empty() {
@@ -229,8 +229,7 @@ pub fn sync_merge() -> Result<SyncResult, String> {
     log::info!("sync_merge: base_url = {}", base);
 
     ensure_snippets_collection(&client, &base, user, pass)
-        .map_err(|e| format!("创建 snippets 目录失败: {e}"))?;
-
+        .map_err(|e| format!("创建 snipvault 目录失败: {e}"))?;
     // Step 1: Get all local snippets
     let local_snippets = db::get_all_for_upload().map_err(|e| format!("读取本地数据失败: {e}"))?;
     let local_map: std::collections::HashMap<String, &Snippet> =
