@@ -563,7 +563,7 @@ body {
 
 .snippet-preview {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-primary);
   background: var(--bg-primary);
   border-radius: var(--radius-sm);
@@ -575,9 +575,16 @@ body {
   border: 1px solid var(--border);
 }
 
-/* Left sidebar snippet preview in dark mode - brighter text */
+/* Left sidebar snippet preview readability in dark mode */
 [data-theme="dark"] .snippet-preview {
   color: #d0d0e0 !important;
+}
+
+/* Left sidebar snippet preview readability in light mode */
+[data-theme="light"] .snippet-preview {
+  color: #0f172a !important;
+  background: #f3f6fb;
+  border-color: #cbd5e1;
 }
 
 /* Left sidebar items in dark mode - brighter text */

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useContext, lazy, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { EditorView } from "@codemirror/view";
 import { useTranslation } from "react-i18next";
 import { useSnippets } from "./hooks/useSnippets";
 import { useSettings, Settings as AppSettings } from "./hooks/useSettings";
@@ -16,7 +17,7 @@ import { ThemeContext } from "./main";
 const EMPTY_FORM: SnippetForm = {
   title: "",
   content: "",
-  language: "javascript",
+  language: "plaintext",
   description: "",
   tags: [],
   is_favorite: false,
@@ -425,24 +426,31 @@ export default function App() {
     target.focus();
   }, []);
 
+  const resolveCodeMirrorView = useCallback((target: HTMLElement): EditorView | null => {
+    try {
+      return EditorView.findFromDOM(target);
+    } catch {
+      return null;
+    }
+  }, []);
+
   const runTextAction = useCallback(async (action: "cut" | "copy" | "paste" | "selectAll") => {
     const target = textMenuTargetRef.current;
     if (!target) return;
 
     focusTextTarget();
 
-    const isInput = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
-    const isCm = target.classList.contains("cm-editor") || !!target.closest(".cm-editor");
+    const inputTarget = (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)
+      ? target
+      : null;
+    const cm = resolveCodeMirrorView(target);
+    if (cm) cm.focus();
 
     if (action === "selectAll") {
-      if (isInput) {
-        target.select();
-      } else if (isCm) {
-        const el = target.classList.contains("cm-editor") ? target : target.closest(".cm-editor") as HTMLElement;
-        const cm = (el as any).cmView?.view;
-        if (cm) {
-          cm.dispatch({ selection: { anchor: 0, head: cm.state.doc.length } });
-        }
+      if (inputTarget) {
+        inputTarget.select();
+      } else if (cm) {
+        cm.dispatch({ selection: { anchor: 0, head: cm.state.doc.length } });
       } else {
         document.execCommand("selectAll");
       }
@@ -453,15 +461,13 @@ export default function App() {
     if (action === "paste") {
       const txt = await readText().catch(() => "");
       if (txt) {
-        if (isInput) {
-          const start = target.selectionStart ?? target.value.length;
-          const end = target.selectionEnd ?? target.value.length;
-          target.setRangeText(txt, start, end, "end");
-          target.dispatchEvent(new Event("input", { bubbles: true }));
-        } else if (isCm) {
-          const el = target.classList.contains("cm-editor") ? target : target.closest(".cm-editor") as HTMLElement;
-          const cm = (el as any).cmView?.view;
-          if (cm) cm.dispatch(cm.state.replaceSelection(txt));
+        if (inputTarget) {
+          const start = inputTarget.selectionStart ?? inputTarget.value.length;
+          const end = inputTarget.selectionEnd ?? inputTarget.value.length;
+          inputTarget.setRangeText(txt, start, end, "end");
+          inputTarget.dispatchEvent(new Event("input", { bubbles: true }));
+        } else if (cm) {
+          cm.dispatch(cm.state.replaceSelection(txt));
         } else {
           document.execCommand("insertText", false, txt);
         }
@@ -470,35 +476,31 @@ export default function App() {
       return;
     }
 
-    if (isInput) {
-      const start = target.selectionStart ?? 0;
-      const end = target.selectionEnd ?? 0;
-      const selected = target.value.slice(start, end);
+    if (inputTarget) {
+      const start = inputTarget.selectionStart ?? 0;
+      const end = inputTarget.selectionEnd ?? 0;
+      const selectedText = inputTarget.value.slice(start, end);
       if (action === "copy") {
-        if (selected) await writeText(selected).catch(() => {});
+        if (selectedText) await writeText(selectedText).catch(() => {});
       } else if (action === "cut") {
-        if (selected) {
-          await writeText(selected).catch(() => {});
-          target.setRangeText("", start, end, "start");
-          target.dispatchEvent(new Event("input", { bubbles: true }));
+        if (selectedText) {
+          await writeText(selectedText).catch(() => {});
+          inputTarget.setRangeText("", start, end, "start");
+          inputTarget.dispatchEvent(new Event("input", { bubbles: true }));
         }
       }
       setTextMenu((prev) => ({ ...prev, visible: false }));
       return;
     }
 
-    if (isCm) {
-      const el = target.classList.contains("cm-editor") ? target : target.closest(".cm-editor") as HTMLElement;
-      const cm = (el as any).cmView?.view;
-      if (cm) {
-        const selected = cm.state.sliceDoc(cm.state.selection.main.from, cm.state.selection.main.to);
-        if (action === "copy") {
-          if (selected) await writeText(selected).catch(() => {});
-        } else if (action === "cut") {
-          if (selected) {
-            await writeText(selected).catch(() => {});
-            cm.dispatch(cm.state.replaceSelection(""));
-          }
+    if (cm) {
+      const selectedText = cm.state.sliceDoc(cm.state.selection.main.from, cm.state.selection.main.to);
+      if (action === "copy") {
+        if (selectedText) await writeText(selectedText).catch(() => {});
+      } else if (action === "cut") {
+        if (selectedText) {
+          await writeText(selectedText).catch(() => {});
+          cm.dispatch(cm.state.replaceSelection(""));
         }
       }
       setTextMenu((prev) => ({ ...prev, visible: false }));
@@ -507,7 +509,7 @@ export default function App() {
 
     document.execCommand(action);
     setTextMenu((prev) => ({ ...prev, visible: false }));
-  }, [focusTextTarget]);
+  }, [focusTextTarget, resolveCodeMirrorView]);
 
   return (
     <>

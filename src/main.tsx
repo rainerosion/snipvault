@@ -57,6 +57,7 @@ window.__bootMarkToNative("main_eval_start");
 
 const root = document.getElementById("root")!;
 const bootTheme = resolveBootTheme();
+document.documentElement.setAttribute("data-theme", bootTheme);
 root.setAttribute("data-theme", bootTheme);
 
 let bootSettingsPromise: Promise<AppSettings | null> | null = null;
@@ -185,6 +186,7 @@ function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [themePref]);
 
   useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
     root.setAttribute("data-theme", theme);
     localStorage.setItem(THEME_EFFECTIVE_KEY, theme);
   }, [theme]);
