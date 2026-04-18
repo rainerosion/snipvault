@@ -40,13 +40,21 @@ The app is local-first by default (SQLite, fully usable offline). If you need mu
 - **Favorites** — Mark important snippets for quick access
 - **Copy to clipboard** — One-click copy with system tray integration
 - **Codeglance minimap** — Right-side canvas minimap with click-to-jump and draggable viewport, using the editor as the single source of scroll behavior
-- **Import/Export** — JSON format for backup and portability
+- **Import/Export** — JSON format for backup and portability; export defaults to `Downloads/SnipVault` when available
 - **Dark/Light/System theme** — Follow system preference or pick manually
 - **WebDAV sync** — Bi-directional merge sync with any WebDAV-compatible cloud storage (Nextcloud, Synology, Nutstore, etc.)
 - **Auto-sync** — Configurable background sync interval
 - **System tray** — Minimize to tray, quick access menu, background operation
 - **Auto-start** — Launch on system boot (Windows/macOS)
 - **Offline-first** — All data stored locally in SQLite; works without internet
+
+### What's New in v2.0.5
+
+- Added WebDAV auth mode selector (`Auto`, `Basic`, `Digest`, `Bearer`, `None`) with default set to `Auto (Digest→Basic)`
+- Improved export UX: single success dialog with direct “Open folder” action
+- Updated shell open permissions so exported local folders can be opened directly
+- Refined editor layout defaults (narrower list/minimap for more coding area)
+- Improved left preview code block height for 3-line visibility
 
 ### Tech Stack
 
@@ -116,6 +124,7 @@ Configure any WebDAV-compatible server in **Settings → WebDAV Sync**:
 
 - **Server URL** — e.g. `https://your-server.com/remote.php/dav/files/username/`
 - **Username** / **Password or API Key**
+- **Auth mode** — `Auto (Digest→Basic)` / `Basic` / `Digest` / `Bearer token` / `No auth`
 - Enable **Auto-sync** and set the interval (5 min / 15 min / 30 min / 1 hour / 2 hours)
 
 > Tip: use a writable WebDAV directory URL (not service homepage URL). On sync, SnipVault will automatically prepare the `snipvault/` directory when the provider allows it.
@@ -202,13 +211,21 @@ Issues and pull requests are welcome! Please read the code conventions in `CLAUD
 - **收藏功能** — 标记重要片段快速访问
 - **一键复制** — 代码片段复制到剪贴板，配合系统托盘使用
 - **Codeglance 预览** — 右侧 Canvas 代码预览，支持点击跳转与视窗拖拽，并以编辑器滚动条作为唯一滚动逻辑来源
-- **导入/导出** — JSON 格式备份与迁移
+- **导入/导出** — JSON 格式备份与迁移；导出优先保存到 `Downloads/SnipVault`
 - **暗色/亮色/跟随系统** — 三种主题模式
 - **WebDAV 同步** — 与任意 WebDAV 兼容云盘双向合并同步（Nextcloud、群晖、坚果云等）
 - **自动同步** — 可配置后台同步间隔
 - **系统托盘** — 最小化到托盘、快捷菜单、后台运行
 - **开机自启** — 开机自动启动（Windows/macOS）
 - **离线优先** — 数据全量存储在本地 SQLite，无网也能用
+
+### v2.0.5 更新内容
+
+- 新增 WebDAV 认证方式选择（`Auto`、`Basic`、`Digest`、`Bearer`、`无认证`），默认 `Auto（Digest→Basic）`
+- 优化导出交互：成功后单弹窗即可直接“打开目录”
+- 修复本地导出目录打开权限，支持直接拉起系统文件管理器
+- 调整编辑器布局默认宽度（缩小左右两栏，提升中间编辑区可视面积）
+- 提升左侧列表代码预览高度，3 行内容显示更完整
 
 ### 技术栈
 
@@ -278,6 +295,7 @@ npm run tauri build
 
 - **服务器地址** — 例如 `https://your-server.com/remote.php/dav/files/username/`
 - **用户名** / **密码或 API Key**
+- **认证方式** — `自动（Digest→Basic）` / `Basic` / `Digest` / `Bearer Token` / `无认证`
 - 开启 **自动同步** 并设置间隔（5 分钟 / 15 分钟 / 30 分钟 / 1 小时 / 2 小时）
 
 > 提示：请填写“可写的 WebDAV 目录 URL”，不要填网盘首页地址。同步时，SnipVault 会在服务端允许的情况下自动准备 `snipvault/` 目录。
