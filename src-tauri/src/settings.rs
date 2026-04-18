@@ -15,9 +15,11 @@ pub struct Settings {
     pub webdav_url: String,
     pub webdav_username: String,
     pub webdav_password: String,
+    pub webdav_auth_mode: String,
     pub webdav_timeout_secs: u64,
     pub auto_sync: bool,
     pub sync_interval_minutes: i32,
+    pub editor_line_wrap: bool,
     pub last_sync_at: String,
 }
 
@@ -31,9 +33,11 @@ impl Default for Settings {
             webdav_url: String::new(),
             webdav_username: String::new(),
             webdav_password: String::new(),
+            webdav_auth_mode: "auto".into(),
             webdav_timeout_secs: 30,
             auto_sync: false,
             sync_interval_minutes: 30,
+            editor_line_wrap: true,
             last_sync_at: String::new(),
         }
     }

@@ -24,6 +24,7 @@ env_logger = "0.11"
 once_cell = "1"
 dirs = "6"
 reqwest = { version = "0.12", features = ["json", "blocking"] }
+digest_auth = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 sys-locale = "0.3"
 

@@ -30,51 +30,76 @@ interface SnippetEditorProps {
   onSave: () => void;
   onCancel: () => void;
   theme: "dark" | "light";
+  lineWrap: boolean;
   saving: boolean;
   isDirty: boolean;
   tagOptions: string[];
 }
 
+const DARK_MINIMAP_COLORS = {
+  keyword: "#ff7b72",
+  name: "#ffa657",
+  functionName: "#d2a8ff",
+  type: "#79c0ff",
+  string: "#a5d6ff",
+  number: "#79c0ff",
+  comment: "#8b949e",
+  punctuation: "#ff7b72",
+  plain: "#c9d1d9",
+};
+
+const LIGHT_MINIMAP_COLORS = {
+  keyword: "#cf222e",
+  name: "#953800",
+  functionName: "#8250df",
+  type: "#0550ae",
+  string: "#0a3069",
+  number: "#0550ae",
+  comment: "#6e7781",
+  punctuation: "#cf222e",
+  plain: "#24292f",
+};
+
 const darkHighlight = syntaxHighlighting(HighlightStyle.define([
-  { tag: t.keyword, color: "#ff7b72" },
-  { tag: [t.name, t.deleted, t.character, t.propertyName, t.macroName], color: "#ffa657" },
-  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: "#d2a8ff" },
+  { tag: t.keyword, color: DARK_MINIMAP_COLORS.keyword },
+  { tag: [t.name, t.deleted, t.character, t.propertyName, t.macroName], color: DARK_MINIMAP_COLORS.name },
+  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: DARK_MINIMAP_COLORS.functionName },
   { tag: [t.labelName], color: "#7ee787" },
-  { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: "#ffa657" },
-  { tag: [t.definition(t.name), t.separator], color: "#c9d1d9" },
-  { tag: [t.typeName, t.className, t.number, t.changed, t.annotation, t.modifier, t.self, t.namespace], color: "#79c0ff" },
-  { tag: [t.operator, t.operatorKeyword, t.url, t.escape, t.regexp, t.link, t.special(t.string)], color: "#ff7b72" },
-  { tag: [t.meta, t.comment], color: "#8b949e", fontStyle: "italic" },
+  { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: DARK_MINIMAP_COLORS.name },
+  { tag: [t.definition(t.name), t.separator], color: DARK_MINIMAP_COLORS.plain },
+  { tag: [t.typeName, t.className, t.number, t.changed, t.annotation, t.modifier, t.self, t.namespace], color: DARK_MINIMAP_COLORS.type },
+  { tag: [t.operator, t.operatorKeyword, t.url, t.escape, t.regexp, t.link, t.special(t.string)], color: DARK_MINIMAP_COLORS.punctuation },
+  { tag: [t.meta, t.comment], color: DARK_MINIMAP_COLORS.comment, fontStyle: "italic" },
   { tag: t.strong, fontWeight: "bold" },
   { tag: t.emphasis, fontStyle: "italic" },
   { tag: t.strikethrough, textDecoration: "line-through" },
-  { tag: t.link, color: "#a5d6ff", textDecoration: "underline" },
-  { tag: t.heading, fontWeight: "bold", color: "#79c0ff" },
-  { tag: [t.atom, t.bool, t.special(t.variableName)], color: "#ff7b72" },
-  { tag: [t.processingInstruction, t.string, t.inserted], color: "#a5d6ff" },
-  { tag: t.number, color: "#79c0ff" },
-  { tag: t.invalid, color: "#ff7b72" },
+  { tag: t.link, color: DARK_MINIMAP_COLORS.string, textDecoration: "underline" },
+  { tag: t.heading, fontWeight: "bold", color: DARK_MINIMAP_COLORS.type },
+  { tag: [t.atom, t.bool, t.special(t.variableName)], color: DARK_MINIMAP_COLORS.keyword },
+  { tag: [t.processingInstruction, t.string, t.inserted], color: DARK_MINIMAP_COLORS.string },
+  { tag: t.number, color: DARK_MINIMAP_COLORS.number },
+  { tag: t.invalid, color: DARK_MINIMAP_COLORS.keyword },
 ]));
 
 const lightHighlight = syntaxHighlighting(HighlightStyle.define([
-  { tag: t.keyword, color: "#cf222e" },
-  { tag: [t.name, t.deleted, t.character, t.propertyName, t.macroName], color: "#953800" },
-  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: "#8250df" },
+  { tag: t.keyword, color: LIGHT_MINIMAP_COLORS.keyword },
+  { tag: [t.name, t.deleted, t.character, t.propertyName, t.macroName], color: LIGHT_MINIMAP_COLORS.name },
+  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: LIGHT_MINIMAP_COLORS.functionName },
   { tag: [t.labelName], color: "#116329" },
-  { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: "#953800" },
-  { tag: [t.definition(t.name), t.separator], color: "#24292f" },
-  { tag: [t.typeName, t.className, t.number, t.changed, t.annotation, t.modifier, t.self, t.namespace], color: "#0550ae" },
-  { tag: [t.operator, t.operatorKeyword, t.url, t.escape, t.regexp, t.link, t.special(t.string)], color: "#cf222e" },
-  { tag: [t.meta, t.comment], color: "#6e7781", fontStyle: "italic" },
+  { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: LIGHT_MINIMAP_COLORS.name },
+  { tag: [t.definition(t.name), t.separator], color: LIGHT_MINIMAP_COLORS.plain },
+  { tag: [t.typeName, t.className, t.number, t.changed, t.annotation, t.modifier, t.self, t.namespace], color: LIGHT_MINIMAP_COLORS.type },
+  { tag: [t.operator, t.operatorKeyword, t.url, t.escape, t.regexp, t.link, t.special(t.string)], color: LIGHT_MINIMAP_COLORS.punctuation },
+  { tag: [t.meta, t.comment], color: LIGHT_MINIMAP_COLORS.comment, fontStyle: "italic" },
   { tag: t.strong, fontWeight: "bold" },
   { tag: t.emphasis, fontStyle: "italic" },
   { tag: t.strikethrough, textDecoration: "line-through" },
-  { tag: t.link, color: "#0a3069", textDecoration: "underline" },
-  { tag: t.heading, fontWeight: "bold", color: "#0550ae" },
-  { tag: [t.atom, t.bool, t.special(t.variableName)], color: "#cf222e" },
-  { tag: [t.processingInstruction, t.string, t.inserted], color: "#0a3069" },
-  { tag: t.number, color: "#0550ae" },
-  { tag: t.invalid, color: "#cf222e" },
+  { tag: t.link, color: LIGHT_MINIMAP_COLORS.string, textDecoration: "underline" },
+  { tag: t.heading, fontWeight: "bold", color: LIGHT_MINIMAP_COLORS.type },
+  { tag: [t.atom, t.bool, t.special(t.variableName)], color: LIGHT_MINIMAP_COLORS.keyword },
+  { tag: [t.processingInstruction, t.string, t.inserted], color: LIGHT_MINIMAP_COLORS.string },
+  { tag: t.number, color: LIGHT_MINIMAP_COLORS.number },
+  { tag: t.invalid, color: LIGHT_MINIMAP_COLORS.keyword },
 ]));
 
 function getLangExtension(lang: string) {
@@ -101,7 +126,7 @@ function getLangExtension(lang: string) {
   }
 }
 
-function buildMainExtensions(isDark: boolean, lang: string) {
+function buildMainExtensions(isDark: boolean, lang: string, lineWrap: boolean) {
   const selBg = isDark ? "rgba(56,189,248,0.62)" : "rgba(2,132,199,0.42)";
   const selBgF = isDark ? "rgba(56,189,248,0.74)" : "rgba(2,132,199,0.56)";
   const cursor = isDark ? "#38bdf8" : "#0284c7";
@@ -112,16 +137,35 @@ function buildMainExtensions(isDark: boolean, lang: string) {
       minHeight: "0",
       fontSize: "13.5px",
     },
+    ".cm-editor": {
+      minWidth: "0",
+    },
     ".cm-scroller": {
       height: "100%",
       minHeight: "0",
+      minWidth: "0",
+      width: "100%",
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
       overflowY: "auto !important",
-      overflowX: "auto !important",
+      overflowX: lineWrap ? "hidden !important" : "auto !important",
     },
     ".cm-content": {
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
       caretColor: cursor,
+      whiteSpace: lineWrap ? "pre-wrap" : "pre",
+      width: lineWrap ? "auto" : "max-content",
+      minWidth: lineWrap ? "0" : "100%",
+      maxWidth: lineWrap ? "100%" : "none",
+      wordBreak: lineWrap ? "break-word" : "normal",
+      overflowWrap: lineWrap ? "anywhere" : "normal",
+      boxSizing: "border-box",
+    },
+    ".cm-line": {
+      whiteSpace: lineWrap ? "pre-wrap" : "pre",
+      wordBreak: lineWrap ? "break-word" : "normal",
+      overflowWrap: lineWrap ? "anywhere" : "normal",
+      maxWidth: lineWrap ? "100%" : "none",
+      boxSizing: "border-box",
     },
     ".cm-cursor, .cm-dropCursor": { borderLeftColor: cursor },
     "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { background: selBg },
@@ -129,7 +173,7 @@ function buildMainExtensions(isDark: boolean, lang: string) {
   });
 
   return [
-    EditorView.lineWrapping,
+    ...(lineWrap ? [EditorView.lineWrapping] : []),
     getLangExtension(lang),
     isDark ? githubDark : githubLight,
     cmLayout,
@@ -147,35 +191,45 @@ interface MiniMapProps {
 
 const GLANCE_LINE_H = 4;
 const GLANCE_PADDING_X = 4;
+const GLANCE_MAX_CHARS_FOR_SCALING = 220;
+const GLANCE_MIN_BASELINE = 24;
+const GLANCE_IQR_MULTIPLIER = 1.5;
+const GLANCE_MIN_OUTLIER_GAP = 12;
 
-function getColorByChar(ch: string, isDark: boolean): string {
-  if (/[\s]/.test(ch)) return isDark ? "#30363d" : "#d0d7de";
-  if (/[{}()\[\]]/.test(ch)) return isDark ? "#ff7b72" : "#cf222e";
-  if (/[=+\-*/<>!&|?:;,.]/.test(ch)) return isDark ? "#ff7b72" : "#cf222e";
-  if (/['"`]/.test(ch)) return isDark ? "#a5d6ff" : "#0a3069";
-  if (/[0-9]/.test(ch)) return isDark ? "#79c0ff" : "#0550ae";
-  if (/[A-Z]/.test(ch)) return isDark ? "#79c0ff" : "#0550ae";
-  return isDark ? "#c9d1d9" : "#24292f";
+function minimapPalette(isDark: boolean) {
+  return isDark ? DARK_MINIMAP_COLORS : LIGHT_MINIMAP_COLORS;
+}
+
+function colorForToken(token: string, isDark: boolean): string {
+  const p = minimapPalette(isDark);
+  if (!token.trim()) return isDark ? "#30363d" : "#d0d7de";
+  if (/^(\/\/|#|\/\*)/.test(token)) return p.comment;
+  if (/^("[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*'|`[^`\\]*(?:\\.[^`\\]*)*`)$/.test(token)) return p.string;
+  if (/^(true|false|null|undefined|let|const|var|function|class|return|if|else|for|while|switch|case|break|continue|try|catch|throw|new|import|export|from|default|async|await|interface|type|enum|extends|implements|public|private|protected|static)$/.test(token)) {
+    return p.keyword;
+  }
+  if (/^\d+(\.\d+)?$/.test(token)) return p.number;
+  if (/^[A-Z][\w$]*$/.test(token)) return p.type;
+  if (/^[{}()\[\];,.<>:=+\-*/%!&|^~?]+$/.test(token)) return p.punctuation;
+  return p.plain;
 }
 
 function tokenizeForMinimap(lineText: string, isDark: boolean): { text: string; color: string }[] {
   if (!lineText.trim()) return [];
-  const segments: { text: string; color: string }[] = [];
-  let currentColor = "";
-  let currentText = "";
 
-  for (let i = 0; i < lineText.length; i++) {
-    const ch = lineText[i];
-    const color = getColorByChar(ch, isDark);
-    if (color !== currentColor) {
-      if (currentText) segments.push({ text: currentText, color: currentColor });
-      currentColor = color;
-      currentText = ch;
+  const parts = lineText.match(/\/\/.*$|\/\*.*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b[A-Za-z_][\w$]*\b|\d+(?:\.\d+)?|[{}()\[\];,.<>:=+\-*/%!&|^~?]+|\s+|./g) ?? [];
+
+  const segments: { text: string; color: string }[] = [];
+  for (const part of parts) {
+    const color = colorForToken(part, isDark);
+    const prev = segments[segments.length - 1];
+    if (prev && prev.color === color) {
+      prev.text += part;
     } else {
-      currentText += ch;
+      segments.push({ text: part, color });
     }
   }
-  if (currentText) segments.push({ text: currentText, color: currentColor });
+
   return segments;
 }
 
@@ -203,9 +257,31 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMap
     }
     return lineContentH;
   }, [mainCanScroll, lineContentH, paneClientHeight]);
-  const maxLen = useMemo(() => Math.max(...lines.map((l) => l.length), 1), [lines]);
+
+  const lineLens = useMemo(
+    () => lines.map((l) => l.length).filter((len) => len > 0),
+    [lines]
+  );
+  const maxLen = useMemo(() => Math.max(...lineLens, 1), [lineLens]);
+
+  const effectiveMaxLen = useMemo(() => {
+    if (lineLens.length === 0) return GLANCE_MIN_BASELINE;
+
+    const sorted = [...lineLens].sort((a, b) => a - b);
+    const q1 = sorted[Math.floor((sorted.length - 1) * 0.25)] ?? sorted[0];
+    const q3 = sorted[Math.floor((sorted.length - 1) * 0.75)] ?? sorted[sorted.length - 1];
+    const iqr = Math.max(0, q3 - q1);
+    const outlierThreshold = q3 + Math.max(GLANCE_MIN_OUTLIER_GAP, iqr * GLANCE_IQR_MULTIPLIER);
+
+    const normalLens = sorted.filter((len) => len <= outlierThreshold);
+    const normalMax = normalLens.length > 0 ? normalLens[normalLens.length - 1] : sorted[sorted.length - 1];
+
+    return Math.min(GLANCE_MAX_CHARS_FOR_SCALING, Math.max(GLANCE_MIN_BASELINE, normalMax));
+  }, [lineLens]);
+
+  const hasExtremeLine = maxLen > effectiveMaxLen;
   const availW = Math.max(1, width - GLANCE_PADDING_X * 2);
-  const scaleX = availW / maxLen;
+  const scaleX = availW / Math.max(1, effectiveMaxLen);
 
   const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -238,8 +314,14 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMap
           if (x >= width - GLANCE_PADDING_X) break;
         }
       }
+
+      if (hasExtremeLine && lineText.length > effectiveMaxLen && x < width - GLANCE_PADDING_X) {
+        const remainW = width - GLANCE_PADDING_X - x;
+        ctx.fillStyle = minimapPalette(isDark).plain;
+        ctx.fillRect(x, y + 1, remainW, GLANCE_LINE_H - 2);
+      }
     });
-  }, [lines, width, totalH, bg, isDark, scaleX]);
+  }, [lines, width, totalH, bg, isDark, scaleX, hasExtremeLine]);
 
   const syncViewportFromMain = useCallback(() => {
     const pane = paneRef.current;
@@ -423,7 +505,7 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMap
 
 export function SnippetEditor({
   snippet, isNew, form, onChange, onSave, onCancel,
-  theme, saving, isDirty, tagOptions,
+  theme, lineWrap, saving, isDirty, tagOptions,
 }: SnippetEditorProps) {
   const { t } = useTranslation();
   const { language } = useContext(LanguageContext);
@@ -435,13 +517,13 @@ export function SnippetEditor({
   const [copied, setCopied] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
-  const [minimapWidth, setMinimapWidth] = useState(120);
+  const [minimapWidth, setMinimapWidth] = useState(96);
   const [isDragging, setIsDragging] = useState(false);
 
   const isDark = theme === "dark";
   const mainExtensions = useMemo(
-    () => buildMainExtensions(isDark, form.language),
-    [isDark, form.language]
+    () => buildMainExtensions(isDark, form.language, lineWrap),
+    [isDark, form.language, lineWrap]
   );
 
   const scrollMainTo = useCallback((scrollTop: number) => {
@@ -460,9 +542,9 @@ export function SnippetEditor({
       const delta = startX - ev.clientX;
       const next = startWidth + delta;
       const splitWidth = splitRef.current?.clientWidth ?? 0;
-      const dynamicMax = splitWidth > 0 ? Math.floor(splitWidth * 0.5) : 420;
-      const maxWidth = Math.max(120, Math.min(420, dynamicMax));
-      setMinimapWidth(Math.min(maxWidth, Math.max(120, next)));
+      const dynamicMax = splitWidth > 0 ? Math.floor(splitWidth * 0.45) : 360;
+      const maxWidth = Math.max(96, Math.min(360, dynamicMax));
+      setMinimapWidth(Math.min(maxWidth, Math.max(96, next)));
     };
     const onUp = () => {
       setIsDragging(false);

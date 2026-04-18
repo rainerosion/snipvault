@@ -183,12 +183,11 @@ pub fn export_snippets() -> SqliteResult<String> {
 }
 
 pub fn import_snippets(json_data: &str) -> SqliteResult<usize> {
-    let snippets: Vec<Snippet> = serde_json::from_str(json_data).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
-    let mut count = 0;
-    for s in snippets {
-        if create_snippet(&s).is_ok() { count += 1; }
-    }
-    Ok(count)
+    let snippets: Vec<Snippet> = serde_json::from_str(json_data)
+        .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+
+    let merge_result = merge_snippets(snippets)?;
+    Ok(merge_result.uploaded + merge_result.downloaded)
 }
 
 // --- Merge sync ---

@@ -271,6 +271,7 @@ fn main() {
             snipvault::commands::search_snippets,
             snipvault::commands::toggle_favorite,
             snipvault::commands::export_snippets,
+            snipvault::commands::export_snippets_to_file,
             snipvault::commands::import_snippets,
             snipvault::commands::get_settings,
             snipvault::commands::save_settings,

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useContext, lazy, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { open } from "@tauri-apps/plugin-shell";
 import { EditorView } from "@codemirror/view";
 import { useTranslation } from "react-i18next";
 import { useSnippets } from "./hooks/useSnippets";
@@ -44,10 +45,10 @@ export default function App() {
     update,
     remove,
     toggleFavorite,
-    exportAll,
+    exportAllToFile,
     importAll,
   } = useSnippets();
-  const { syncUpload, settings, load: loadSettings } = useSettings();
+  const { syncUpload, settings, load: loadSettings, save: saveSettings } = useSettings();
 
   const [selected, setSelected] = useState<Snippet | null>(null);
   const [isNew, setIsNew] = useState(false);
@@ -59,7 +60,8 @@ export default function App() {
   const [favFilter, setFavFilter] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [textMenu, setTextMenu] = useState<{ visible: boolean; x: number; y: number }>({ visible: false, x: 0, y: 0 });
+  const lineWrap = settings?.editor_line_wrap ?? true;
+  const [textMenu, setTextMenu] = useState<{ visible: boolean; x: number; y: number; isEditorContext: boolean }>({ visible: false, x: 0, y: 0, isEditorContext: false });
   const textMenuRef = useRef<HTMLDivElement | null>(null);
   const textMenuTargetRef = useRef<HTMLElement | null>(null);
 
@@ -105,6 +107,7 @@ export default function App() {
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadSettings().catch(() => {}); }, [loadSettings]);
 
   useEffect(() => {
     (window as any).__openSettings = () => setSettingsOpen(true);
@@ -227,7 +230,7 @@ export default function App() {
 
       if (!target) {
         textMenuTargetRef.current = null;
-        setTextMenu((prev) => ({ ...prev, visible: false }));
+        setTextMenu((prev) => ({ ...prev, visible: false, isEditorContext: false }));
         return;
       }
 
@@ -237,12 +240,13 @@ export default function App() {
 
       textMenuTargetRef.current = textTarget;
 
+      const isEditorContext = textTarget.classList.contains("cm-editor") || !!textTarget.closest(".cm-editor");
       const menuW = 132;
-      const menuH = 148;
+      const menuH = isEditorContext ? 184 : 148;
       const x = Math.max(8, Math.min(e.clientX, window.innerWidth - menuW - 8));
       const y = Math.max(8, Math.min(e.clientY, window.innerHeight - menuH - 8));
 
-      setTextMenu({ visible: true, x, y });
+      setTextMenu({ visible: true, x, y, isEditorContext });
     };
 
     const hideMenu = () => {
@@ -389,15 +393,32 @@ export default function App() {
   );
 
   const handleExport = useCallback(async () => {
-    const json = await exportAll();
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `gist-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [exportAll]);
+    try {
+      const result = await exportAllToFile();
+      if (!result.file_path || !result.folder_path) {
+        throw new Error("invalid export result");
+      }
+
+      const successKey = result.saved_in_downloads
+        ? "errors.exportSuccessDownloads"
+        : "errors.exportSuccessFallback";
+
+      const shouldOpen = await dialogRef.current?.confirm(
+        t(successKey),
+        "dialog.title",
+        {
+          cancelLabel: "errors.exportActionOk",
+          confirmLabel: "errors.exportActionOpenFolder",
+        }
+      );
+      if (shouldOpen) {
+        await open(result.folder_path);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      dialogRef.current?.alert(t("errors.exportFailed", { error: message }));
+    }
+  }, [exportAllToFile, t]);
 
   const handleImportData = useCallback(
     async (jsonData: string) => {
@@ -415,6 +436,26 @@ export default function App() {
   const handleThemeToggle = useCallback(() => {
     setTheme(theme === "dark" ? "light" : "dark");
   }, [theme, setTheme]);
+
+  const handleToggleLineWrap = useCallback(async () => {
+    let current = settings;
+    if (!current) {
+      try {
+        current = await invoke<AppSettings>("get_settings");
+      } catch {
+        return;
+      }
+    }
+
+    try {
+      await saveSettings({
+        ...current,
+        editor_line_wrap: !current.editor_line_wrap,
+      });
+    } catch (e) {
+      dialogRef.current?.alert(t("errors.settingsFailed", { error: e }));
+    }
+  }, [settings, saveSettings, t]);
 
   const handleOpenSettings = useCallback(() => {
     setSettingsOpen(true);
@@ -576,6 +617,7 @@ export default function App() {
                 onSave={handleSave}
                 onCancel={handleCancel}
                 theme={theme}
+                lineWrap={lineWrap}
                 saving={saving}
                 isDirty={isDirty}
                 tagOptions={allTagOptions}
@@ -593,11 +635,26 @@ export default function App() {
           style={{ left: textMenu.x, top: textMenu.y }}
           role="menu"
         >
-          <button type="button" className="text-context-item" onClick={() => runTextAction("cut")}>剪切</button>
-          <button type="button" className="text-context-item" onClick={() => runTextAction("copy")}>复制</button>
-          <button type="button" className="text-context-item" onClick={() => runTextAction("paste")}>粘贴</button>
+          <button type="button" className="text-context-item" onClick={() => runTextAction("cut")}>{t("contextMenu.cut")}</button>
+          <button type="button" className="text-context-item" onClick={() => runTextAction("copy")}>{t("contextMenu.copy")}</button>
+          <button type="button" className="text-context-item" onClick={() => runTextAction("paste")}>{t("contextMenu.paste")}</button>
           <div className="text-context-divider" />
-          <button type="button" className="text-context-item" onClick={() => runTextAction("selectAll")}>全选</button>
+          <button type="button" className="text-context-item" onClick={() => runTextAction("selectAll")}>{t("contextMenu.selectAll")}</button>
+          {textMenu.isEditorContext && (
+            <>
+              <div className="text-context-divider" />
+              <button
+                type="button"
+                className="text-context-item"
+                onClick={async () => {
+                  await handleToggleLineWrap();
+                  setTextMenu((prev) => ({ ...prev, visible: false }));
+                }}
+              >
+                {lineWrap ? t("contextMenu.wrapOff") : t("contextMenu.wrapOn")}
+              </button>
+            </>
+          )}
         </div>
       )}
     </>

@@ -6,6 +6,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tauri::{command, AppHandle, Manager};
 
+#[derive(serde::Serialize)]
+pub struct ExportResult {
+    pub file_path: String,
+    pub folder_path: String,
+    pub saved_in_downloads: bool,
+}
+
 pub static BOOT_START: OnceCell<Instant> = OnceCell::new();
 pub static WINDOW_SHOWN: AtomicBool = AtomicBool::new(false);
 
@@ -131,6 +138,30 @@ pub fn toggle_favorite(id: String) -> Result<bool, String> {
 #[command]
 pub fn export_snippets() -> Result<String, String> {
     db::export_snippets().map_err(|e| format!("Export error: {e}"))
+}
+
+#[command]
+pub fn export_snippets_to_file() -> Result<ExportResult, String> {
+    let json = db::export_snippets().map_err(|e| format!("Export error: {e}"))?;
+
+    let (export_dir, saved_in_downloads) = crate::paths::get_export_dir();
+    std::fs::create_dir_all(&export_dir)
+        .map_err(|e| format!("创建导出目录失败 ({}): {e}", export_dir.display()))?;
+
+    let filename = format!(
+        "snipvault-backup-{}.json",
+        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
+    );
+    let target = export_dir.join(filename);
+
+    std::fs::write(&target, json)
+        .map_err(|e| format!("写入导出文件失败 ({}): {e}", target.display()))?;
+
+    Ok(ExportResult {
+        file_path: target.display().to_string(),
+        folder_path: export_dir.display().to_string(),
+        saved_in_downloads,
+    })
 }
 
 #[command]

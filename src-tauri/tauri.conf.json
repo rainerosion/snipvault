@@ -31,7 +31,11 @@
       "csp": null
     }
   },
-  "plugins": {},
+  "plugins": {
+    "shell": {
+      "open": "(https?://.+)|(mailto:.+)|(tel:.+)|(file://.+)|([a-zA-Z]:[\\\\/].+)|(\\\\\\\\.+)"
+    }
+  },
   "bundle": {
     "active": true,
     "publisher": "rainerosion",

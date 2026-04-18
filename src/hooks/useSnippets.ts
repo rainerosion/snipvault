@@ -2,6 +2,12 @@ import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Snippet, SnippetForm } from "../types";
 
+export interface ExportResult {
+  file_path: string;
+  folder_path: string;
+  saved_in_downloads: boolean;
+}
+
 export function useSnippets() {
   const [snippets, setSnippets] = useState<Snippet[]>([]);
   const [loading, setLoading] = useState(false);
@@ -87,6 +93,10 @@ export function useSnippets() {
     return invoke<string>("export_snippets");
   }, []);
 
+  const exportAllToFile = useCallback(async () => {
+    return invoke<ExportResult>("export_snippets_to_file");
+  }, []);
+
   const importAll = useCallback(async (jsonData: string) => {
     const count = await invoke<number>("import_snippets", { jsonData });
     await load();
@@ -104,6 +114,7 @@ export function useSnippets() {
     remove,
     toggleFavorite,
     exportAll,
+    exportAllToFile,
     importAll,
   };
 }

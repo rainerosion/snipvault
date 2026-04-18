@@ -9,9 +9,11 @@ export interface Settings {
   webdav_url: string;
   webdav_username: string;
   webdav_password: string;
+  webdav_auth_mode: string;
   webdav_timeout_secs: number;
   auto_sync: boolean;
   sync_interval_minutes: number;
+  editor_line_wrap: boolean;
   last_sync_at: string;
 }
 

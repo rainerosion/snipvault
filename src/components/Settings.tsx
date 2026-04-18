@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useContext } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useState, useEffect, useCallback, useRef, useContext } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { useTranslation } from "react-i18next";
 import { useSettings, Settings, SyncVersion } from "../hooks/useSettings";
@@ -201,6 +200,22 @@ export function SettingsPanel({ theme, setTheme, onClose }: SettingsPanelProps) 
               value={form.webdav_password}
               onChange={(e) => setForm({ ...form, webdav_password: e.target.value })} />
           </div>
+
+          <label className="settings-row">
+            <div className="settings-row-info">
+              <span className="settings-row-label">{t("settings.webdavAuthMode")}</span>
+              <span className="settings-row-desc">{t("settings.webdavAuthModeDesc")}</span>
+            </div>
+            <select className="settings-select"
+              value={form.webdav_auth_mode}
+              onChange={(e) => setForm({ ...form, webdav_auth_mode: e.target.value })}>
+              <option value="basic">{t("settings.webdavAuthBasic")}</option>
+              <option value="digest">{t("settings.webdavAuthDigest")}</option>
+              <option value="bearer">{t("settings.webdavAuthBearer")}</option>
+              <option value="none">{t("settings.webdavAuthNone")}</option>
+              <option value="auto">{t("settings.webdavAuthAuto")}</option>
+            </select>
+          </label>
 
           <label className="settings-row">
             <div className="settings-row-info">
