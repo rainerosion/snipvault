@@ -302,7 +302,7 @@ export function SettingsPanel({ theme, setTheme, onClose }: SettingsPanelProps) 
             </div>
             <div className="about-row">
               <span className="about-label">{t("settings.aboutVersion")}</span>
-              <span className="about-value">v2.0.5</span>
+              <span className="about-value">v2.1.0</span>
             </div>
             <div className="about-row">
               <span className="about-label">{t("settings.aboutAuthor")}</span>
@@ -327,7 +327,7 @@ export function SettingsPanel({ theme, setTheme, onClose }: SettingsPanelProps) 
       </div>
 
       <div className="settings-footer">
-        <span className="settings-version">灵藏 · SnipVault v2.0.5</span>
+        <span className="settings-version">灵藏 · SnipVault v2.1.0</span>
         <div className="settings-footer-btns">
           <button className="btn-save-settings" onClick={handleSave}>
             {saved ? t("settings.saved") : t("settings.save")}

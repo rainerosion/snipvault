@@ -48,7 +48,7 @@ The app is local-first by default (SQLite, fully usable offline). If you need mu
 - **Auto-start** — Launch on system boot (Windows/macOS)
 - **Offline-first** — All data stored locally in SQLite; works without internet
 
-### What's New in v2.0.5
+### What's New in v2.1.0
 
 - Added WebDAV auth mode selector (`Auto`, `Basic`, `Digest`, `Bearer`, `None`) with default set to `Auto (Digest→Basic)`
 - Improved export UX: single success dialog with direct “Open folder” action
@@ -219,7 +219,7 @@ Issues and pull requests are welcome! Please read the code conventions in `CLAUD
 - **开机自启** — 开机自动启动（Windows/macOS）
 - **离线优先** — 数据全量存储在本地 SQLite，无网也能用
 
-### v2.0.5 更新内容
+### v2.1.0 更新内容
 
 - 新增 WebDAV 认证方式选择（`Auto`、`Basic`、`Digest`、`Bearer`、`无认证`），默认 `Auto（Digest→Basic）`
 - 优化导出交互：成功后单弹窗即可直接“打开目录”
