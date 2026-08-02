@@ -1,6 +1,6 @@
 # SnipVault 已知限制与技术债
 
-> 本文记录 v2.1.1 在 2026-08-02 production WebDAV protocol-v2 activation 与发布链路硬化检查点后仍可验证的限制。已解决问题及方案见 [第一轮问题修复记录](remediation-2026-07-31.md) 与 [第二轮修复记录](remediation-round-2.md)。本文不是修复承诺。
+> 本文记录 v2.1.2 在 2026-08-02 production WebDAV protocol-v2 activation 与发布链路硬化检查点后仍可验证的限制。已解决问题及方案见 [第一轮问题修复记录](remediation-2026-07-31.md) 与 [第二轮修复记录](remediation-round-2.md)。本文不是修复承诺。
 
 ## 优先级概览
 

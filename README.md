@@ -49,10 +49,11 @@ Snippet data is stored locally in SQLite and remains available offline. Optional
 
 > WebDAV v2 requires server support for strong ETags and conditional PUT. Its one-way cutover, immutable-object retention, conflict UI, and verification boundaries are documented in [Known limitations](docs/known-limitations.md). Keep an independent backup before activating a v1 directory and do not use old clients against it afterward.
 
-### What's New in v2.1.1
+### What's New in v2.1.2
 
 - Added WebDAV auth mode selection: `Auto`, `Basic`, `Digest`, `Bearer`, and `None`.
 - Added a direct “Open folder” action after export.
+- Fixed CI context-menu focus restoration so the full frontend test suite is stable in GitHub Actions.
 - Refined editor, toolbar brand, left-list width/code preview, and minimap sizing.
 
 ### Technology
@@ -206,10 +207,11 @@ Feature design and development changes must update the relevant development docu
 
 > WebDAV v2 要求服务器支持 strong ETag 和 conditional PUT。单向升级、不可变对象保留、冲突 UI 与验证边界见[已知限制](docs/known-limitations.md)。激活 v1 目录前请保留独立备份，激活后不要再让旧客户端访问该目录。
 
-### v2.1.1 更新内容
+### v2.1.2 更新内容
 
 - 新增 WebDAV 认证方式选择：`Auto`、`Basic`、`Digest`、`Bearer`、`None`。
 - 导出成功后可直接“打开目录”。
+- 修复 CI 中文本右键菜单焦点恢复时序，确保 GitHub Actions 全量前端测试稳定通过。
 - 调整编辑器、工具栏品牌区、左侧列表宽度/代码预览和 minimap 默认布局。
 
 ### 技术栈

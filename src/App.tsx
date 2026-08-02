@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useContext, lazy, Suspense } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useContext, lazy, Suspense } from "react";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { invoke } from "@tauri-apps/api/core";
 import { EditorView } from "@codemirror/view";
@@ -382,12 +382,14 @@ export default function App() {
     };
 
     const hideMenu = (restoreFocus = false) => {
+      const restoreTarget = restoreFocus ? textMenuRestoreFocusRef.current : null;
       setTextMenu((prev) => (prev.visible ? { ...prev, visible: false } : prev));
-      if (restoreFocus) {
-        window.requestAnimationFrame(() => {
-          const restoreTarget = textMenuRestoreFocusRef.current;
-          if (restoreTarget?.isConnected) restoreTarget.focus();
-        });
+      if (
+        restoreTarget?.isConnected &&
+        !restoreTarget.inert &&
+        restoreTarget.getAttribute("aria-hidden") !== "true"
+      ) {
+        restoreTarget.focus();
       }
     };
 
@@ -440,14 +442,11 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!textMenu.visible) return;
-    const frame = window.requestAnimationFrame(() => {
-      textMenuRef.current
-        ?.querySelector<HTMLButtonElement>("[role='menuitem']")
-        ?.focus();
-    });
-    return () => window.cancelAnimationFrame(frame);
+    textMenuRef.current
+      ?.querySelector<HTMLButtonElement>("[role='menuitem']")
+      ?.focus();
   }, [textMenu.visible]);
 
   const resetToEmpty = useCallback(() => {

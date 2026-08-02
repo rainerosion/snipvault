@@ -1,6 +1,6 @@
 # SnipVault 架构设计
 
-> 本文描述 v2.1.1 源码截至 2026-08-02 的当前架构。已发现但尚未修复的问题集中记录在 [已知限制](known-limitations.md)。
+> 本文描述 v2.1.2 源码截至 2026-08-02 的当前架构。已发现但尚未修复的问题集中记录在 [已知限制](known-limitations.md)。
 
 ## 1. 系统定位与边界
 
@@ -647,7 +647,7 @@ sequenceDiagram
 {
   "format_id": "snipvault.snippets",
   "schema_version": 1,
-  "app_version": "2.1.1",
+  "app_version": "2.1.2",
   "exported_at": "RFC3339 timestamp",
   "snippets": []
 }

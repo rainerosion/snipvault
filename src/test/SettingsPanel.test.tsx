@@ -194,11 +194,8 @@ describe("SettingsPanel draft behavior", () => {
 
     await user.click(await screen.findByLabelText("Username"));
     await user.keyboard("-draft");
-    let closePromise!: Promise<boolean>;
-    await act(async () => {
-      closePromise = panelRef.current!.requestClose();
-      await Promise.resolve();
-    });
+    const closePromise = panelRef.current!.requestClose();
+    await screen.findByRole("dialog", { name: "Confirm" });
     expect(onClose).not.toHaveBeenCalled();
 
     await user.click(await screen.findByRole("button", { name: "Discard" }));
