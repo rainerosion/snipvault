@@ -4,7 +4,7 @@ export interface Language {
   color: string;
 }
 
-export const LANGUAGES: Language[] = [
+export const LANGUAGES = [
   { id: "plaintext", name: "Plain Text", color: "#6b7280" },
   { id: "javascript", name: "JavaScript", color: "#ca8a04" },
   { id: "typescript", name: "TypeScript", color: "#2563eb" },
@@ -35,7 +35,9 @@ export const LANGUAGES: Language[] = [
   { id: "r", name: "R", color: "#0284c7" },
   { id: "scala", name: "Scala", color: "#b91c1c" },
   { id: "elixir", name: "Elixir", color: "#6d28d9" },
-];
+] as const satisfies readonly Language[];
+
+export type LanguageId = (typeof LANGUAGES)[number]["id"];
 
 export const getLang = (id: string): Language =>
   LANGUAGES.find((l) => l.id === id) ?? LANGUAGES[0];

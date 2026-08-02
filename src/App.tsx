@@ -1,18 +1,23 @@
 import { useState, useEffect, useCallback, useRef, useContext, lazy, Suspense } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { open } from "@tauri-apps/plugin-shell";
+import { invoke } from "@tauri-apps/api/core";
 import { EditorView } from "@codemirror/view";
 import { useTranslation } from "react-i18next";
 import { useSnippets } from "./hooks/useSnippets";
-import { useSettings, Settings as AppSettings } from "./hooks/useSettings";
+import {
+  settingsToDraft,
+  useSettings,
+  type SyncCompletionEvent,
+  type SyncSource,
+} from "./hooks/useSettings";
 import { Toolbar } from "./components/Toolbar";
 import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
 const SnippetEditor = lazy(() => import("./components/SnippetEditor").then((m) => ({ default: m.SnippetEditor })));
-import { SettingsPanel } from "./components/Settings";
+import { SettingsPanel, type SettingsPanelHandle } from "./components/Settings";
 import { Dialog, DialogHandle } from "./components/Dialog";
-import { Snippet, SnippetForm } from "./types";
+import { Snippet, SnippetForm, SnippetSummary } from "./types";
+import { localizeCommandError, normalizeCommandError } from "./utils/commandErrors";
 import { ThemeContext } from "./main";
 
 const EMPTY_FORM: SnippetForm = {
@@ -35,12 +40,31 @@ function isFormDirty(current: SnippetForm, original: SnippetForm): boolean {
   );
 }
 
+function snippetToForm(snippet: Snippet): SnippetForm {
+  return {
+    title: snippet.title,
+    content: snippet.content,
+    language: snippet.language,
+    description: snippet.description,
+    tags: snippet.tags,
+    is_favorite: snippet.is_favorite,
+  };
+}
+
 export default function App() {
   const { t } = useTranslation();
   const {
     snippets,
+    total,
+    hasMore,
+    tags: allTagOptions,
     loading,
+    loadingMore,
+    error,
+    loadMoreError,
     load,
+    loadMore,
+    get,
     create,
     update,
     remove,
@@ -48,94 +72,254 @@ export default function App() {
     exportAllToFile,
     importAll,
   } = useSnippets();
-  const { syncUpload, settings, load: loadSettings, save: saveSettings } = useSettings();
+  const {
+    sync,
+    syncing,
+    syncStatus,
+    setSyncStatus,
+    settings,
+    reload: reloadSettings,
+    save: saveSettings,
+    reloadHistory,
+  } = useSettings();
 
   const [selected, setSelected] = useState<Snippet | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [form, setForm] = useState<SnippetForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [detailState, setDetailState] = useState<
+    | { status: "idle" }
+    | { status: "loading"; summary: SnippetSummary }
+    | { status: "error"; summary: SnippetSummary; error: unknown }
+  >({ status: "idle" });
   const { theme, setTheme } = useContext(ThemeContext);
   const [searchQuery, setSearchQuery] = useState("");
   const [langFilter, setLangFilter] = useState("");
   const [favFilter, setFavFilter] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [syncing, setSyncing] = useState(false);
+  const [refreshStatus, setRefreshStatus] = useState<"applied" | "stale" | null>(null);
   const lineWrap = settings?.editor_line_wrap ?? true;
   const [textMenu, setTextMenu] = useState<{ visible: boolean; x: number; y: number; isEditorContext: boolean }>({ visible: false, x: 0, y: 0, isEditorContext: false });
   const textMenuRef = useRef<HTMLDivElement | null>(null);
   const textMenuTargetRef = useRef<HTMLElement | null>(null);
+  const textMenuRestoreFocusRef = useRef<HTMLElement | null>(null);
+
+  const originalFormRef = useRef<SnippetForm>(EMPTY_FORM);
+  const formRef = useRef<SnippetForm>(EMPTY_FORM);
+  const editorTargetRef = useRef<string | null>(null);
+  const saveRequestRef = useRef(0);
+  const dialogRef = useRef<DialogHandle>(null);
+  const settingsPanelRef = useRef<SettingsPanelHandle>(null);
+  const isDirty = isFormDirty(form, originalFormRef.current);
+
+  const detailRequestRef = useRef(0);
+  const activeListRequest = useCallback(() => ({
+    query: searchQuery,
+    language: langFilter || null,
+    favorite: favFilter,
+    exact_tag: null,
+  }), [favFilter, langFilter, searchQuery]);
+
+  const reconcileAuthoritative = useCallback(async () => {
+    const currentTarget = editorTargetRef.current;
+    if (!currentTarget || currentTarget === "new") return "none" as const;
+    if (isFormDirty(formRef.current, originalFormRef.current)) {
+      setRefreshStatus("stale");
+      return "preserve-dirty" as const;
+    }
+
+    const requestId = ++detailRequestRef.current;
+    try {
+      const latest = await get(currentTarget);
+      if (requestId !== detailRequestRef.current || editorTargetRef.current !== currentTarget) {
+        return "stale" as const;
+      }
+      if (isFormDirty(formRef.current, originalFormRef.current)) {
+        setRefreshStatus("stale");
+        return "preserve-dirty" as const;
+      }
+      const latestForm = snippetToForm(latest);
+      setSelected(latest);
+      setForm(latestForm);
+      formRef.current = latestForm;
+      originalFormRef.current = latestForm;
+      setRefreshStatus("applied");
+      return "refresh" as const;
+    } catch (cause) {
+      const normalized = normalizeCommandError(cause);
+      if (
+        requestId === detailRequestRef.current &&
+        editorTargetRef.current === currentTarget &&
+        normalized.code === "not_found"
+      ) {
+        setSelected(null);
+        setIsNew(false);
+        setForm(EMPTY_FORM);
+        formRef.current = EMPTY_FORM;
+        editorTargetRef.current = null;
+        originalFormRef.current = EMPTY_FORM;
+        setRefreshStatus("applied");
+        return "clear" as const;
+      }
+      throw cause;
+    }
+  }, [get]);
+
+  const reloadSnippets = useCallback(async () => {
+    const authoritative = await load(activeListRequest());
+    if (authoritative) await reconcileAuthoritative();
+    return authoritative;
+  }, [activeListRequest, load, reconcileAuthoritative]);
+
+  const refreshAfterSync = useCallback(async () => {
+    const [authoritative] = await Promise.all([
+      reloadSnippets(),
+      reloadSettings(),
+      reloadHistory().catch(() => []),
+    ]);
+    return authoritative;
+  }, [reloadHistory, reloadSettings, reloadSnippets]);
+
+  const reconcileSyncCompletion = useCallback(
+    async (
+      completion: SyncCompletionEvent,
+      options: { showDialog: boolean },
+    ): Promise<SyncCompletionEvent> => {
+      setSyncStatus(completion);
+
+      if (completion.status === "result" && completion.result?.success) {
+        try {
+          await refreshAfterSync();
+        } catch (cause) {
+          const reloadFailure: SyncCompletionEvent = {
+            source: completion.source,
+            status: "error",
+            error: {
+              code: "unknown",
+              message: "The latest local state could not be reloaded.",
+              retryable: true,
+            },
+          };
+          setSyncStatus(reloadFailure);
+          if (options.showDialog) {
+            await dialogRef.current?.alert(
+              t("errors.reloadAfterSyncFailed", {
+                error: localizeCommandError(cause, t),
+              }),
+            );
+          }
+          return reloadFailure;
+        }
+      }
+
+      if (options.showDialog) {
+        const text = completion.result?.message
+          || (completion.error ? localizeCommandError(completion.error, t) : t("errors.syncFailedShort"));
+        await dialogRef.current?.alert(text);
+      }
+
+      return completion;
+    },
+    [refreshAfterSync, setSyncStatus, t],
+  );
+
+  const runManualSync = useCallback(
+    async (source: Extract<SyncSource, "toolbar" | "settings">): Promise<SyncCompletionEvent> => {
+      try {
+        const result = await sync(source);
+        const completion: SyncCompletionEvent = {
+          source,
+          status: "result",
+          result,
+        };
+        return await reconcileSyncCompletion(completion, {
+          showDialog: source === "toolbar",
+        });
+      } catch (cause) {
+        const normalized = normalizeCommandError(cause);
+        const completion: SyncCompletionEvent = {
+          source,
+          status: normalized.code === "sync_busy" ? "busy" : "error",
+          error: normalized,
+        };
+        return await reconcileSyncCompletion(completion, {
+          showDialog: source === "toolbar",
+        });
+      }
+    },
+    [reconcileSyncCompletion, sync],
+  );
 
   const handleSync = useCallback(async () => {
     let effectiveSettings = settings;
 
-    // Settings in this page may still be null/stale before loadSettings finishes.
-    // Read once directly from backend as a fallback.
-    if (!effectiveSettings?.webdav_url?.trim()) {
+    if (!effectiveSettings) {
       try {
-        effectiveSettings = await invoke<AppSettings>("get_settings");
-      } catch {
-        // keep fallback as null
+        effectiveSettings = await reloadSettings();
+      } catch (cause) {
+        await dialogRef.current?.alert(
+          `${t("errors.settingsLoadFailed")} ${localizeCommandError(cause, t)}`,
+        );
+        return;
       }
     }
 
-    if (!effectiveSettings?.webdav_url?.trim()) {
-      dialogRef.current?.alert(t("errors.noWebdav"));
+    if (!effectiveSettings.webdav_url.trim()) {
+      await dialogRef.current?.alert(t("errors.noWebdav"));
       return;
     }
 
-    const ok = await dialogRef.current?.confirm(t("settings.syncConfirm"));
-    if (ok !== true) return;
+    const confirmed = await dialogRef.current?.confirm(t("settings.syncConfirm"));
+    if (confirmed !== true) return;
+    await runManualSync("toolbar");
+  }, [reloadSettings, runManualSync, settings, t]);
 
-    setSyncing(true);
-    try {
-      const result = await syncUpload();
-      dialogRef.current?.alert(result.message);
-      if (result.success) {
-        await load();
-        await loadSettings();
-      }
-    } catch (e) {
-      dialogRef.current?.alert(t("errors.syncFailed", { error: e }));
-    } finally {
-      setSyncing(false);
-    }
-  }, [settings, syncUpload, load, loadSettings, t]);
-
-  const originalFormRef = useRef<SnippetForm>(EMPTY_FORM);
-  const dialogRef = useRef<DialogHandle>(null);
-  const isDirty = isFormDirty(form, originalFormRef.current);
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => { loadSettings().catch(() => {}); }, [loadSettings]);
+  useEffect(() => {
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      void reloadSnippets().catch(() => {});
+    }, 150);
+    return () => clearTimeout(searchTimer.current);
+  }, [reloadSnippets]);
 
   useEffect(() => {
-    (window as any).__openSettings = () => setSettingsOpen(true);
-  }, []);
+    let disposed = false;
+    const unlisteners: Array<() => void> = [];
 
-  useEffect(() => {
-    import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-      const tauriWindow = getCurrentWindow() as any;
-      const unlistenSync = tauriWindow.on("sync-complete", async (event: any) => {
-        const result = event.payload as { success: boolean; message: string };
-        setSyncing(false);
-        dialogRef.current?.alert(result.message);
-        if (result.success) {
-          await load();
-          await loadSettings();
+    void import("@tauri-apps/api/window")
+      .then(async ({ getCurrentWindow }) => {
+        const tauriWindow = getCurrentWindow();
+        const registered = await Promise.all([
+          tauriWindow.listen<SyncCompletionEvent>("sync-complete", async (event) => {
+            const source = event.payload.source;
+            await reconcileSyncCompletion(event.payload, {
+              showDialog: source === "tray",
+            });
+          }),
+          tauriWindow.listen("open-settings", () => setSettingsOpen(true)),
+          tauriWindow.listen("autostart-toggled", () => {
+            void reloadSettings().catch(() => {});
+          }),
+        ]);
+
+        if (disposed) {
+          registered.forEach((unlisten) => unlisten());
+        } else {
+          unlisteners.push(...registered);
         }
-      });
-      const unlistenSettings = tauriWindow.on("open-settings", () => { setSettingsOpen(true); });
-      const unlistenAutoStart = tauriWindow.on("autostart-toggled", async () => {
-        await loadSettings();
-      });
-      return () => {
-        unlistenSync.then((f: () => void) => f());
-        unlistenSettings.then((f: () => void) => f());
-        unlistenAutoStart.then((f: () => void) => f());
-      };
-    }).catch(() => {});
-  }, [setSettingsOpen]);
+      })
+      .catch(() => {});
+
+    return () => {
+      disposed = true;
+      unlisteners.forEach((unlisten) => unlisten());
+    };
+  }, [reconcileSyncCompletion, reloadSettings]);
 
   useEffect(() => {
     document.getElementById("root")!.setAttribute("data-theme", theme);
@@ -158,75 +342,20 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
-    clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => {
-      if (langFilter || favFilter !== null || searchQuery) {
-        const hasQuery = searchQuery.trim().length > 0;
-        const hasFilter = langFilter || favFilter !== null;
-        if (hasQuery || hasFilter) {
-          const filtered = snippets.filter((s) => {
-            const matchLang = !langFilter || s.language === langFilter;
-            const matchFav = favFilter === null || s.is_favorite === favFilter;
-            const matchSearch =
-              !searchQuery ||
-              s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-              s.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
-              s.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-              s.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase()));
-            return matchLang && matchFav && matchSearch;
-          });
-          if (JSON.stringify(filtered.map((s) => s.id)) !==
-              JSON.stringify(snippets.map((s) => s.id))) {
-            setFilteredSnippets(filtered);
-          } else {
-            setFilteredSnippets(null);
-          }
-        } else {
-          setFilteredSnippets(null);
-        }
-      } else {
-        setFilteredSnippets(null);
-      }
-    }, 150);
-  }, [searchQuery, langFilter, favFilter, snippets]);
-
-  const [filteredSnippets, setFilteredSnippets] = useState<Snippet[] | null>(null);
-  const displaySnippets = filteredSnippets ?? snippets;
-  const allTagOptions = Array.from(new Set(snippets.flatMap((s) => s.tags))).sort((a, b) => a.localeCompare(b));
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const ctrl = e.ctrlKey || e.metaKey;
-      if (ctrl && e.key === "n") {
-        e.preventDefault();
-        handleNew();
-      }
-      if (ctrl && e.key === "s") {
-        e.preventDefault();
-        handleSave();
-      }
-      if (ctrl && e.key === "e") {
-        e.preventDefault();
-        handleExport();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [form, selected, isNew]);
 
   useEffect(() => {
     const onContextMenu = (e: MouseEvent) => {
       const target = e.composedPath().find((node) => {
         if (!(node instanceof HTMLElement)) return false;
-        if (node.matches("input, textarea, [contenteditable='true']")) return true;
+        if (node instanceof HTMLTextAreaElement) return true;
+        if (node instanceof HTMLInputElement) {
+          return ["text", "search", "email", "url", "tel", "password", "number"].includes(
+            node.type,
+          );
+        }
         if (node.isContentEditable) return true;
-        if (node.classList.contains("cm-editor")) return true;
-        if (node.closest("input, textarea, [contenteditable='true'], .cm-editor")) return true;
-        return false;
+        return node.classList.contains("cm-editor") || !!node.closest(".cm-editor");
       }) as HTMLElement | undefined;
-
-      e.preventDefault();
 
       if (!target) {
         textMenuTargetRef.current = null;
@@ -234,11 +363,14 @@ export default function App() {
         return;
       }
 
-      const textTarget = target.matches("input, textarea, [contenteditable='true'], .cm-editor")
+      e.preventDefault();
+
+      const textTarget: HTMLElement = target.classList.contains("cm-editor")
         ? target
-        : target.closest("input, textarea, [contenteditable='true'], .cm-editor") as HTMLElement;
+        : target.closest<HTMLElement>(".cm-editor") ?? target;
 
       textMenuTargetRef.current = textTarget;
+      textMenuRestoreFocusRef.current = textTarget;
 
       const isEditorContext = textTarget.classList.contains("cm-editor") || !!textTarget.closest(".cm-editor");
       const menuW = 132;
@@ -249,8 +381,14 @@ export default function App() {
       setTextMenu({ visible: true, x, y, isEditorContext });
     };
 
-    const hideMenu = () => {
+    const hideMenu = (restoreFocus = false) => {
       setTextMenu((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+      if (restoreFocus) {
+        window.requestAnimationFrame(() => {
+          const restoreTarget = textMenuRestoreFocusRef.current;
+          if (restoreTarget?.isConnected) restoreTarget.focus();
+        });
+      }
     };
 
     const onPointerDown = (e: PointerEvent) => {
@@ -260,144 +398,302 @@ export default function App() {
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") hideMenu();
+      const menu = textMenuRef.current;
+      if (!menu) return;
+      const items = Array.from(
+        menu.querySelectorAll<HTMLButtonElement>("[role='menuitem']:not([disabled])"),
+      );
+      if (items.length === 0) return;
+      const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+      let nextIndex: number | null = null;
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        hideMenu(true);
+        return;
+      }
+      if (e.key === "Home") nextIndex = 0;
+      else if (e.key === "End") nextIndex = items.length - 1;
+      else if (e.key === "ArrowDown") nextIndex = (currentIndex + 1) % items.length;
+      else if (e.key === "ArrowUp") nextIndex = (currentIndex - 1 + items.length) % items.length;
+
+      if (nextIndex !== null) {
+        e.preventDefault();
+        items[nextIndex].focus();
+      }
     };
+
+    const onViewportChange = () => hideMenu();
 
     window.addEventListener("contextmenu", onContextMenu);
     window.addEventListener("pointerdown", onPointerDown, true);
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("resize", hideMenu);
-    window.addEventListener("scroll", hideMenu, true);
+    window.addEventListener("resize", onViewportChange);
+    window.addEventListener("scroll", onViewportChange, true);
 
     return () => {
       window.removeEventListener("contextmenu", onContextMenu);
       window.removeEventListener("pointerdown", onPointerDown, true);
       window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("resize", hideMenu);
-      window.removeEventListener("scroll", hideMenu, true);
+      window.removeEventListener("resize", onViewportChange);
+      window.removeEventListener("scroll", onViewportChange, true);
     };
   }, []);
 
+  useEffect(() => {
+    if (!textMenu.visible) return;
+    const frame = window.requestAnimationFrame(() => {
+      textMenuRef.current
+        ?.querySelector<HTMLButtonElement>("[role='menuitem']")
+        ?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [textMenu.visible]);
+
   const resetToEmpty = useCallback(() => {
+    ++detailRequestRef.current;
     setSelected(null);
     setIsNew(false);
+    setDetailState({ status: "idle" });
     setForm(EMPTY_FORM);
+    formRef.current = EMPTY_FORM;
+    editorTargetRef.current = null;
     originalFormRef.current = EMPTY_FORM;
+    setRefreshStatus(null);
   }, []);
 
   const startNewSnippetDraft = useCallback(() => {
+    ++detailRequestRef.current;
     setSelected(null);
     setIsNew(true);
+    setDetailState({ status: "idle" });
     setForm(EMPTY_FORM);
+    formRef.current = EMPTY_FORM;
+    editorTargetRef.current = "new";
     originalFormRef.current = EMPTY_FORM;
+    setRefreshStatus(null);
   }, []);
 
   const loadSnippet = useCallback((s: Snippet) => {
-    const loaded: SnippetForm = {
-      title: s.title,
-      content: s.content,
-      language: s.language,
-      description: s.description,
-      tags: s.tags,
-      is_favorite: s.is_favorite,
-    };
+    const loaded = snippetToForm(s);
     setSelected(s);
     setIsNew(false);
+    setDetailState({ status: "idle" });
     setForm(loaded);
+    formRef.current = loaded;
+    editorTargetRef.current = s.id;
     originalFormRef.current = loaded;
+    setRefreshStatus(null);
   }, []);
 
-  const handleSelect = useCallback((s: Snippet) => {
-    if (selected?.id === s.id) return;
-    if (isDirty) {
-      dialogRef.current?.ask(t("dialog.unsavedChanges")).then((action) => {
-        if (action === "save") {
-          handleSave().then(() => loadSnippet(s));
-        } else if (action === "discard") {
-          loadSnippet(s);
-        }
-      });
-      return;
-    }
-    loadSnippet(s);
-  }, [isDirty, selected, loadSnippet, t]);
-
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (): Promise<boolean> => {
+    if (saving) return false;
     if (!form.title.trim()) {
-      dialogRef.current?.alert(t("snippet.titleRequired"));
-      return;
+      await dialogRef.current?.alert(t("snippet.titleRequired"));
+      return false;
     }
+
+    const submittedForm = form;
+    const submittedTarget = isNew ? "new" : selected?.id ?? null;
+    const requestId = ++saveRequestRef.current;
+    formRef.current = submittedForm;
+    editorTargetRef.current = submittedTarget;
     setSaving(true);
     try {
+      let savedSnippet: Snippet;
       if (isNew) {
-        await create(form);
-        setIsNew(false);
-        await load();
+        savedSnippet = await create(submittedForm);
       } else if (selected) {
-        await update(selected.id, form, selected.updated_at);
-        setSelected({ ...selected, ...form, updated_at: new Date().toISOString() });
-        await load();
+        savedSnippet = await update(selected.id, selected.revision_id, submittedForm);
+      } else {
+        return false;
       }
-      originalFormRef.current = { ...form };
-    } catch (err) {
-      console.error(err);
-      dialogRef.current?.alert(t("errors.saveFailed", { error: err }));
-    } finally {
-      setSaving(false);
-    }
-  }, [isNew, form, selected, create, update, load, t]);
 
-  const handleNew = useCallback(() => {
-    if (isDirty) {
-      dialogRef.current?.ask(t("dialog.unsavedChanges")).then((action) => {
-        if (action === "save") {
-          handleSave().then(() => startNewSnippetDraft());
-        } else if (action === "discard") {
-          startNewSnippetDraft();
+      // Do not overwrite a newer edit or navigation that happened while IPC was
+      // pending. The database save succeeded, but the current UI now owns newer
+      // state and must retain its dirty snapshot.
+      if (
+        requestId !== saveRequestRef.current
+        || editorTargetRef.current !== submittedTarget
+        || isFormDirty(formRef.current, submittedForm)
+      ) {
+        try {
+          await reloadSnippets();
+        } catch (reloadError) {
+          await dialogRef.current?.alert(
+            t("errors.reloadAfterMutationFailed", {
+              error: localizeCommandError(reloadError, t),
+            })
+          );
         }
-      });
-      return;
+        return true;
+      }
+
+      const savedForm = snippetToForm(savedSnippet);
+      setSelected(savedSnippet);
+      setIsNew(false);
+      setForm(savedForm);
+      formRef.current = savedForm;
+      editorTargetRef.current = savedSnippet.id;
+      originalFormRef.current = savedForm;
+      try {
+        await reloadSnippets();
+      } catch (reloadError) {
+        await dialogRef.current?.alert(
+          t("errors.reloadAfterMutationFailed", {
+            error: localizeCommandError(reloadError, t),
+          })
+        );
+      }
+      return true;
+    } catch (cause) {
+      console.error(cause);
+      const normalized = normalizeCommandError(cause);
+      if (
+        normalized.code === "stale_revision"
+        && requestId === saveRequestRef.current
+        && editorTargetRef.current === submittedTarget
+        && selected
+      ) {
+        try {
+          const latest = await get(selected.id);
+          if (
+            requestId === saveRequestRef.current
+            && editorTargetRef.current === submittedTarget
+          ) {
+            setSelected(latest);
+            setRefreshStatus("stale");
+          }
+        } catch {
+          setRefreshStatus("stale");
+        }
+      }
+      await dialogRef.current?.alert(
+        t("errors.saveFailed", { error: localizeCommandError(cause, t) })
+      );
+      return false;
+    } finally {
+      if (requestId === saveRequestRef.current) {
+        setSaving(false);
+      }
+    }
+  }, [saving, isNew, form, selected, create, update, get, reloadSnippets, t]);
+
+  const fetchSnippetDetail = useCallback(async (snippet: SnippetSummary) => {
+    const requestId = ++detailRequestRef.current;
+    editorTargetRef.current = snippet.id;
+    setSelected(null);
+    setIsNew(false);
+    setDetailState({ status: "loading", summary: snippet });
+    setRefreshStatus(null);
+    try {
+      const detail = await get(snippet.id);
+      if (requestId !== detailRequestRef.current || editorTargetRef.current !== snippet.id) return;
+      loadSnippet(detail);
+    } catch (cause) {
+      if (requestId !== detailRequestRef.current || editorTargetRef.current !== snippet.id) return;
+      setDetailState({ status: "error", summary: snippet, error: cause });
+    }
+  }, [get, loadSnippet]);
+
+  const handleSelect = useCallback(async (snippet: SnippetSummary) => {
+    if (selected?.id === snippet.id || (
+      detailState.status !== "idle" && detailState.summary.id === snippet.id
+    )) return;
+    if (isDirty) {
+      const action = await dialogRef.current?.ask(t("dialog.unsavedChanges"));
+      if (action === "save") {
+        const saved = await handleSave();
+        if (!saved) return;
+      } else if (action !== "discard") {
+        return;
+      }
+    }
+
+    await fetchSnippetDetail(snippet);
+  }, [detailState, fetchSnippetDetail, handleSave, isDirty, selected, t]);
+
+  const handleNew = useCallback(async () => {
+    if (isDirty) {
+      const action = await dialogRef.current?.ask(t("dialog.unsavedChanges"));
+      if (action === "save") {
+        const saved = await handleSave();
+        if (!saved) return;
+      } else if (action !== "discard") {
+        return;
+      }
     }
     startNewSnippetDraft();
   }, [isDirty, t, handleSave, startNewSnippetDraft]);
 
-  const handleCancel = useCallback(() => {
+  const handleCancel = useCallback(async () => {
     if (isDirty) {
-      dialogRef.current?.ask(t("dialog.unsavedChanges")).then((action) => {
-        if (action === "save") {
-          handleSave().then(() => resetToEmpty());
-        } else if (action === "discard") {
-          resetToEmpty();
-        }
-      });
-      return;
+      const action = await dialogRef.current?.ask(t("dialog.unsavedChanges"));
+      if (action === "save") {
+        const saved = await handleSave();
+        if (!saved) return;
+      } else if (action !== "discard") {
+        return;
+      }
     }
     resetToEmpty();
-  }, [isDirty, t]);
+  }, [isDirty, t, handleSave, resetToEmpty]);
 
   const handleDelete = useCallback(
     async (id: string) => {
       if (!(await dialogRef.current?.confirm(t("dialog.confirmDelete")))) return;
-      await remove(id);
+      try {
+        await remove(id);
+      } catch (cause) {
+        await dialogRef.current?.alert(
+          t("errors.deleteFailed", { error: localizeCommandError(cause, t) })
+        );
+        return;
+      }
+
       if (selected?.id === id) {
         resetToEmpty();
       }
-      await load();
+      try {
+        await reloadSnippets();
+      } catch (reloadError) {
+        await dialogRef.current?.alert(
+          t("errors.reloadAfterMutationFailed", {
+            error: localizeCommandError(reloadError, t),
+          })
+        );
+      }
     },
-    [remove, selected, load, resetToEmpty, t]
+    [remove, selected, reloadSnippets, resetToEmpty, t]
   );
 
   const handleToggleFav = useCallback(
-    async (id: string) => { await toggleFavorite(id); },
-    [toggleFavorite]
+    async (id: string) => {
+      try {
+        await toggleFavorite(id);
+      } catch (cause) {
+        await dialogRef.current?.alert(
+          t("errors.favoriteFailed", { error: localizeCommandError(cause, t) })
+        );
+        return;
+      }
+
+      try {
+        await reloadSnippets();
+      } catch (reloadError) {
+        await dialogRef.current?.alert(
+          t("errors.reloadAfterMutationFailed", {
+            error: localizeCommandError(reloadError, t),
+          })
+        );
+      }
+    },
+    [toggleFavorite, reloadSnippets, t]
   );
 
   const handleExport = useCallback(async () => {
     try {
       const result = await exportAllToFile();
-      if (!result.file_path || !result.folder_path) {
-        throw new Error("invalid export result");
-      }
 
       const successKey = result.saved_in_downloads
         ? "errors.exportSuccessDownloads"
@@ -412,26 +708,67 @@ export default function App() {
         }
       );
       if (shouldOpen) {
-        await open(result.folder_path);
+        await invoke("open_trusted_directory", { directory: "export" });
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      dialogRef.current?.alert(t("errors.exportFailed", { error: message }));
+    } catch (cause) {
+      await dialogRef.current?.alert(
+        t("errors.exportFailed", { error: localizeCommandError(cause, t) })
+      );
     }
   }, [exportAllToFile, t]);
 
   const handleImportData = useCallback(
     async (jsonData: string) => {
       try {
-        const count = await importAll(jsonData);
-        dialogRef.current?.alert(t("errors.importSuccess", { count }));
-        await load();
-      } catch (err) {
-        dialogRef.current?.alert(t("errors.importFailed") + ": " + err);
+        const result = await importAll(jsonData);
+        const changed = result.inserted + result.updated;
+        try {
+          await reloadSnippets();
+        } catch (reloadError) {
+          await dialogRef.current?.alert(
+            t("errors.reloadAfterMutationFailed", {
+              error: localizeCommandError(reloadError, t),
+            })
+          );
+          return;
+        }
+        await dialogRef.current?.alert(t("errors.importSuccess", { count: changed }));
+      } catch (cause) {
+        await dialogRef.current?.alert(
+          t("errors.importFailed") + ": " + localizeCommandError(cause, t)
+        );
       }
     },
-    [importAll, load, t]
+    [importAll, reloadSnippets, t]
   );
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const ctrl = event.ctrlKey || event.metaKey;
+      if (!ctrl) return;
+
+      const key = event.key.toLowerCase();
+      if (settingsOpen) {
+        if (key === "n" || key === "s" || key === "e") {
+          event.preventDefault();
+        }
+        return;
+      }
+
+      if (key === "n") {
+        event.preventDefault();
+        void handleNew();
+      } else if (key === "s") {
+        event.preventDefault();
+        void handleSave();
+      } else if (key === "e") {
+        event.preventDefault();
+        void handleExport();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleNew, handleSave, handleExport, settingsOpen]);
 
   const handleThemeToggle = useCallback(() => {
     setTheme(theme === "dark" ? "light" : "dark");
@@ -441,21 +778,26 @@ export default function App() {
     let current = settings;
     if (!current) {
       try {
-        current = await invoke<AppSettings>("get_settings");
-      } catch {
+        current = await reloadSettings();
+      } catch (cause) {
+        await dialogRef.current?.alert(
+          `${t("errors.settingsLoadFailed")} ${localizeCommandError(cause, t)}`,
+        );
         return;
       }
     }
 
     try {
       await saveSettings({
-        ...current,
+        ...settingsToDraft(current),
         editor_line_wrap: !current.editor_line_wrap,
       });
-    } catch (e) {
-      dialogRef.current?.alert(t("errors.settingsFailed", { error: e }));
+    } catch (cause) {
+      await dialogRef.current?.alert(
+        t("errors.settingsFailed", { error: localizeCommandError(cause, t) }),
+      );
     }
-  }, [settings, saveSettings, t]);
+  }, [reloadSettings, saveSettings, settings, t]);
 
   const handleOpenSettings = useCallback(() => {
     setSettingsOpen(true);
@@ -500,18 +842,24 @@ export default function App() {
     }
 
     if (action === "paste") {
-      const txt = await readText().catch(() => "");
-      if (txt) {
-        if (inputTarget) {
-          const start = inputTarget.selectionStart ?? inputTarget.value.length;
-          const end = inputTarget.selectionEnd ?? inputTarget.value.length;
-          inputTarget.setRangeText(txt, start, end, "end");
-          inputTarget.dispatchEvent(new Event("input", { bubbles: true }));
-        } else if (cm) {
-          cm.dispatch(cm.state.replaceSelection(txt));
-        } else {
-          document.execCommand("insertText", false, txt);
+      try {
+        const txt = await readText();
+        if (txt) {
+          if (inputTarget) {
+            const start = inputTarget.selectionStart ?? inputTarget.value.length;
+            const end = inputTarget.selectionEnd ?? inputTarget.value.length;
+            inputTarget.setRangeText(txt, start, end, "end");
+            inputTarget.dispatchEvent(new Event("input", { bubbles: true }));
+          } else if (cm) {
+            cm.dispatch(cm.state.replaceSelection(txt));
+          } else {
+            document.execCommand("insertText", false, txt);
+          }
         }
+      } catch (cause) {
+        await dialogRef.current?.alert(
+          t("errors.clipboardFailed", { error: localizeCommandError(cause, t) })
+        );
       }
       setTextMenu((prev) => ({ ...prev, visible: false }));
       return;
@@ -521,14 +869,18 @@ export default function App() {
       const start = inputTarget.selectionStart ?? 0;
       const end = inputTarget.selectionEnd ?? 0;
       const selectedText = inputTarget.value.slice(start, end);
-      if (action === "copy") {
-        if (selectedText) await writeText(selectedText).catch(() => {});
-      } else if (action === "cut") {
-        if (selectedText) {
-          await writeText(selectedText).catch(() => {});
+      try {
+        if (action === "copy") {
+          if (selectedText) await writeText(selectedText);
+        } else if (action === "cut" && selectedText) {
+          await writeText(selectedText);
           inputTarget.setRangeText("", start, end, "start");
           inputTarget.dispatchEvent(new Event("input", { bubbles: true }));
         }
+      } catch (cause) {
+        await dialogRef.current?.alert(
+          t("errors.clipboardFailed", { error: localizeCommandError(cause, t) })
+        );
       }
       setTextMenu((prev) => ({ ...prev, visible: false }));
       return;
@@ -536,13 +888,17 @@ export default function App() {
 
     if (cm) {
       const selectedText = cm.state.sliceDoc(cm.state.selection.main.from, cm.state.selection.main.to);
-      if (action === "copy") {
-        if (selectedText) await writeText(selectedText).catch(() => {});
-      } else if (action === "cut") {
-        if (selectedText) {
-          await writeText(selectedText).catch(() => {});
+      try {
+        if (action === "copy") {
+          if (selectedText) await writeText(selectedText);
+        } else if (action === "cut" && selectedText) {
+          await writeText(selectedText);
           cm.dispatch(cm.state.replaceSelection(""));
         }
+      } catch (cause) {
+        await dialogRef.current?.alert(
+          t("errors.clipboardFailed", { error: localizeCommandError(cause, t) })
+        );
       }
       setTextMenu((prev) => ({ ...prev, visible: false }));
       return;
@@ -550,17 +906,41 @@ export default function App() {
 
     document.execCommand(action);
     setTextMenu((prev) => ({ ...prev, visible: false }));
-  }, [focusTextTarget, resolveCodeMirrorView]);
+  }, [focusTextTarget, resolveCodeMirrorView, t]);
 
   return (
     <>
       <Dialog ref={dialogRef} theme={theme} />
       {settingsOpen && (
-        <div className="settings-overlay" onClick={(e) => { if (e.target === e.currentTarget) setSettingsOpen(false); }}>
-          <SettingsPanel theme={theme} setTheme={setTheme} onClose={() => setSettingsOpen(false)} />
+        <div
+          className="app-modal-layer"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              void settingsPanelRef.current?.requestClose();
+            }
+          }}
+        >
+          <SettingsPanel
+            ref={settingsPanelRef}
+            theme={theme}
+            setTheme={setTheme}
+            onClose={() => setSettingsOpen(false)}
+            onSync={() => runManualSync("settings")}
+          />
         </div>
       )}
       <div className={`app ${theme}`}>
+      <div className="sync-live-region" role="status" aria-live="polite" aria-atomic="true">
+        {syncStatus?.source === "background" && (
+          syncStatus.status === "result" && syncStatus.result?.success
+            ? t("settings.backgroundSyncSuccess")
+            : syncStatus.status === "busy"
+              ? t("commandErrors.sync_busy")
+              : syncStatus.error
+                ? localizeCommandError(syncStatus.error, t)
+                : t("errors.syncFailedShort")
+        )}
+      </div>
       <Titlebar theme={theme} />
       <Toolbar
         searchQuery={searchQuery}
@@ -578,21 +958,53 @@ export default function App() {
         onSync={handleSync}
         syncing={syncing}
         favoriteFilter={favFilter}
-        totalCount={displaySnippets.length}
+        totalCount={total}
       />
 
       <div className="app-main">
         <Sidebar
-          snippets={displaySnippets}
-          selectedId={selected?.id ?? null}
+          snippets={snippets}
+          selectedId={selected?.id ?? editorTargetRef.current}
           onSelect={handleSelect}
           onDelete={handleDelete}
           onToggleFavorite={handleToggleFav}
           loading={loading}
+          loadingMore={loadingMore}
+          hasMore={hasMore}
+          error={error ? localizeCommandError(error, t) : null}
+          loadMoreError={loadMoreError ? localizeCommandError(loadMoreError, t) : null}
+          onRetry={() => { void reloadSnippets().catch(() => {}); }}
+          onLoadMore={() => { void loadMore().catch(() => {}); }}
         />
 
         <div className="editor-pane">
-          {!selected && !isNew ? (
+          {refreshStatus && (
+            <div
+              className={`refresh-status ${refreshStatus === "stale" ? "warning" : ""}`}
+              role="status"
+            >
+              {t(refreshStatus === "stale" ? "errors.remoteUpdatePending" : "errors.remoteUpdateApplied")}
+            </div>
+          )}
+          {!selected && !isNew && detailState.status === "loading" ? (
+            <div className="editor-empty" role="status">
+              <div className="spinner" />
+              <p>{t("snippet.loadingDetail")}</p>
+            </div>
+          ) : !selected && !isNew && detailState.status === "error" ? (
+            <div className="editor-empty" role="alert">
+              <p>{t("errors.loadDetailFailed", {
+                error: localizeCommandError(detailState.error, t),
+              })}</p>
+              <button
+                type="button"
+                className="snippet-retry-btn"
+                onClick={() => { void fetchSnippetDetail(detailState.summary); }}
+              >
+                {t("sidebar.retry")}
+              </button>
+            </div>
+          ) : !selected && !isNew ? (
             <div className="editor-empty">
               <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
                 <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
@@ -613,9 +1025,18 @@ export default function App() {
                 snippet={selected}
                 isNew={isNew}
                 form={form}
-                onChange={(f) => setForm((prev) => ({ ...prev, ...f }))}
+                onChange={(f) => {
+                  const next = { ...formRef.current, ...f };
+                  formRef.current = next;
+                  setForm(next);
+                }}
                 onSave={handleSave}
                 onCancel={handleCancel}
+                onClipboardError={(cause) => {
+                  void dialogRef.current?.alert(
+                    t("errors.clipboardFailed", { error: localizeCommandError(cause, t) })
+                  );
+                }}
                 theme={theme}
                 lineWrap={lineWrap}
                 saving={saving}
@@ -635,17 +1056,19 @@ export default function App() {
           style={{ left: textMenu.x, top: textMenu.y }}
           role="menu"
         >
-          <button type="button" className="text-context-item" onClick={() => runTextAction("cut")}>{t("contextMenu.cut")}</button>
-          <button type="button" className="text-context-item" onClick={() => runTextAction("copy")}>{t("contextMenu.copy")}</button>
-          <button type="button" className="text-context-item" onClick={() => runTextAction("paste")}>{t("contextMenu.paste")}</button>
-          <div className="text-context-divider" />
-          <button type="button" className="text-context-item" onClick={() => runTextAction("selectAll")}>{t("contextMenu.selectAll")}</button>
+          <button type="button" role="menuitem" className="text-context-item" onClick={() => runTextAction("cut")}>{t("contextMenu.cut")}</button>
+          <button type="button" role="menuitem" className="text-context-item" onClick={() => runTextAction("copy")}>{t("contextMenu.copy")}</button>
+          <button type="button" role="menuitem" className="text-context-item" onClick={() => runTextAction("paste")}>{t("contextMenu.paste")}</button>
+          <div className="text-context-divider" role="separator" />
+          <button type="button" role="menuitem" className="text-context-item" onClick={() => runTextAction("selectAll")}>{t("contextMenu.selectAll")}</button>
           {textMenu.isEditorContext && (
             <>
-              <div className="text-context-divider" />
+              <div className="text-context-divider" role="separator" />
               <button
                 type="button"
+                role="menuitem"
                 className="text-context-item"
+                aria-pressed={lineWrap}
                 onClick={async () => {
                   await handleToggleLineWrap();
                   setTextMenu((prev) => ({ ...prev, visible: false }));

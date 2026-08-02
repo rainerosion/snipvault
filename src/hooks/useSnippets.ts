@@ -1,54 +1,187 @@
-import { useState, useCallback } from "react";
+import { useCallback, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Snippet, SnippetForm } from "../types";
+import {
+  Snippet,
+  SnippetForm,
+  SnippetQuery,
+  SnippetQueryResult,
+  SnippetSummary,
+} from "../types";
+import { normalizeCommandError, type CommandError } from "../utils/commandErrors";
 
 export interface ExportResult {
-  file_path: string;
-  folder_path: string;
   saved_in_downloads: boolean;
 }
 
-export function useSnippets() {
-  const [snippets, setSnippets] = useState<Snippet[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export interface ImportResult {
+  input_count: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+}
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+export interface ListRequest {
+  query?: string;
+  language?: string | null;
+  favorite?: boolean | null;
+  exact_tag?: string | null;
+}
+
+const PAGE_SIZE = 100;
+
+function normalizeRequest(request: ListRequest = {}): ListRequest {
+  return {
+    query: request.query?.trim() ?? "",
+    language: request.language || null,
+    favorite: request.favorite ?? null,
+    exact_tag: request.exact_tag || null,
+  };
+}
+
+function requestKey(request: ListRequest): string {
+  return JSON.stringify(normalizeRequest(request));
+}
+
+export function useSnippets() {
+  const [snippets, setSnippets] = useState<SnippetSummary[]>([]);
+  const [total, setTotal] = useState(0);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [tags, setTags] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<CommandError | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<CommandError | null>(null);
+  const generationRef = useRef(0);
+  const requestRef = useRef<ListRequest>(normalizeRequest());
+  const requestKeyRef = useRef(requestKey(requestRef.current));
+  const snippetsRef = useRef<SnippetSummary[]>([]);
+  const nextCursorRef = useRef<string | null>(null);
+  const loadMoreInFlightRef = useRef(false);
+  const loadMoreRequestRef = useRef(0);
+
+  const applyItems = useCallback((items: SnippetSummary[]) => {
+    snippetsRef.current = items;
+    setSnippets(items);
+  }, []);
+
+  const loadTags = useCallback(async (generation: number) => {
     try {
-      const data = await invoke<Snippet[]>("get_snippets");
-      setSnippets(data);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
+      const values = await invoke<string[]>("get_snippet_tags");
+      if (generation === generationRef.current) setTags(values);
+    } catch {
+      // Tag metadata is supplemental. The authoritative list error remains the
+      // primary failure state and suggestions retain their last valid values.
     }
   }, []);
 
-  const search = useCallback(
-    async (query: string, language?: string, tag?: string) => {
+  const load = useCallback(
+    async (request: ListRequest = requestRef.current): Promise<SnippetQueryResult | null> => {
+      const normalized = normalizeRequest(request);
+      const key = requestKey(normalized);
+      requestRef.current = normalized;
+      requestKeyRef.current = key;
+      const generation = ++generationRef.current;
+      ++loadMoreRequestRef.current;
+      loadMoreInFlightRef.current = false;
       setLoading(true);
+      setLoadingMore(false);
       setError(null);
+      setLoadMoreError(null);
       try {
-        const data = await invoke<Snippet[]>("search_snippets", {
-          query,
-          language: language || null,
-          tag: tag || null,
-        });
-        setSnippets(data);
-      } catch (e) {
-        setError(String(e));
+        const query: SnippetQuery = {
+          query: normalized.query ?? "",
+          language: normalized.language ?? null,
+          favorite: normalized.favorite ?? null,
+          exact_tag: normalized.exact_tag ?? null,
+          limit: PAGE_SIZE,
+          cursor: null,
+        };
+        const result = await invoke<SnippetQueryResult>("query_snippets", { request: query });
+        if (generation !== generationRef.current || key !== requestKeyRef.current) return null;
+        applyItems(result.items);
+        setTotal(result.total);
+        nextCursorRef.current = result.next_cursor;
+        setNextCursor(result.next_cursor);
+        void loadTags(generation);
+        return result;
+      } catch (cause) {
+        if (generation === generationRef.current && key === requestKeyRef.current) {
+          setError(normalizeCommandError(cause));
+        }
+        throw cause;
       } finally {
-        setLoading(false);
+        if (generation === generationRef.current && key === requestKeyRef.current) {
+          setLoading(false);
+        }
       }
     },
-    []
+    [applyItems, loadTags],
   );
+
+  const loadMore = useCallback(async (): Promise<SnippetQueryResult | null> => {
+    const cursor = nextCursorRef.current;
+    if (!cursor || loadMoreInFlightRef.current) return null;
+    loadMoreInFlightRef.current = true;
+    const appendRequest = ++loadMoreRequestRef.current;
+    const generation = generationRef.current;
+    const key = requestKeyRef.current;
+    const expectedIds = new Set(snippetsRef.current.map((snippet) => snippet.id));
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const active = requestRef.current;
+      const query: SnippetQuery = {
+        query: active.query ?? "",
+        language: active.language ?? null,
+        favorite: active.favorite ?? null,
+        exact_tag: active.exact_tag ?? null,
+        limit: PAGE_SIZE,
+        cursor,
+      };
+      const result = await invoke<SnippetQueryResult>("query_snippets", { request: query });
+      if (
+        generation !== generationRef.current ||
+        key !== requestKeyRef.current ||
+        cursor !== nextCursorRef.current
+      ) {
+        return null;
+      }
+      const combined = [
+        ...snippetsRef.current,
+        ...result.items.filter((snippet) => !expectedIds.has(snippet.id)),
+      ];
+      applyItems(combined);
+      setTotal(result.total);
+      nextCursorRef.current = result.next_cursor;
+      setNextCursor(result.next_cursor);
+      return result;
+    } catch (cause) {
+      if (
+        appendRequest === loadMoreRequestRef.current &&
+        generation === generationRef.current &&
+        key === requestKeyRef.current &&
+        cursor === nextCursorRef.current
+      ) {
+        setLoadMoreError(normalizeCommandError(cause));
+      }
+      throw cause;
+    } finally {
+      if (appendRequest === loadMoreRequestRef.current) {
+        loadMoreInFlightRef.current = false;
+        if (generation === generationRef.current && key === requestKeyRef.current) {
+          setLoadingMore(false);
+        }
+      }
+    }
+  }, [applyItems]);
+
+  const get = useCallback(async (id: string) => {
+    return invoke<Snippet>("get_snippet", { id });
+  }, []);
 
   const create = useCallback(async (form: SnippetForm) => {
     const id = crypto.randomUUID();
-    await invoke("create_snippet", {
+    return invoke<Snippet>("create_snippet", {
       id,
       title: form.title,
       content: form.content,
@@ -59,56 +192,49 @@ export function useSnippets() {
     });
   }, []);
 
-  const update = useCallback(
-    async (id: string, form: SnippetForm, updatedAt: string) => {
-      await invoke("update_snippet", {
-        id,
-        title: form.title,
-        content: form.content,
-        language: form.language,
-        description: form.description,
-        tags: form.tags,
-        isFavorite: form.is_favorite,
-        updatedAt,
-      });
-    },
-    []
-  );
+  const update = useCallback(async (id: string, baseRevisionId: string, form: SnippetForm) => {
+    return invoke<Snippet>("update_snippet", {
+      id,
+      title: form.title,
+      content: form.content,
+      language: form.language,
+      description: form.description,
+      tags: form.tags,
+      isFavorite: form.is_favorite,
+      baseRevisionId,
+    });
+  }, []);
 
   const remove = useCallback(async (id: string) => {
-    await invoke("delete_snippet", { id });
+    return invoke<{ revision_id: string; deleted: boolean }>("delete_snippet", { id });
   }, []);
 
   const toggleFavorite = useCallback(async (id: string) => {
-    const fav = await invoke<boolean>("toggle_favorite", { id });
-    setSnippets((prev) =>
-      prev.map((s) =>
-        s.id === id ? { ...s, is_favorite: fav, updated_at: new Date().toISOString() } : s
-      )
-    );
-    return fav;
+    return invoke<Snippet>("toggle_favorite", { id });
   }, []);
 
-  const exportAll = useCallback(async () => {
-    return invoke<string>("export_snippets");
-  }, []);
-
-  const exportAllToFile = useCallback(async () => {
-    return invoke<ExportResult>("export_snippets_to_file");
-  }, []);
-
-  const importAll = useCallback(async (jsonData: string) => {
-    const count = await invoke<number>("import_snippets", { jsonData });
-    await load();
-    return count;
-  }, [load]);
+  const exportAll = useCallback(async () => invoke<string>("export_snippets"), []);
+  const exportAllToFile = useCallback(
+    async () => invoke<ExportResult>("export_snippets_to_file"),
+    [],
+  );
+  const importAll = useCallback(
+    async (jsonData: string) => invoke<ImportResult>("import_snippets", { jsonData }),
+    [],
+  );
 
   return {
     snippets,
+    total,
+    hasMore: nextCursor !== null,
+    tags,
     loading,
+    loadingMore,
     error,
+    loadMoreError,
     load,
-    search,
+    loadMore,
+    get,
     create,
     update,
     remove,

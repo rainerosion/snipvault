@@ -6,21 +6,10 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { javascript } from "@codemirror/lang-javascript";
-import { python } from "@codemirror/lang-python";
-import { rust } from "@codemirror/lang-rust";
-import { java } from "@codemirror/lang-java";
-import { cpp } from "@codemirror/lang-cpp";
-import { php } from "@codemirror/lang-php";
-import { sql } from "@codemirror/lang-sql";
-import { xml } from "@codemirror/lang-xml";
-import { json } from "@codemirror/lang-json";
-import { css } from "@codemirror/lang-css";
-import { markdown } from "@codemirror/lang-markdown";
-import { yaml } from "@codemirror/lang-yaml";
 import { Snippet, SnippetForm } from "../types";
-import { LANGUAGES } from "../utils/languages";
+import { LANGUAGES, type LanguageId } from "../utils/languages";
 import { LanguageContext } from "../context/LanguageContext";
+import { getLanguageExtensions } from "./languageExtensions";
 
 interface SnippetEditorProps {
   snippet: Snippet | null;
@@ -29,6 +18,7 @@ interface SnippetEditorProps {
   onChange: (f: Partial<SnippetForm>) => void;
   onSave: () => void;
   onCancel: () => void;
+  onClipboardError?: (error: unknown) => void;
   theme: "dark" | "light";
   lineWrap: boolean;
   saving: boolean;
@@ -102,30 +92,6 @@ const lightHighlight = syntaxHighlighting(HighlightStyle.define([
   { tag: t.invalid, color: LIGHT_MINIMAP_COLORS.keyword },
 ]));
 
-function getLangExtension(lang: string) {
-  switch (lang) {
-    case "javascript": return javascript({ jsx: true, typescript: false });
-    case "typescript": return javascript({ jsx: true, typescript: true });
-    case "jsx": return javascript({ jsx: true });
-    case "tsx": return javascript({ jsx: true, typescript: true });
-    case "python": return python();
-    case "rust": return rust();
-    case "java": return java();
-    case "cpp":
-    case "c":
-    case "csharp": return cpp();
-    case "php": return php();
-    case "sql": return sql();
-    case "xml":
-    case "html": return xml();
-    case "json": return json();
-    case "css": return css();
-    case "markdown": return markdown();
-    case "yaml": return yaml();
-    default: return [];
-  }
-}
-
 function buildMainExtensions(isDark: boolean, lang: string, lineWrap: boolean) {
   const selBg = isDark ? "rgba(56,189,248,0.62)" : "rgba(2,132,199,0.42)";
   const selBgF = isDark ? "rgba(56,189,248,0.74)" : "rgba(2,132,199,0.56)";
@@ -145,12 +111,12 @@ function buildMainExtensions(isDark: boolean, lang: string, lineWrap: boolean) {
       minHeight: "0",
       minWidth: "0",
       width: "100%",
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+      fontFamily: "ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace",
       overflowY: "auto !important",
       overflowX: lineWrap ? "hidden !important" : "auto !important",
     },
     ".cm-content": {
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+      fontFamily: "ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace",
       caretColor: cursor,
       whiteSpace: lineWrap ? "pre-wrap" : "pre",
       width: lineWrap ? "auto" : "max-content",
@@ -174,7 +140,11 @@ function buildMainExtensions(isDark: boolean, lang: string, lineWrap: boolean) {
 
   return [
     ...(lineWrap ? [EditorView.lineWrapping] : []),
-    getLangExtension(lang),
+    getLanguageExtensions(
+      LANGUAGES.some((language) => language.id === lang)
+        ? (lang as LanguageId)
+        : "plaintext",
+    ),
     isDark ? githubDark : githubLight,
     cmLayout,
     isDark ? darkHighlight : lightHighlight,
@@ -321,7 +291,16 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMap
         ctx.fillRect(x, y + 1, remainW, GLANCE_LINE_H - 2);
       }
     });
-  }, [lines, width, totalH, bg, isDark, scaleX, hasExtremeLine]);
+  }, [
+    lines,
+    width,
+    totalH,
+    bg,
+    isDark,
+    scaleX,
+    hasExtremeLine,
+    effectiveMaxLen,
+  ]);
 
   const syncViewportFromMain = useCallback(() => {
     const pane = paneRef.current;
@@ -480,7 +459,7 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMap
   }, [mainScrollEl, scrollMainTo, syncViewportFromMain, totalH]);
 
   return (
-    <div className="minimap-wrap" style={{ width }}>
+    <div className="minimap-wrap" style={{ width }} aria-hidden="true">
       <div
         ref={paneRef}
         className="minimap-pane"
@@ -503,8 +482,192 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMap
   );
 }
 
+function TagCombobox({
+  tags,
+  tagOptions,
+  onChange,
+}: {
+  tags: string[];
+  tagOptions: string[];
+  onChange: (tags: string[]) => void;
+}) {
+  const { t } = useTranslation();
+  const [tagInput, setTagInput] = useState("");
+  const [showTagSuggestions, setShowTagSuggestions] = useState(false);
+  const [activeTagIndex, setActiveTagIndex] = useState(0);
+  const tagInputRef = useRef<HTMLInputElement>(null);
+  const tagListboxId = "snippet-tag-options";
+
+  const filteredTagOptions = useMemo(() => {
+    const query = tagInput.trim().toLowerCase();
+    return tagOptions
+      .filter(
+        (tag) =>
+          !tags.includes(tag) &&
+          (query === "" || tag.toLowerCase().includes(query)),
+      )
+      .slice(0, 8);
+  }, [tagInput, tagOptions, tags]);
+
+  const addTag = useCallback(
+    (raw: string) => {
+      const tag = raw.trim();
+      if (!tag) return;
+      if (!tags.includes(tag)) onChange([...tags, tag]);
+      setTagInput("");
+      setShowTagSuggestions(false);
+      setActiveTagIndex(0);
+    },
+    [onChange, tags],
+  );
+
+  const removeTag = useCallback(
+    (tag: string) => onChange(tags.filter((item) => item !== tag)),
+    [onChange, tags],
+  );
+
+  useEffect(() => {
+    setActiveTagIndex((current) =>
+      filteredTagOptions.length === 0
+        ? 0
+        : Math.min(current, filteredTagOptions.length - 1),
+    );
+  }, [filteredTagOptions.length]);
+
+  const handleTagKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        if (filteredTagOptions.length === 0) return;
+        event.preventDefault();
+        setShowTagSuggestions(true);
+        setActiveTagIndex((current) => {
+          const direction = event.key === "ArrowDown" ? 1 : -1;
+          return (
+            (current + direction + filteredTagOptions.length) %
+            filteredTagOptions.length
+          );
+        });
+        return;
+      }
+
+      if (event.key === "Escape" && showTagSuggestions) {
+        event.preventDefault();
+        setShowTagSuggestions(false);
+        return;
+      }
+
+      if (event.key === "Enter" || event.key === ",") {
+        event.preventDefault();
+        const activeSuggestion = showTagSuggestions
+          ? filteredTagOptions[activeTagIndex]
+          : undefined;
+        addTag(activeSuggestion ?? tagInput);
+        return;
+      }
+
+      if (event.key === "Backspace" && !tagInput && tags.length > 0) {
+        removeTag(tags[tags.length - 1]);
+      }
+    },
+    [
+      activeTagIndex,
+      addTag,
+      filteredTagOptions,
+      removeTag,
+      showTagSuggestions,
+      tagInput,
+      tags,
+    ],
+  );
+
+  return (
+    <div className="editor-tags">
+      {tags.map((tag) => (
+        <span key={tag} className="tag-chip">
+          <span>{tag}</span>
+          <button
+            type="button"
+            className="tag-remove"
+            onClick={() => removeTag(tag)}
+            aria-label={t("snippet.removeTag", { tag })}
+            title={t("snippet.removeTag", { tag })}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      <div className="tag-input-wrap">
+        <input
+          ref={tagInputRef}
+          className="tag-input"
+          placeholder={t("snippet.tags")}
+          value={tagInput}
+          role="combobox"
+          aria-label={t("snippet.tags")}
+          aria-expanded={showTagSuggestions && filteredTagOptions.length > 0}
+          aria-controls={tagListboxId}
+          aria-autocomplete="list"
+          aria-activedescendant={
+            showTagSuggestions && filteredTagOptions[activeTagIndex]
+              ? `${tagListboxId}-${activeTagIndex}`
+              : undefined
+          }
+          onClick={() => {
+            setShowTagSuggestions(true);
+            setActiveTagIndex(0);
+          }}
+          onFocus={() => {
+            setShowTagSuggestions(true);
+            setActiveTagIndex(0);
+          }}
+          onBlur={(event) => {
+            const next = event.relatedTarget;
+            if (
+              !(next instanceof Node) ||
+              !event.currentTarget.parentElement?.contains(next)
+            ) {
+              setShowTagSuggestions(false);
+            }
+          }}
+          onChange={(event) => {
+            setTagInput(event.target.value);
+            setShowTagSuggestions(true);
+            setActiveTagIndex(0);
+          }}
+          onKeyDown={handleTagKeyDown}
+        />
+        {showTagSuggestions && filteredTagOptions.length > 0 && (
+          <div id={tagListboxId} className="tag-suggestions" role="listbox">
+            {filteredTagOptions.map((tag, index) => (
+              <button
+                id={`${tagListboxId}-${index}`}
+                key={tag}
+                type="button"
+                className={`tag-suggestion ${index === activeTagIndex ? "active" : ""}`}
+                role="option"
+                aria-selected={index === activeTagIndex}
+                tabIndex={-1}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  addTag(tag);
+                  tagInputRef.current?.focus();
+                }}
+                onMouseEnter={() => setActiveTagIndex(index)}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export const SnippetTagCombobox = TagCombobox;
+
 export function SnippetEditor({
-  snippet, isNew, form, onChange, onSave, onCancel,
+  snippet, isNew, form, onChange, onSave, onCancel, onClipboardError,
   theme, lineWrap, saving, isDirty, tagOptions,
 }: SnippetEditorProps) {
   const { t } = useTranslation();
@@ -515,8 +678,6 @@ export function SnippetEditor({
 
   const splitRef = useRef<HTMLDivElement | null>(null);
   const [copied, setCopied] = useState(false);
-  const [tagInput, setTagInput] = useState("");
-  const [showTagSuggestions, setShowTagSuggestions] = useState(false);
   const [minimapWidth, setMinimapWidth] = useState(96);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -556,28 +717,6 @@ export function SnippetEditor({
     document.addEventListener("pointerup", onUp);
   }, [minimapWidth]);
 
-  const filteredTagOptions = useMemo(() => {
-    const q = tagInput.trim().toLowerCase();
-    return tagOptions
-      .filter((tag) => !form.tags.includes(tag) && (q === "" || tag.toLowerCase().includes(q)))
-      .slice(0, 8);
-  }, [tagOptions, form.tags, tagInput]);
-
-  const addTag = useCallback((raw: string) => {
-    const tag = raw.trim();
-    if (!tag) return;
-    if (form.tags.includes(tag)) { setTagInput(""); setShowTagSuggestions(false); return; }
-    onChange({ tags: [...form.tags, tag] });
-    setTagInput("");
-    setShowTagSuggestions(false);
-  }, [form.tags, onChange]);
-
-  const removeTag = useCallback((tag: string) => {
-    onChange({ tags: form.tags.filter((x) => x !== tag) });
-  }, [form.tags, onChange]);
-
-  const commitTagInput = useCallback(() => addTag(tagInput), [addTag, tagInput]);
-
   const handleCopy = useCallback(async () => {
     if (!form.content) return;
     try {
@@ -585,9 +724,9 @@ export function SnippetEditor({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (e) {
-      console.error("Copy failed:", e);
+      onClipboardError?.(e);
     }
-  }, [form.content]);
+  }, [form.content, onClipboardError]);
 
   const formatDate = (iso: string) => {
     try {
@@ -625,11 +764,14 @@ export function SnippetEditor({
             {LANGUAGES.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
           <button
+            type="button"
             className={`fav-toggle ${form.is_favorite ? "active" : ""}`}
             onClick={() => onChange({ is_favorite: !form.is_favorite })}
             title={form.is_favorite ? t("snippet.unfavorite") : t("snippet.favorite")}
+            aria-label={form.is_favorite ? t("snippet.unfavorite") : t("snippet.favorite")}
+            aria-pressed={form.is_favorite}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill={form.is_favorite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill={form.is_favorite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
             </svg>
           </button>
@@ -648,37 +790,11 @@ export function SnippetEditor({
           <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
           <line x1="7" y1="7" x2="7.01" y2="7" />
         </svg>
-        <div className="editor-tags">
-          {form.tags.map((tag) => (
-            <span key={tag} className="tag-chip">
-              <span>{tag}</span>
-              <button type="button" className="tag-remove" onClick={() => removeTag(tag)} title={t("snippet.delete")}>×</button>
-            </span>
-          ))}
-          <div className="tag-input-wrap">
-            <input
-              className="tag-input"
-              placeholder={language === "zh" ? "输入后按回车" : "Press Enter"}
-              value={tagInput}
-              onFocus={() => setShowTagSuggestions(true)}
-              onBlur={() => setTimeout(() => setShowTagSuggestions(false), 120)}
-              onChange={(e) => { setTagInput(e.target.value); setShowTagSuggestions(true); }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === ",") { e.preventDefault(); commitTagInput(); }
-                if (e.key === "Backspace" && !tagInput && form.tags.length > 0) removeTag(form.tags[form.tags.length - 1]);
-              }}
-            />
-            {showTagSuggestions && filteredTagOptions.length > 0 && (
-              <div className="tag-suggestions">
-                {filteredTagOptions.map((tag) => (
-                  <button key={tag} type="button" className="tag-suggestion" onMouseDown={(e) => { e.preventDefault(); addTag(tag); }}>
-                    {tag}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+        <TagCombobox
+          tags={form.tags}
+          tagOptions={tagOptions}
+          onChange={(tags) => onChange({ tags })}
+        />
       </div>
 
       <div ref={splitRef} className="cm-editor-split">
@@ -708,7 +824,12 @@ export function SnippetEditor({
           />
         </div>
 
-        <div className={`codeglance-divider ${isDragging ? "active" : ""}`} onPointerDown={handleDividerPointerDown} />
+        <div
+          className={`codeglance-divider ${isDragging ? "active" : ""}`}
+          onPointerDown={handleDividerPointerDown}
+          aria-hidden="true"
+          title={t("snippet.minimapResize")}
+        />
 
         <MiniMap
           content={form.content}
@@ -730,16 +851,16 @@ export function SnippetEditor({
         </div>
         <div className="footer-btns">
           {form.content && (
-            <button className={`btn-copy ${copied ? "copied" : ""}`} onClick={handleCopy} title={t("snippet.copy")}>
+            <button type="button" className={`btn-copy ${copied ? "copied" : ""}`} onClick={handleCopy} title={t("snippet.copy")} aria-live="polite">
               {copied ? t("snippet.copied") : t("snippet.copy")}
             </button>
           )}
           {(isNew || isDirty) && (
-            <button className="btn-cancel" onClick={onCancel}>
+            <button type="button" className="btn-cancel" onClick={onCancel}>
               {isNew ? t("snippet.cancel") : t("snippet.cancelEdit")}
             </button>
           )}
-          <button className="btn-save" onClick={onSave} disabled={saving}>
+          <button type="button" className="btn-save" onClick={onSave} disabled={saving} aria-busy={saving}>
             {saving ? t("snippet.saveInProgress") : isNew ? t("snippet.create") : t("snippet.save")}
           </button>
         </div>

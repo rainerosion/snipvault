@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useImperativeHandle, forwardRef, useContext } from "react";
+import React, { useRef, useImperativeHandle, forwardRef } from "react";
 import { useTranslation } from "react-i18next";
+import { ModalSurface } from "./ModalSurface";
 
 export type DialogResponse = "save" | "discard" | "cancel";
 
@@ -34,6 +35,7 @@ export const Dialog = forwardRef<DialogHandle, DialogProps>(function Dialog(
   const resolveRef = useRef<(v?: boolean) => void>(() => {});
   const resolveAskRef = useRef<(v: DialogResponse) => void>(() => {});
   const overlayRef = useRef<HTMLDivElement>(null);
+  const initialFocusRef = useRef<HTMLButtonElement>(null);
 
   useImperativeHandle(ref, () => ({
     async confirm(message: string, title = "dialog.title", options?: ConfirmOptions) {
@@ -69,26 +71,19 @@ export const Dialog = forwardRef<DialogHandle, DialogProps>(function Dialog(
     },
   }));
 
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setOpen(false);
-        if (type === "ask") resolveAskRef.current("cancel");
-        else resolveRef.current(false);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [open, type]);
+  const closeDialog = (result?: boolean | DialogResponse) => {
+    setOpen(false);
+    if (type === "ask") {
+      resolveAskRef.current(
+        result === "save" || result === "discard" ? result : "cancel",
+      );
+    } else {
+      resolveRef.current(typeof result === "boolean" ? result : false);
+    }
+  };
 
   const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === overlayRef.current) {
-      setOpen(false);
-      if (type === "ask") resolveAskRef.current("cancel");
-      else resolveRef.current(false);
-    }
+    if (e.target === overlayRef.current) closeDialog();
   };
 
   if (!open) return null;
@@ -97,30 +92,42 @@ export const Dialog = forwardRef<DialogHandle, DialogProps>(function Dialog(
 
   return (
     <div className="dialog-overlay" ref={overlayRef} onClick={handleOverlayClick}>
-      <div className={`dialog-box ${theme}`} onClick={(e) => e.stopPropagation()}>
-        <div className="dialog-title">{resolveText(titleKey)}</div>
-        <div className="dialog-message">{resolveText(message)}</div>
+      <ModalSurface
+        className={`dialog-box ${theme}`}
+        role={type === "alert" ? "alertdialog" : "dialog"}
+        labelledBy="promise-dialog-title"
+        describedBy="promise-dialog-message"
+        onEscape={() => closeDialog()}
+        initialFocusRef={initialFocusRef}
+      >
+        <div id="promise-dialog-title" className="dialog-title">
+          {resolveText(titleKey)}
+        </div>
+        <div id="promise-dialog-message" className="dialog-message">
+          {resolveText(message)}
+        </div>
         <div className="dialog-actions">
           {type === "ask" ? (
             <>
               <button
+                ref={initialFocusRef}
                 type="button"
                 className="dialog-btn dialog-btn-cancel"
-                onClick={() => { setOpen(false); resolveAskRef.current("cancel"); }}
+                onClick={() => closeDialog("cancel")}
               >
                 {t("dialog.cancel")}
               </button>
               <button
                 type="button"
                 className="dialog-btn dialog-btn-discard"
-                onClick={() => { setOpen(false); resolveAskRef.current("discard"); }}
+                onClick={() => closeDialog("discard")}
               >
                 {t("dialog.discard")}
               </button>
               <button
                 type="button"
                 className="dialog-btn dialog-btn-save"
-                onClick={() => { setOpen(false); resolveAskRef.current("save"); }}
+                onClick={() => closeDialog("save")}
               >
                 {t("dialog.save")}
               </button>
@@ -128,31 +135,33 @@ export const Dialog = forwardRef<DialogHandle, DialogProps>(function Dialog(
           ) : type === "confirm" ? (
             <>
               <button
+                ref={initialFocusRef}
                 type="button"
                 className="dialog-btn dialog-btn-cancel"
-                onClick={() => { setOpen(false); resolveRef.current(false); }}
+                onClick={() => closeDialog(false)}
               >
                 {resolveText(confirmLabels.cancelLabel)}
               </button>
               <button
                 type="button"
                 className="dialog-btn dialog-btn-ok"
-                onClick={() => { setOpen(false); resolveRef.current(true); }}
+                onClick={() => closeDialog(true)}
               >
                 {resolveText(confirmLabels.confirmLabel)}
               </button>
             </>
           ) : (
             <button
+              ref={initialFocusRef}
               type="button"
               className="dialog-btn dialog-btn-ok"
-              onClick={() => { setOpen(false); resolveRef.current(); }}
+              onClick={() => closeDialog(true)}
             >
               {t("dialog.confirm")}
             </button>
           )}
         </div>
-      </div>
+      </ModalSurface>
     </div>
   );
 });

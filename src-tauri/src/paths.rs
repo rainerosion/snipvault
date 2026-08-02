@@ -40,7 +40,7 @@ fn detect_installed() -> bool {
 #[cfg(windows)]
 fn is_registered_install() -> bool {
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
-    use winreg::{HKEY, RegKey};
+    use winreg::{RegKey, HKEY};
 
     fn has_uninstall_entry(hkey: HKEY, subkey: &str) -> bool {
         let root = RegKey::predef(hkey);
@@ -108,19 +108,18 @@ fn resolve_data_dir() -> PathBuf {
             if let Some(exe_dir) = exe_path.parent() {
                 let installed_data_dir = exe_dir.join("data");
                 if can_write_dir(&installed_data_dir) {
-                    log::info!("get_data_dir: resolved installed path = {:?}", installed_data_dir);
+                    log::info!("get_data_dir: using writable installed data directory");
                     return installed_data_dir;
                 }
 
                 log::warn!(
-                    "get_data_dir: installed path not writable, fallback to appdata: {:?}",
-                    installed_data_dir
+                    "get_data_dir: installed data directory is not writable; using appdata fallback"
                 );
             }
         }
     }
 
-    log::info!("get_data_dir: resolved appdata path = {:?}", app_data_dir);
+    log::info!("get_data_dir: using roaming appdata directory");
     app_data_dir
 }
 

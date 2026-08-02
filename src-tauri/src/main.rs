@@ -1,141 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use once_cell::sync::OnceCell;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
-use tauri::{
-    image::Image,
-    menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder},
-    tray::{TrayIcon, TrayIconBuilder},
-    AppHandle, Emitter, Manager,
-};
-
-/// Stores the tray icon so we can rebuild it when autostart state changes.
-static TRAY: OnceCell<Arc<Mutex<Option<TrayIcon>>>> = OnceCell::new();
-
-fn build_tray_menu(app: &AppHandle, auto_start: bool) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    let show_item = MenuItemBuilder::with_id("show", "打开 灵藏 SnipVault").build(app)?;
-    let sync_item = MenuItemBuilder::with_id("sync", "立即同步").build(app)?;
-    let settings_item = MenuItemBuilder::with_id("settings", "设置").build(app)?;
-    let autostart_item = CheckMenuItemBuilder::with_id("autostart", "开机自启")
-        .checked(auto_start)
-        .build(app)?;
-    let quit_item = MenuItemBuilder::with_id("quit", "退出").build(app)?;
-
-    MenuBuilder::new(app)
-        .item(&show_item)
-        .separator()
-        .item(&sync_item)
-        .item(&settings_item)
-        .separator()
-        .item(&autostart_item)
-        .separator()
-        .item(&quit_item)
-        .build()
-}
-
-fn reveal_main_window(app: &AppHandle) {
-    snipvault::commands::WINDOW_SHOWN.store(true, Ordering::SeqCst);
-    snipvault::commands::boot_log("reveal_main_window", "manual_reveal");
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
-}
-
-fn build_tray(app: &AppHandle, auto_start: bool) -> tauri::Result<TrayIcon> {
-    let menu = build_tray_menu(app, auto_start)?;
-
-    TrayIconBuilder::new()
-        .icon(Image::from_path("icons/32x32.png").unwrap_or_else(|_| {
-            Image::from_bytes(include_bytes!("../icons/32x32.png")).expect("invalid tray icon")
-        }))
-        .menu(&menu)
-        .tooltip("灵藏 SnipVault")
-        .on_tray_icon_event(|tray, event| {
-            if let tauri::tray::TrayIconEvent::Click {
-                button: tauri::tray::MouseButton::Left,
-                ..
-            } = event
-            {
-                reveal_main_window(tray.app_handle());
-            }
-        })
-        .on_menu_event(|app, event| {
-            match event.id().as_ref() {
-                "show" => {
-                    reveal_main_window(app);
-                }
-                "sync" => {
-                    reveal_main_window(app);
-                    let app_handle = app.clone();
-                    std::thread::spawn(move || {
-                        match snipvault::webdav::sync_merge() {
-                            Ok(result) => {
-                                log::info!("Tray sync result: {}", result.message);
-                                if let Some(window) = app_handle.get_webview_window("main") {
-                                    let _ = window.emit("sync-complete", &result);
-                                }
-                            }
-                            Err(e) => {
-                                log::error!("Tray sync error: {}", e);
-                                if let Some(window) = app_handle.get_webview_window("main") {
-                                    let _ = window.emit("sync-complete", serde_json::json!({
-                                        "success": false,
-                                        "message": e
-                                    }));
-                                }
-                            }
-                        }
-                    });
-                }
-                "settings" => {
-                    // Directly open settings panel in the frontend
-                    reveal_main_window(app);
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.eval("if(window.__openSettings)window.__openSettings()");
-                    }
-                }
-                "autostart" => {
-                    // Toggle auto-start via proper IPC so the plugin + settings both update
-                    let app_handle = app.clone();
-                    std::thread::spawn(move || {
-                        let current = snipvault::settings::get_settings();
-                        let new_val = !current.auto_start;
-                        match snipvault::commands::set_auto_start(new_val, app_handle.clone()) {
-                            Ok(()) => {
-                                log::info!("Autostart toggled to {}", new_val);
-                                // Update tray menu checkbox to match new state
-                                if let Some(tray_cell) = TRAY.get() {
-                                    if let Ok(guard) = tray_cell.lock() {
-                                        if let Some(tray) = guard.as_ref() {
-                                            if let Ok(menu) = build_tray_menu(&app_handle, new_val) {
-                                                let _ = tray.set_menu(Some(menu));
-                                            }
-                                        }
-                                    }
-                                }
-                                reveal_main_window(&app_handle);
-                                if let Some(window) = app_handle.get_webview_window("main") {
-                                    let _ = window.emit("autostart-toggled", new_val);
-                                }
-                            }
-                            Err(e) => {
-                                log::error!("set_auto_start failed: {}", e);
-                            }
-                        }
-                    });
-                }
-                "quit" => {
-                    std::process::exit(0);
-                }
-                _ => {}
-            }
-        })
-        .build(app)
-}
+use tauri::Manager;
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
@@ -156,26 +23,21 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            reveal_main_window(app);
+            snipvault::tray::reveal_main_window(app);
         }))
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
         ))
         .setup(move |app| {
             snipvault::commands::boot_log("setup_enter", "start");
-            log::info!(
-                "App mode: {} | Data dir: {:?}",
-                snipvault::paths::get_app_mode(),
-                snipvault::paths::get_data_dir()
-            );
+            log::info!("App mode: {}", snipvault::paths::get_app_mode());
 
             // Warm-up DB/settings in background so first paint is not blocked
             std::thread::spawn(|| {
-                if let Err(e) = snipvault::db::init_db() {
-                    log::error!("Background database init failed: {e}");
+                if let Err(_error) = snipvault::db::init_db() {
+                    log::error!("Background database initialization failed");
                 } else {
                     log::info!("Background database init completed");
                 }
@@ -183,17 +45,9 @@ fn main() {
                 log::info!("Background settings init completed");
             });
 
-            // Initialize global tray storage
-            let tray_store = Arc::new(Mutex::new(None::<TrayIcon>));
-            TRAY.set(tray_store.clone()).ok();
-
-            snipvault::commands::boot_log("setup_before_get_settings", "for_tray");
-            let settings = snipvault::settings::get_settings();
-            snipvault::commands::boot_log("setup_after_get_settings", "for_tray");
             snipvault::commands::boot_log("setup_before_build_tray", "start");
-            let tray = build_tray(app.handle(), settings.auto_start)?;
+            snipvault::tray::initialize(app.handle())?;
             snipvault::commands::boot_log("setup_after_build_tray", "done");
-            *tray_store.lock().unwrap() = Some(tray);
 
             if start_minimized {
                 snipvault::commands::WINDOW_SHOWN.store(true, Ordering::SeqCst);
@@ -208,63 +62,39 @@ fn main() {
                     std::thread::sleep(Duration::from_millis(2500));
                     if !snipvault::commands::WINDOW_SHOWN.load(Ordering::SeqCst) {
                         snipvault::commands::boot_log("fallback_show_fired", "timeout_ms=2500");
-                        snipvault::commands::show_main_window_if_needed(&app_handle, "fallback_timeout");
+                        snipvault::commands::show_main_window_if_needed(
+                            &app_handle,
+                            "fallback_timeout",
+                        );
                     }
                 });
             }
 
-            // Handle main window close -> minimize to tray
-            let minimize_to_tray = settings.minimize_to_tray;
+            // Handle main window close -> minimize to tray using the latest
+            // persisted setting so changes take effect without restarting.
             let app_handle = app.handle().clone();
             let main_window = app.get_webview_window("main").unwrap();
             main_window.on_window_event(move |event| {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    if minimize_to_tray {
+                    if snipvault::settings::get_settings().minimize_to_tray {
                         api.prevent_close();
-                        if let Some(w) = app_handle.get_webview_window("main") {
-                            let _ = w.hide();
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let _ = window.hide();
                         }
                     }
                 }
             });
 
-            // Auto-sync timer
-            let auto_sync_settings = snipvault::settings::get_settings();
-            if auto_sync_settings.auto_sync && auto_sync_settings.sync_interval_minutes > 0 {
-                let interval_secs = auto_sync_settings.sync_interval_minutes as u64 * 60;
-                let _app_handle_sync = app.handle().clone();
-                log::info!(
-                    "Starting auto-sync timer (every {} minutes)",
-                    auto_sync_settings.sync_interval_minutes
-                );
-                std::thread::spawn(move || {
-                    loop {
-                        std::thread::sleep(std::time::Duration::from_secs(interval_secs));
-                        let s = snipvault::settings::get_settings();
-                        if !s.auto_sync || s.webdav_url.is_empty() {
-                            log::info!(
-                                "Auto-sync disabled or WebDAV not configured, stopping timer"
-                            );
-                            break;
-                        }
-                        log::info!("Running scheduled auto-sync");
-                        match snipvault::webdav::sync_merge() {
-                            Ok(result) => {
-                                log::info!("Auto-sync result: {}", result.message);
-                            }
-                            Err(e) => {
-                                log::error!("Auto-sync error: {}", e);
-                            }
-                        }
-                    }
-                });
-            }
+            snipvault::sync::start_auto_sync_worker(app.handle().clone());
 
             snipvault::commands::boot_log("setup_exit", "done");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             snipvault::commands::get_snippets,
+            snipvault::commands::query_snippets,
+            snipvault::commands::get_snippet,
+            snipvault::commands::get_snippet_tags,
             snipvault::commands::create_snippet,
             snipvault::commands::update_snippet,
             snipvault::commands::delete_snippet,
@@ -272,6 +102,8 @@ fn main() {
             snipvault::commands::toggle_favorite,
             snipvault::commands::export_snippets,
             snipvault::commands::export_snippets_to_file,
+            snipvault::commands::open_project_repository,
+            snipvault::commands::open_trusted_directory,
             snipvault::commands::import_snippets,
             snipvault::commands::get_settings,
             snipvault::commands::save_settings,

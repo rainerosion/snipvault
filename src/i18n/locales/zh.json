@@ -2,11 +2,13 @@
   "app": {
     "title": "灵藏 · SnipVault",
     "brand": "灵藏",
+    "subtitle": "本地代码片段库",
     "count": "{{count}} 条"
   },
   "search": {
     "placeholder": "搜索代码片段...",
-    "all": "全部语言"
+    "all": "全部语言",
+    "clear": "清除搜索"
   },
   "filter": {
     "all": "全部语言",
@@ -34,16 +36,29 @@
     "savedAt": "已保存 {{time}}",
     "shortcutSave": "Ctrl+S 保存",
     "titleRequired": "请输入标题",
-    "untitled": "无标题"
+    "untitled": "无标题",
+    "loadingDetail": "正在加载代码片段...",
+    "select": "选择代码片段 {{title}}",
+    "favoriteTitle": "收藏 {{title}}",
+    "unfavoriteTitle": "取消收藏 {{title}}",
+    "deleteTitle": "删除 {{title}}",
+    "removeTag": "移除标签 {{tag}}",
+    "minimapResize": "拖动以调整装饰性代码缩略图宽度"
   },
   "settings": {
     "title": "设置",
     "close": "关闭",
     "save": "保存设置",
+    "saving": "保存中...",
     "saved": "已保存 ✓",
+    "unsavedChanges": "设置中有未保存的更改，关闭前是否保存？",
+    "changedExternally": "已保存设置在其他位置发生变化。你的未保存字段已保留；保存将应用当前草稿。",
+    "saveBeforeSync": "请先保存设置，再执行同步。",
+    "autoSyncTimingNote": "启用后首次自动同步可能很快开始，之后按所选间隔执行。",
+    "backgroundSyncSuccess": "后台同步已完成，并已刷新最新代码片段。",
     "general": "通用",
     "webdav": "WebDAV 同步",
-    "webdavDesc": "将片段同步到支持 WebDAV 的网盘（Nextcloud、群晖、坚果云等），支持增量合并",
+    "webdavDesc": "安全的 WebDAV 双向合并同步。除 localhost、127.0.0.1 和 ::1 本地开发服务器外，必须使用 HTTPS。",
     "about": "关于",
     "autoStart": "开机自启",
     "autoStartDesc": "登录 Windows 时自动启动应用",
@@ -60,7 +75,29 @@
     "username": "用户名",
     "usernamePlaceholder": "用户名",
     "password": "密码 / API Key",
-    "passwordPlaceholder": "密码",
+    "passwordPlaceholder": "输入新凭据",
+    "passwordStoredPlaceholder": "已安全保存——输入内容可替换",
+    "clearStoredCredential": "清除已保存凭据",
+    "keepStoredCredential": "保留已保存凭据",
+    "openDataFolder": "打开数据目录",
+    "secretAction": {
+      "replace": "保存后将替换系统凭据库中的凭据；界面永远不会显示旧值。",
+      "clear": "保存后将删除系统凭据；在重新设置前，依赖凭据的自动同步不会运行。"
+    },
+    "credentialStatus": {
+      "configured": "操作系统已保存凭据。将此输入框留空即可保留。",
+      "not_configured": "尚未保存凭据；如果所选认证方式需要，请输入新凭据。",
+      "unavailable": "操作系统凭据库不可用。请解锁或修复后替换或清除凭据。",
+      "denied": "凭据访问被拒绝。请授予访问权限后替换或清除凭据。",
+      "invalid": "凭据条目无效，请替换或清除。",
+      "ambiguous": "发现多个匹配凭据。请清理重复项后在此替换或清除。",
+      "migration_required": "旧版凭据迁移失败，原设置文件已保留用于恢复；替换或清除凭据前，自动同步不会恢复。",
+      "recovery_required": "回滚未能完整完成。请检查系统凭据和开机自启状态，然后替换或清除凭据。"
+    },
+    "recovery": {
+      "backup_restored": "主设置文件损坏并已隔离，现已恢复有效备份。",
+      "defaults_loaded": "设置文件损坏并已隔离，且没有有效备份；已载入安全默认值。"
+    },
     "webdavAuthMode": "认证方式",
     "webdavAuthModeDesc": "默认 Auto（Digest→Basic）；可按服务端要求切换",
     "webdavAuthBasic": "Basic",
@@ -79,8 +116,16 @@
     "lastSync": "上次同步：{{time}}",
     "neverSynced": "从未同步",
     "syncSuccess": "同步成功",
+    "syncHistoryLoading": "正在加载同步历史...",
+    "syncHistoryDirectionPublish": "已发布",
+    "syncHistoryDirectionMerge": "已合并",
+    "syncHistoryDirectionOther": "{{direction}}",
+    "syncHistoryCounts": "共 {{total}} 条 · 上传 {{uploaded}} · 下载 {{downloaded}} · 删除 {{deleted}} · 冲突 {{conflicts}}",
+    "syncHistoryProtocol": "协议 v{{protocol}} · 第 {{generation}} 代",
+    "syncResultProtocol": "协议 v{{protocol}} · 第 {{generation}} 代",
+    "syncResultCounts": "共 {{total}} 条 · 上传 {{uploaded}} · 下载 {{downloaded}} · 删除 {{deleted}} · 冲突 {{conflicts}} · 待处理 {{pending}}",
     "noHistory": "暂无同步记录",
-    "syncConfirm": "将执行双向合并同步：本地新于远程的会上传，远程新于本地的会下载合并。是否继续？",
+    "syncConfirm": "将执行 WebDAV v2 双向合并同步：本地和远程变更会通过 revision/outbox 合并，删除会以 tombstone 传播，并发分支会保留冲突副本。是否继续？",
     "aboutName": "应用名称",
     "aboutVersion": "版本",
     "aboutAuthor": "作者",
@@ -116,7 +161,10 @@
     "empty": "暂无代码片段",
     "emptyHint": "点击上方「新建」按钮创建",
     "loading": "加载中...",
-    "languages": "语言",
+    "loadMore": "加载更多",
+    "loadingMore": "加载更多...",
+    "retry": "重试",
+    "snippetList": "代码片段列表",
     "tags": "标签",
     "timeAgo": {
       "justNow": "刚刚",
@@ -157,6 +205,25 @@
     "restore": "还原",
     "close": "关闭"
   },
+  "commandErrors": {
+    "validation": "部分输入内容无效，请检查后重试。",
+    "not_found": "未找到请求的项目。",
+    "stale_revision": "代码片段在草稿加载后已发生变化。草稿已保留，请重新加载后再次保存。",
+    "outbox_full": "待同步队列已达到安全上限。请先同步或释放空间，再继续编辑。",
+    "database": "本地数据库操作失败，请重试。",
+    "settings": "设置操作失败，请重试。",
+    "network": "网络或同步请求失败，请重试。",
+    "sync_busy": "已有同步任务正在运行，请稍后重试。",
+    "sync_cas_conflict": "发布期间远程保险库已发生变化。请重新同步以合并最新代次。",
+    "sync_legacy_changed": "单向升级至 v2 期间，旧版 WebDAV 数据发生了变化。请在其他客户端停止写入后重试。",
+    "import": "无法完成代码片段导入。",
+    "export": "无法完成代码片段导出。",
+    "autostart": "无法更改开机自启设置。",
+    "credential": "操作系统凭据库未能完成请求。",
+    "recovery": "更改未能完整回滚，请打开设置并按恢复提示处理。",
+    "open": "无法打开受信任的位置。",
+    "unknown": "无法完成此操作。"
+  },
   "errors": {
     "importFailed": "导入失败",
     "importInvalid": "无效的 JSON 文件",
@@ -170,7 +237,17 @@
     "syncFailed": "同步失败: {{error}}",
     "saveFailed": "保存失败: {{error}}",
     "settingsFailed": "保存失败: {{error}}",
+    "settingsLoadFailed": "无法加载设置。",
+    "deleteFailed": "删除失败：{{error}}",
+    "favoriteFailed": "收藏状态更新失败：{{error}}",
+    "clipboardFailed": "剪贴板操作失败：{{error}}",
+    "reloadAfterMutationFailed": "更改已保存，但无法重新加载最新代码片段：{{error}}",
+    "reloadAfterSyncFailed": "同步已完成，但无法重新加载最新本地状态：{{error}}",
+    "remoteUpdateApplied": "已使用最新保存数据刷新当前代码片段。",
+    "remoteUpdatePending": "检测到新的已保存数据，未覆盖你的未保存编辑。",
     "loadFailed": "加载失败，请重试",
+    "loadDetailFailed": "无法加载代码片段：{{error}}",
+    "syncFailedShort": "无法完成同步。",
     "noWebdav": "请先在设置中配置 WebDAV 服务器地址"
   }
 }

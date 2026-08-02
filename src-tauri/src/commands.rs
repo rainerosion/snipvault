@@ -1,20 +1,30 @@
 use crate::db::{self, Snippet};
-use crate::settings::{self, Settings};
+use crate::error::CommandError;
+use crate::settings::{self, SecretAction, Settings, SettingsInput, SettingsView};
 use crate::webdav::{self, SyncResult};
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{command, AppHandle, Manager};
 
 #[derive(serde::Serialize)]
 pub struct ExportResult {
-    pub file_path: String,
-    pub folder_path: String,
     pub saved_in_downloads: bool,
 }
 
+#[derive(Debug, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustedDirectory {
+    Data,
+    Export,
+}
+
+const PROJECT_REPOSITORY_URL: &str = "https://github.com/rainerosion/snipvault";
+
 pub static BOOT_START: OnceCell<Instant> = OnceCell::new();
 pub static WINDOW_SHOWN: AtomicBool = AtomicBool::new(false);
+static SETTINGS_WRITE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 pub fn boot_log(stage: &str, meta: &str) {
     let elapsed_ms = BOOT_START
@@ -44,7 +54,10 @@ pub fn show_main_window_if_needed(app: &AppHandle, reason: &str) {
         let _ = window.set_focus();
         boot_log("window_show_ok", reason);
     } else {
-        boot_log("window_show_error", &format!("reason={} err=no_main_window", reason));
+        boot_log(
+            "window_show_error",
+            &format!("reason={} err=no_main_window", reason),
+        );
     }
 }
 
@@ -65,8 +78,35 @@ pub fn boot_mark(stage: String, t_ms: f64, app: AppHandle) {
 }
 
 #[command]
-pub fn get_snippets() -> Result<Vec<Snippet>, String> {
-    db::get_all_snippets().map_err(|e| format!("Database error: {e}"))
+pub fn get_snippets() -> Result<Vec<Snippet>, CommandError> {
+    db::get_all_snippets().map_err(|error| {
+        log::error!("get_snippets failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn query_snippets(request: db::SnippetQuery) -> Result<db::SnippetQueryResult, CommandError> {
+    db::query_snippets(&request).map_err(|error| {
+        log::error!("query_snippets failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn get_snippet(id: String) -> Result<Snippet, CommandError> {
+    db::get_snippet(&id).map_err(|error| {
+        log::error!("get_snippet failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn get_snippet_tags() -> Result<Vec<String>, CommandError> {
+    db::list_distinct_tags().map_err(|error| {
+        log::error!("get_snippet_tags failed");
+        CommandError::database(&error)
+    })
 }
 
 #[command]
@@ -78,7 +118,7 @@ pub fn create_snippet(
     description: String,
     tags: Vec<String>,
     is_favorite: bool,
-) -> Result<(), String> {
+) -> Result<Snippet, CommandError> {
     let now = chrono::Utc::now().to_rfc3339();
     let snippet = Snippet {
         id,
@@ -90,11 +130,20 @@ pub fn create_snippet(
         is_favorite,
         created_at: now.clone(),
         updated_at: now,
+        revision_id: String::new(),
     };
-    db::create_snippet(&snippet).map_err(|e| format!("Create error: {e}"))
+    db::validate_snippet(&snippet).map_err(|error| {
+        log::warn!("create_snippet validation failed: {error}");
+        CommandError::validation()
+    })?;
+    db::create_snippet(&snippet).map_err(|error| {
+        log::error!("create_snippet database write failed");
+        CommandError::mutation(&error)
+    })
 }
 
 #[command]
+#[allow(clippy::too_many_arguments)]
 pub fn update_snippet(
     id: String,
     title: String,
@@ -103,8 +152,9 @@ pub fn update_snippet(
     description: String,
     tags: Vec<String>,
     is_favorite: bool,
-    updated_at: String,
-) -> Result<(), String> {
+    base_revision_id: String,
+) -> Result<Snippet, CommandError> {
+    let now = chrono::Utc::now().to_rfc3339();
     let snippet = Snippet {
         id,
         title,
@@ -113,132 +163,382 @@ pub fn update_snippet(
         description,
         tags,
         is_favorite,
-        created_at: String::new(),
-        updated_at,
+        created_at: now.clone(),
+        updated_at: now,
+        revision_id: String::new(),
     };
-    db::update_snippet(&snippet).map_err(|e| format!("Update error: {e}"))
-}
-
-#[command]
-pub fn delete_snippet(id: String) -> Result<(), String> {
-    db::delete_snippet(&id).map_err(|e| format!("Delete error: {e}"))
-}
-
-#[command]
-pub fn search_snippets(query: String, language: Option<String>, tag: Option<String>) -> Result<Vec<Snippet>, String> {
-    db::search_snippets(&query, language.as_deref(), tag.as_deref())
-        .map_err(|e| format!("Search error: {e}"))
-}
-
-#[command]
-pub fn toggle_favorite(id: String) -> Result<bool, String> {
-    db::toggle_favorite(&id).map_err(|e| format!("Toggle error: {e}"))
-}
-
-#[command]
-pub fn export_snippets() -> Result<String, String> {
-    db::export_snippets().map_err(|e| format!("Export error: {e}"))
-}
-
-#[command]
-pub fn export_snippets_to_file() -> Result<ExportResult, String> {
-    let json = db::export_snippets().map_err(|e| format!("Export error: {e}"))?;
-
-    let (export_dir, saved_in_downloads) = crate::paths::get_export_dir();
-    std::fs::create_dir_all(&export_dir)
-        .map_err(|e| format!("创建导出目录失败 ({}): {e}", export_dir.display()))?;
-
-    let filename = format!(
-        "snipvault-backup-{}.json",
-        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
-    );
-    let target = export_dir.join(filename);
-
-    std::fs::write(&target, json)
-        .map_err(|e| format!("写入导出文件失败 ({}): {e}", target.display()))?;
-
-    Ok(ExportResult {
-        file_path: target.display().to_string(),
-        folder_path: export_dir.display().to_string(),
-        saved_in_downloads,
+    db::validate_snippet(&snippet).map_err(|error| {
+        log::warn!("update_snippet validation failed: {error}");
+        CommandError::validation()
+    })?;
+    db::update_snippet(&snippet, &base_revision_id).map_err(|error| {
+        log::error!("update_snippet database write failed");
+        CommandError::mutation(&error)
     })
 }
 
 #[command]
-pub fn import_snippets(json_data: String) -> Result<usize, String> {
-    db::import_snippets(&json_data).map_err(|e| format!("Import error: {e}"))
+pub fn delete_snippet(id: String) -> Result<db::RevisionHead, CommandError> {
+    db::delete_snippet(&id).map_err(|error| {
+        log::error!("delete_snippet failed");
+        CommandError::mutation(&error)
+    })
+}
+
+#[command]
+pub fn search_snippets(
+    query: String,
+    language: Option<String>,
+    tag: Option<String>,
+) -> Result<Vec<Snippet>, CommandError> {
+    db::search_snippets(&query, language.as_deref(), tag.as_deref()).map_err(|error| {
+        log::error!("search_snippets failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn toggle_favorite(id: String) -> Result<Snippet, CommandError> {
+    db::toggle_favorite(&id).map_err(|error| {
+        log::error!("toggle_favorite failed");
+        CommandError::mutation(&error)
+    })
+}
+
+#[command]
+pub fn export_snippets() -> Result<String, CommandError> {
+    db::export_snippets().map_err(|_error| {
+        log::error!("export_snippets failed");
+        CommandError::export()
+    })
+}
+
+#[command]
+pub fn export_snippets_to_file() -> Result<ExportResult, CommandError> {
+    let json = db::export_snippets().map_err(|_error| {
+        log::error!("export_snippets_to_file serialization failed");
+        CommandError::export()
+    })?;
+
+    let (export_dir, saved_in_downloads) = crate::paths::get_export_dir();
+    std::fs::create_dir_all(&export_dir).map_err(|_error| {
+        log::error!("creating export directory failed");
+        CommandError::export()
+    })?;
+
+    let filename_stem = format!(
+        "snipvault-backup-{}",
+        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
+    );
+
+    db::write_export_file(&export_dir, &filename_stem, &json).map_err(|_error| {
+        log::error!("writing export file failed");
+        CommandError::export()
+    })?;
+
+    Ok(ExportResult { saved_in_downloads })
+}
+
+fn trusted_directory_path(directory: TrustedDirectory) -> std::path::PathBuf {
+    match directory {
+        TrustedDirectory::Data => crate::paths::get_data_dir(),
+        TrustedDirectory::Export => crate::paths::get_export_dir().0,
+    }
+}
+
+#[command]
+pub fn open_project_repository() -> Result<(), CommandError> {
+    opener::open_browser(PROJECT_REPOSITORY_URL).map_err(|_error| {
+        log::error!("Opening the allowlisted project URL failed");
+        CommandError::open()
+    })
+}
+
+#[command]
+pub fn open_trusted_directory(directory: TrustedDirectory) -> Result<(), CommandError> {
+    let path = trusted_directory_path(directory);
+    std::fs::create_dir_all(&path).map_err(|_error| {
+        log::error!("Creating a trusted application directory failed");
+        CommandError::open()
+    })?;
+    opener::open(&path).map_err(|_error| {
+        log::error!("Opening a trusted application directory failed");
+        CommandError::open()
+    })
+}
+
+#[command]
+pub fn import_snippets(json_data: String) -> Result<db::ImportResult, CommandError> {
+    db::import_snippets(&json_data).map_err(|_error| {
+        log::warn!("import_snippets failed");
+        CommandError::import()
+    })
 }
 
 // --- Settings ---
 
 #[command]
-pub fn get_settings() -> Result<Settings, String> {
-    Ok(settings::get_settings())
+pub fn get_settings() -> Result<SettingsView, CommandError> {
+    Ok(settings::get_settings_view())
 }
 
-#[command]
-pub fn save_settings(new_settings: Settings, app: AppHandle) -> Result<(), String> {
+fn settings_write_guard() -> std::sync::MutexGuard<'static, ()> {
+    SETTINGS_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
+fn apply_auto_start(app: &AppHandle, enabled: bool) -> Result<(), CommandError> {
+    use tauri_plugin_autostart::ManagerExt;
+    let autostart = app.autolaunch();
+    let result = if enabled {
+        autostart.enable()
+    } else {
+        autostart.disable()
+    };
+    result.map_err(|error| {
+        log::error!("applying autostart state failed: {error}");
+        CommandError::autostart()
+    })
+}
+
+fn persist_auto_start(app: &AppHandle, enabled: bool) -> Result<Settings, CommandError> {
     let current = settings::get_settings();
-    settings::update_settings(|s| {
-        *s = new_settings.clone();
-        // Preserve last_sync_at — it's not sent from the frontend
-        // and must not be cleared when saving other settings
-        s.last_sync_at = current.last_sync_at.clone();
+    if enabled == current.auto_start {
+        return Ok(current);
+    }
+
+    apply_auto_start(app, enabled)?;
+    match settings::update_settings(|settings| settings.auto_start = enabled) {
+        Ok(saved) => Ok(saved),
+        Err(save_error) => {
+            log::error!("persisting autostart setting failed: {save_error}");
+            if let Err(rollback_error) = apply_auto_start(app, current.auto_start) {
+                log::error!("rolling back autostart state failed: {rollback_error}");
+            }
+            Err(CommandError::settings())
+        }
+    }
+}
+
+trait AutostartController {
+    fn apply(&self, enabled: bool) -> Result<(), CommandError>;
+}
+
+struct TauriAutostartController<'a>(&'a AppHandle);
+
+impl AutostartController for TauriAutostartController<'_> {
+    fn apply(&self, enabled: bool) -> Result<(), CommandError> {
+        apply_auto_start(self.0, enabled)
+    }
+}
+
+fn apply_secret_action(
+    store: &dyn crate::credentials::CredentialStore,
+    action: &SecretAction,
+) -> Result<(), crate::credentials::CredentialFailure> {
+    match action {
+        SecretAction::Keep => Ok(()),
+        SecretAction::Replace(value) => store.write_secret(value),
+        SecretAction::Clear => store.clear_secret(),
+    }
+}
+
+fn restore_secret(
+    store: &dyn crate::credentials::CredentialStore,
+    previous: &Option<String>,
+) -> Result<(), crate::credentials::CredentialFailure> {
+    match previous {
+        Some(value) => store.write_secret(value),
+        None => store.clear_secret(),
+    }
+}
+
+fn save_settings_transaction(
+    current: &Settings,
+    candidate: Settings,
+    secret_action: &SecretAction,
+    autostart: &dyn AutostartController,
+    store: &dyn crate::credentials::CredentialStore,
+    persist: impl FnOnce(Settings) -> Result<Settings, String>,
+    mark_recovery: &dyn Fn(),
+) -> Result<Settings, CommandError> {
+    settings::validate_settings(&candidate).map_err(|error| {
+        log::warn!("save_settings validation failed: {error}");
+        CommandError::validation()
+    })?;
+    settings::validate_secret_action(secret_action).map_err(|error| {
+        log::warn!("save_settings secret action validation failed: {error}");
+        CommandError::validation()
     })?;
 
-    // Sync autostart registration whenever auto_start setting changes
-    if new_settings.auto_start != current.auto_start {
-        use tauri_plugin_autostart::ManagerExt;
-        let autostart = app.autolaunch();
-        if new_settings.auto_start {
-            autostart.enable().map_err(|e| format!("开启开机自启失败: {e}"))?;
-        } else {
-            autostart.disable().map_err(|e| format!("关闭开机自启失败: {e}"))?;
+    let recovery_required =
+        current.credential_recovery_status != settings::CredentialRecoveryStatus::None;
+    if recovery_required && matches!(secret_action, SecretAction::Keep) {
+        return Err(CommandError::credential(false));
+    }
+
+    let previous_secret = if matches!(secret_action, SecretAction::Keep) {
+        None
+    } else {
+        Some(store.read_secret().map_err(|failure| {
+            log::warn!("Credential snapshot failed safely: {failure}");
+            CommandError::credential(matches!(
+                failure,
+                crate::credentials::CredentialFailure::Unavailable
+            ))
+        })?)
+    };
+
+    if let Err(failure) = apply_secret_action(store, secret_action) {
+        log::warn!("Credential action failed safely: {failure}");
+        return Err(CommandError::credential(matches!(
+            failure,
+            crate::credentials::CredentialFailure::Unavailable
+        )));
+    }
+
+    let autostart_changed = candidate.auto_start != current.auto_start;
+    if autostart_changed {
+        if let Err(error) = autostart.apply(candidate.auto_start) {
+            let credential_rollback_failed = previous_secret
+                .as_ref()
+                .map(|previous| restore_secret(store, previous).is_err())
+                .unwrap_or(false);
+            if credential_rollback_failed {
+                mark_recovery();
+                return Err(CommandError::recovery());
+            }
+            return Err(error);
         }
     }
 
-    Ok(())
+    match persist(candidate) {
+        Ok(saved) => Ok(saved),
+        Err(save_error) => {
+            log::error!("Saving sanitized settings failed: {save_error}");
+            let autostart_rollback_failed =
+                autostart_changed && autostart.apply(current.auto_start).is_err();
+            let credential_rollback_failed = previous_secret
+                .as_ref()
+                .map(|previous| restore_secret(store, previous).is_err())
+                .unwrap_or(false);
+            if autostart_rollback_failed || credential_rollback_failed {
+                mark_recovery();
+                Err(CommandError::recovery())
+            } else {
+                Err(CommandError::settings())
+            }
+        }
+    }
+}
+
+fn save_settings_candidate(
+    current: &Settings,
+    mut candidate: Settings,
+    secret_action: &SecretAction,
+    app: &AppHandle,
+) -> Result<Settings, CommandError> {
+    let changes_secret = !matches!(secret_action, SecretAction::Keep);
+    if changes_secret {
+        candidate.credential_revision = current.credential_revision.saturating_add(1);
+    }
+    candidate.credential_recovery_status = settings::CredentialRecoveryStatus::None;
+    candidate.settings_recovery_status = settings::SettingsRecoveryStatus::None;
+
+    let autostart_changed = candidate.auto_start != current.auto_start;
+    let store = settings::credential_store();
+    let saved = save_settings_transaction(
+        current,
+        candidate,
+        secret_action,
+        &TauriAutostartController(app),
+        store.as_ref(),
+        settings::replace_settings,
+        &settings::mark_credential_recovery_required,
+    )?;
+    if autostart_changed {
+        if let Err(error) = crate::tray::refresh_menu(app) {
+            log::error!("Refreshing tray menu after settings save failed: {error}");
+        }
+    }
+    Ok(saved)
+}
+
+#[command]
+pub fn save_settings(
+    new_settings: SettingsInput,
+    secret_action: SecretAction,
+    app: AppHandle,
+) -> Result<SettingsView, CommandError> {
+    let _write_guard = settings_write_guard();
+    let current = settings::get_settings();
+    let candidate = new_settings.apply_to(&current);
+    save_settings_candidate(&current, candidate, &secret_action, &app)?;
+    Ok(settings::get_settings_view())
 }
 
 // --- Auto-start ---
 
-#[command]
-pub fn set_auto_start(enabled: bool, app: AppHandle) -> Result<(), String> {
-    use tauri_plugin_autostart::ManagerExt;
-    let autostart = app.autolaunch();
-    if enabled {
-        autostart.enable().map_err(|e| format!("开启失败: {e}"))?;
-    } else {
-        autostart.disable().map_err(|e| format!("关闭失败: {e}"))?;
+fn refresh_tray_after_auto_start_change(app: &AppHandle) {
+    if let Err(error) = crate::tray::refresh_menu(app) {
+        log::error!("refreshing tray menu after autostart change failed: {error}");
     }
-    settings::update_settings(|s| s.auto_start = enabled)
+}
+
+pub fn toggle_auto_start_from_tray(app: &AppHandle) -> Result<bool, CommandError> {
+    let _write_guard = settings_write_guard();
+    let enabled = !settings::get_settings().auto_start;
+    persist_auto_start(app, enabled)?;
+    refresh_tray_after_auto_start_change(app);
+    Ok(enabled)
 }
 
 #[command]
-pub fn is_auto_start_enabled(app: AppHandle) -> Result<bool, String> {
+pub fn set_auto_start(enabled: bool, app: AppHandle) -> Result<(), CommandError> {
+    let _write_guard = settings_write_guard();
+    persist_auto_start(&app, enabled)?;
+    refresh_tray_after_auto_start_change(&app);
+    Ok(())
+}
+
+#[command]
+pub fn is_auto_start_enabled(app: AppHandle) -> Result<bool, CommandError> {
     use tauri_plugin_autostart::ManagerExt;
-    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+    app.autolaunch().is_enabled().map_err(|error| {
+        log::error!("reading autostart state failed: {error}");
+        CommandError::autostart()
+    })
 }
 
 // --- WebDAV Sync ---
 
 #[command]
-pub fn sync_upload() -> Result<SyncResult, String> {
-    webdav::sync_to_webdav()
+pub fn sync_upload() -> Result<SyncResult, CommandError> {
+    webdav::sync_to_webdav().map_err(|error| {
+        log::error!("sync_upload failed: {error}");
+        CommandError::sync(&error)
+    })
 }
 
 #[command]
-pub fn sync_download() -> Result<SyncResult, String> {
-    webdav::sync_from_webdav()
+pub fn sync_download() -> Result<SyncResult, CommandError> {
+    webdav::sync_from_webdav().map_err(|error| {
+        log::error!("sync_download failed: {error}");
+        CommandError::sync(&error)
+    })
 }
 
 #[command]
-pub fn get_sync_versions() -> Result<Vec<db::SyncVersion>, String> {
-    db::get_sync_versions().map_err(|e| format!("读取同步历史失败: {e}"))
+pub fn get_sync_versions() -> Result<Vec<db::SyncVersion>, CommandError> {
+    db::get_sync_versions().map_err(|error| {
+        log::error!("get_sync_versions failed");
+        CommandError::database(&error)
+    })
 }
 
 #[command]
-pub fn get_system_theme(app: AppHandle) -> Result<String, String> {
+pub fn get_system_theme(app: AppHandle) -> Result<String, CommandError> {
     if let Some(window) = app.get_webview_window("main") {
         if let Ok(theme) = window.theme() {
             return Ok(match theme {
@@ -276,3 +576,176 @@ pub fn get_system_locale() -> String {
     "en".to_string()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::credentials::tests::MemoryCredentialStore;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct FakeAutostart {
+        state: Mutex<bool>,
+        failures: Mutex<Vec<bool>>,
+    }
+
+    impl FakeAutostart {
+        fn new(enabled: bool) -> Self {
+            Self {
+                state: Mutex::new(enabled),
+                ..Self::default()
+            }
+        }
+
+        fn enabled(&self) -> bool {
+            *self.state.lock().unwrap()
+        }
+    }
+
+    impl AutostartController for FakeAutostart {
+        fn apply(&self, enabled: bool) -> Result<(), CommandError> {
+            if self.failures.lock().unwrap().pop().unwrap_or(false) {
+                return Err(CommandError::autostart());
+            }
+            *self.state.lock().unwrap() = enabled;
+            Ok(())
+        }
+    }
+
+    fn candidate(current: &Settings) -> Settings {
+        SettingsInput {
+            auto_start: current.auto_start,
+            minimize_to_tray: current.minimize_to_tray,
+            theme: current.theme.clone(),
+            language: current.language.clone(),
+            webdav_url: current.webdav_url.clone(),
+            webdav_username: current.webdav_username.clone(),
+            webdav_auth_mode: current.webdav_auth_mode.clone(),
+            webdav_timeout_secs: current.webdav_timeout_secs,
+            auto_sync: current.auto_sync,
+            sync_interval_minutes: current.sync_interval_minutes,
+            editor_line_wrap: current.editor_line_wrap,
+        }
+        .apply_to(current)
+    }
+
+    #[test]
+    fn keep_replace_and_clear_use_explicit_secret_actions() {
+        let current = Settings::default();
+        let autostart = FakeAutostart::new(false);
+        let store = MemoryCredentialStore::with_secret(Some("old-value"));
+        let mark_count = Arc::new(Mutex::new(0));
+        let mark = {
+            let mark_count = Arc::clone(&mark_count);
+            move || *mark_count.lock().unwrap() += 1
+        };
+
+        save_settings_transaction(
+            &current,
+            candidate(&current),
+            &SecretAction::Keep,
+            &autostart,
+            &store,
+            Ok,
+            &mark,
+        )
+        .unwrap();
+        assert_eq!(store.secret().as_deref(), Some("old-value"));
+
+        save_settings_transaction(
+            &current,
+            candidate(&current),
+            &SecretAction::Replace("new-value".into()),
+            &autostart,
+            &store,
+            Ok,
+            &mark,
+        )
+        .unwrap();
+        assert_eq!(store.secret().as_deref(), Some("new-value"));
+
+        save_settings_transaction(
+            &current,
+            candidate(&current),
+            &SecretAction::Clear,
+            &autostart,
+            &store,
+            Ok,
+            &mark,
+        )
+        .unwrap();
+        assert_eq!(store.secret(), None);
+        assert_eq!(*mark_count.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn settings_failure_rolls_back_credential_and_autostart() {
+        let current = Settings::default();
+        let mut next = candidate(&current);
+        next.auto_start = true;
+        let autostart = FakeAutostart::new(false);
+        let store = MemoryCredentialStore::with_secret(Some("old-value"));
+        let marked = Mutex::new(false);
+
+        let error = save_settings_transaction(
+            &current,
+            next,
+            &SecretAction::Replace("new-value".into()),
+            &autostart,
+            &store,
+            |_| Err("forced persistence failure".into()),
+            &|| *marked.lock().unwrap() = true,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code, crate::error::ErrorCode::Settings);
+        assert_eq!(store.secret().as_deref(), Some("old-value"));
+        assert!(!autostart.enabled());
+        assert!(!*marked.lock().unwrap());
+    }
+
+    #[test]
+    fn compensation_failure_returns_safe_recovery_error() {
+        let current = Settings::default();
+        let mut next = candidate(&current);
+        next.auto_start = true;
+        let autostart = FakeAutostart::new(false);
+        // Stack order: candidate apply succeeds, rollback fails.
+        autostart.failures.lock().unwrap().extend([true, false]);
+        let store = MemoryCredentialStore::with_secret(Some("old-value"));
+        let marked = Mutex::new(false);
+
+        let error = save_settings_transaction(
+            &current,
+            next,
+            &SecretAction::Replace("new-value".into()),
+            &autostart,
+            &store,
+            |_| Err("forced persistence failure".into()),
+            &|| *marked.lock().unwrap() = true,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code, crate::error::ErrorCode::Recovery);
+        assert_eq!(store.secret().as_deref(), Some("old-value"));
+        assert!(*marked.lock().unwrap());
+        let serialized = serde_json::to_string(&error).unwrap();
+        assert!(!serialized.contains("old-value"));
+        assert!(!serialized.contains("new-value"));
+    }
+
+    #[test]
+    fn trusted_open_targets_are_fixed_and_path_derived() {
+        assert_eq!(
+            PROJECT_REPOSITORY_URL,
+            "https://github.com/rainerosion/snipvault"
+        );
+        assert_eq!(
+            trusted_directory_path(TrustedDirectory::Data),
+            crate::paths::get_data_dir()
+        );
+        assert_eq!(
+            trusted_directory_path(TrustedDirectory::Export),
+            crate::paths::get_export_dir().0
+        );
+    }
+}

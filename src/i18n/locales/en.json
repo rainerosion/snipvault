@@ -2,11 +2,13 @@
   "app": {
     "title": "灵藏 · SnipVault",
     "brand": "灵藏",
+    "subtitle": "Local snippet vault",
     "count": "{{count}} items"
   },
   "search": {
     "placeholder": "Search snippets...",
-    "all": "All languages"
+    "all": "All languages",
+    "clear": "Clear search"
   },
   "filter": {
     "all": "All languages",
@@ -34,16 +36,29 @@
     "savedAt": "Saved {{time}}",
     "shortcutSave": "Ctrl+S to save",
     "titleRequired": "Please enter a title",
-    "untitled": "Untitled"
+    "untitled": "Untitled",
+    "loadingDetail": "Loading snippet...",
+    "select": "Select snippet {{title}}",
+    "favoriteTitle": "Favorite {{title}}",
+    "unfavoriteTitle": "Remove {{title}} from favorites",
+    "deleteTitle": "Delete {{title}}",
+    "removeTag": "Remove tag {{tag}}",
+    "minimapResize": "Drag to resize the decorative code minimap"
   },
   "settings": {
     "title": "Settings",
     "close": "Close",
     "save": "Save Settings",
+    "saving": "Saving...",
     "saved": "Saved ✓",
+    "unsavedChanges": "These settings have unsaved changes. Save before closing?",
+    "changedExternally": "Saved settings changed elsewhere. Your unsaved fields have been kept; saving will apply this draft.",
+    "saveBeforeSync": "Save settings before syncing.",
+    "autoSyncTimingNote": "The first automatic sync may run shortly after enabling. Later attempts follow the selected interval.",
+    "backgroundSyncSuccess": "Background sync completed and the latest snippets were refreshed.",
     "general": "General",
     "webdav": "WebDAV Sync",
-    "webdavDesc": "Sync snippets to WebDAV-supported cloud storage (Nextcloud, Synology, Nutstore, etc.) with incremental merge",
+    "webdavDesc": "Secure two-way WebDAV merge. HTTPS is required except for localhost, 127.0.0.1, and ::1 development servers.",
     "about": "About",
     "autoStart": "Start with Windows",
     "autoStartDesc": "Automatically launch when you log in",
@@ -60,7 +75,29 @@
     "username": "Username",
     "usernamePlaceholder": "Username",
     "password": "Password / API Key",
-    "passwordPlaceholder": "Password",
+    "passwordPlaceholder": "Enter a new credential",
+    "passwordStoredPlaceholder": "Stored securely — enter to replace",
+    "clearStoredCredential": "Clear stored credential",
+    "keepStoredCredential": "Keep stored credential",
+    "openDataFolder": "Open data folder",
+    "secretAction": {
+      "replace": "Saving will replace the stored credential. The existing value is never shown here.",
+      "clear": "Saving will remove the stored credential and disable credential-backed auto-sync until replaced."
+    },
+    "credentialStatus": {
+      "configured": "A credential is stored by the operating system. Leave this field blank to keep it.",
+      "not_configured": "No credential is stored. Enter one if the selected authentication mode requires it.",
+      "unavailable": "The operating-system credential store is unavailable. Unlock or repair it, then replace or clear the credential.",
+      "denied": "Credential access was denied. Grant access, then replace or clear the credential.",
+      "invalid": "The credential entry is invalid. Replace or clear it.",
+      "ambiguous": "Multiple matching credential entries were found. Clear the duplicates, then replace or clear here.",
+      "migration_required": "A legacy credential could not be migrated. The original settings file is preserved; replace or clear the credential before auto-sync resumes.",
+      "recovery_required": "A rollback could not be completed. Review the operating-system credential and startup settings, then replace or clear the credential."
+    },
+    "recovery": {
+      "backup_restored": "The primary settings file was damaged and quarantined; a valid backup was restored.",
+      "defaults_loaded": "The settings file was damaged and quarantined, no valid backup was available, and safe defaults were loaded."
+    },
     "webdavAuthMode": "Auth mode",
     "webdavAuthModeDesc": "Auto by default (Digest→Basic); switch based on your server",
     "webdavAuthBasic": "Basic",
@@ -79,8 +116,16 @@
     "lastSync": "Last sync: {{time}}",
     "neverSynced": "Never synced",
     "syncSuccess": "Sync successful",
+    "syncHistoryLoading": "Loading sync history...",
+    "syncHistoryDirectionPublish": "Published",
+    "syncHistoryDirectionMerge": "Merged",
+    "syncHistoryDirectionOther": "{{direction}}",
+    "syncHistoryCounts": "{{total}} total · {{uploaded}} up · {{downloaded}} down · {{deleted}} deleted · {{conflicts}} conflicts",
+    "syncHistoryProtocol": "Protocol v{{protocol}} · generation {{generation}}",
+    "syncResultProtocol": "Protocol v{{protocol}} · generation {{generation}}",
+    "syncResultCounts": "{{total}} total · {{uploaded}} up · {{downloaded}} down · {{deleted}} deleted · {{conflicts}} conflicts · {{pending}} pending",
     "noHistory": "No sync history",
-    "syncConfirm": "Two-way merge sync: local snippets newer than remote will be uploaded, remote snippets newer than local will be downloaded. Continue?",
+    "syncConfirm": "WebDAV v2 two-way merge sync will run: local and remote revisions are merged through the revision/outbox journal, deletions propagate as tombstones, and concurrent branches keep conflict copies. Continue?",
     "aboutName": "App Name",
     "aboutVersion": "Version",
     "aboutAuthor": "Author",
@@ -116,7 +161,10 @@
     "empty": "No snippets yet",
     "emptyHint": "Click New above to create one",
     "loading": "Loading...",
-    "languages": "Languages",
+    "loadMore": "Load more",
+    "loadingMore": "Loading more...",
+    "retry": "Retry",
+    "snippetList": "Code snippets",
     "tags": "Tags",
     "timeAgo": {
       "justNow": "Just now",
@@ -157,6 +205,25 @@
     "restore": "Restore",
     "close": "Close"
   },
+  "commandErrors": {
+    "validation": "Some provided values are invalid.",
+    "not_found": "The requested item could not be found.",
+    "stale_revision": "This snippet changed since the draft was loaded. Your draft was preserved; reload before saving again.",
+    "outbox_full": "The pending synchronization queue reached its safety limit. Synchronize or free space before editing more snippets.",
+    "database": "The local database operation failed. Please retry.",
+    "settings": "The settings operation failed. Please retry.",
+    "network": "The network or synchronization request failed. Please retry.",
+    "sync_busy": "Another synchronization is already running. Please wait and retry.",
+    "sync_cas_conflict": "The remote vault changed while publishing. Retry synchronization to reconcile the latest generation.",
+    "sync_legacy_changed": "Legacy WebDAV data changed during the one-way v2 upgrade. Retry after other clients stop writing.",
+    "import": "The snippet import could not be completed.",
+    "export": "The snippet export could not be completed.",
+    "autostart": "The startup setting could not be changed.",
+    "credential": "The operating-system credential store could not complete the request.",
+    "recovery": "The change could not be fully rolled back. Open Settings and follow the recovery guidance.",
+    "open": "The trusted location could not be opened.",
+    "unknown": "The operation could not be completed."
+  },
   "errors": {
     "importFailed": "Import failed",
     "importInvalid": "Invalid JSON file",
@@ -170,7 +237,17 @@
     "syncFailed": "Sync failed: {{error}}",
     "saveFailed": "Save failed: {{error}}",
     "settingsFailed": "Settings save failed: {{error}}",
+    "settingsLoadFailed": "Settings could not be loaded.",
+    "deleteFailed": "Delete failed: {{error}}",
+    "favoriteFailed": "Favorite update failed: {{error}}",
+    "clipboardFailed": "Clipboard operation failed: {{error}}",
+    "reloadAfterMutationFailed": "The change was saved, but the latest snippets could not be reloaded: {{error}}",
+    "reloadAfterSyncFailed": "Sync completed, but the latest local state could not be reloaded: {{error}}",
+    "remoteUpdateApplied": "The selected snippet was refreshed with the latest saved data.",
+    "remoteUpdatePending": "New saved data is available. Your unsaved edits were preserved.",
     "loadFailed": "Load failed, please retry",
+    "loadDetailFailed": "The snippet could not be loaded: {{error}}",
+    "syncFailedShort": "Synchronization could not be completed.",
     "noWebdav": "Please configure WebDAV server address in Settings first"
   }
 }

@@ -14,7 +14,8 @@
     "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "types": ["node", "vitest/globals", "@testing-library/jest-dom", "jest-axe"]
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]

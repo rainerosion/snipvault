@@ -6,6 +6,9 @@ dist/
 dist-win/
 out/
 
+# Claude local workspace
+.claude/
+
 # Tauri
 src-tauri/target/
 

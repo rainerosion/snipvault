@@ -3,9 +3,9 @@ import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
 import "./index.css";
-import i18n from "./i18n";
-import { LanguageContext } from "./context/LanguageContext";
-import type { Settings as AppSettings } from "./hooks/useSettings";
+import { LanguageProvider } from "./context/LanguageProvider";
+import type { SettingsView } from "./hooks/useSettings";
+import { SettingsProvider, settingsToDraft } from "./hooks/useSettings";
 
 declare global {
   interface Window {
@@ -60,7 +60,7 @@ const bootTheme = resolveBootTheme();
 document.documentElement.setAttribute("data-theme", bootTheme);
 root.setAttribute("data-theme", bootTheme);
 
-let bootSettingsPromise: Promise<AppSettings | null> | null = null;
+let bootSettingsPromise: Promise<SettingsView | null> | null = null;
 
 function getBootSettings() {
   if (!bootSettingsPromise) {
@@ -68,7 +68,7 @@ function getBootSettings() {
     window.__bootMark?.("get_settings_start");
     void invoke("boot_mark", { stage: "get_settings_start", tMs: t }).catch(() => {});
 
-    bootSettingsPromise = invoke<AppSettings>("get_settings")
+    bootSettingsPromise = invoke<SettingsView>("get_settings")
       .then((settings) => {
         const done = performance.now() - (window.__bootT0 ?? 0);
         window.__bootMark?.("get_settings_done");
@@ -85,6 +85,26 @@ function getBootSettings() {
   return bootSettingsPromise;
 }
 
+function getBootLanguage(): Promise<string> {
+  return getBootSettings().then(async (settings) => {
+    const initialLanguage = settings?.language || "zh";
+    if (settings?.language || !settings) return initialLanguage;
+
+    try {
+      const systemLanguage = (await invoke<string>("get_system_locale")) || "zh";
+      if (systemLanguage !== initialLanguage) {
+        void invoke("save_settings", {
+          newSettings: { ...settingsToDraft(settings), language: systemLanguage },
+          secretAction: { action: "keep" },
+        }).catch(() => {});
+      }
+      return systemLanguage;
+    } catch {
+      return initialLanguage;
+    }
+  });
+}
+
 export const ThemeContext = createContext<{
   theme: "dark" | "light";
   setTheme: (t: "dark" | "light") => void;
@@ -95,11 +115,13 @@ void invoke("boot_mark", { stage: "react_render_start", tMs: performance.now() -
 
 ReactDOM.createRoot(root).render(
   <React.StrictMode>
-    <ThemeProvider>
-      <LanguageProvider>
-        <App />
-      </LanguageProvider>
-    </ThemeProvider>
+    <SettingsProvider initialSettings={getBootSettings()}>
+      <ThemeProvider>
+        <LanguageProvider loadInitialLanguage={getBootLanguage}>
+          <App />
+        </LanguageProvider>
+      </ThemeProvider>
+    </SettingsProvider>
   </React.StrictMode>
 );
 
@@ -195,58 +217,5 @@ function ThemeProvider({ children }: { children: React.ReactNode }) {
     <ThemeContext.Provider value={{ theme, setTheme }}>
       {children}
     </ThemeContext.Provider>
-  );
-}
-
-function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguageState] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    getBootSettings()
-      .then((settings) => {
-        if (cancelled) return;
-
-        const initialLang = settings?.language || "zh";
-        setLanguageState(initialLang);
-        void i18n.changeLanguage(initialLang);
-
-        if (settings?.language) return;
-
-        invoke<string>("get_system_locale")
-          .then((sysLang) => {
-            if (cancelled || !settings) return;
-            const detected = sysLang || "zh";
-            if (detected === initialLang) return;
-
-            setLanguageState(detected);
-            void i18n.changeLanguage(detected);
-            invoke("save_settings", {
-              newSettings: { ...settings, language: detected },
-            }).catch(() => {});
-          })
-          .catch(() => {});
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setLanguageState("zh");
-        void i18n.changeLanguage("zh");
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const setLanguage = (l: string) => {
-    setLanguageState(l);
-    void i18n.changeLanguage(l);
-  };
-
-  return (
-    <LanguageContext.Provider value={{ language: language || "zh", setLanguage }}>
-      {children}
-    </LanguageContext.Provider>
   );
 }

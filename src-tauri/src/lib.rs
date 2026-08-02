@@ -1,5 +1,10 @@
 pub mod commands;
+pub mod credentials;
 pub mod db;
+pub mod error;
 pub mod paths;
+pub mod revision;
 pub mod settings;
+pub mod sync;
+pub mod tray;
 pub mod webdav;

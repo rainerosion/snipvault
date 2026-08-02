@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-win/
+out/
+public/
+screenshot/
+scripts/src-tauri/
+src-tauri/target/
+package-lock.json
+src-tauri/Cargo.lock
