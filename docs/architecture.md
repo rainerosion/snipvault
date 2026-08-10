@@ -1,6 +1,6 @@
 # SnipVault 架构设计
 
-> 本文描述 v2.1.2 源码截至 2026-08-02 的当前架构。已发现但尚未修复的问题集中记录在 [已知限制](known-limitations.md)。
+> 本文描述 v2.1.3 源码截至 2026-08-11 的当前架构。已发现但尚未修复的问题集中记录在 [已知限制](known-limitations.md)。
 
 ## 1. 系统定位与边界
 
@@ -36,6 +36,7 @@ flowchart LR
         SNIPPETS[useSnippets]
         MODAL[ModalSurface<br/>模态栈与焦点所有权]
         EDITOR[SnippetEditor<br/>CodeMirror + Canvas MiniMap]
+        SYNTAX_HIGHLIGHT[syntaxHighlight.ts<br/>共享语法范围适配器]
         LANGUAGE_META[languages.ts<br/>轻量语言元数据]
         LANGUAGE_EXT[languageExtensions.ts<br/>编辑器 parser / stream factory]
         UI --> APP
@@ -46,6 +47,8 @@ flowchart LR
         UI --> MODAL
         EDITOR --> LANGUAGE_META
         EDITOR --> LANGUAGE_EXT
+        EDITOR --> SYNTAX_HIGHLIGHT
+        SYNTAX_HIGHLIGHT --> LANGUAGE_EXT
         LANGUAGE_EXT --> LANGUAGE_META
     end
 
@@ -194,7 +197,7 @@ flowchart LR
 └── .minimap-wrap
 ```
 
-CodeMirror 的语言扩展由 [languageExtensions.ts](../src/components/languageExtensions.ts) 隔离：它从轻量 [languages.ts](../src/utils/languages.ts) 的 `LanguageId` 建立 exhaustively typed 分类和 factory；元数据文件不导入编辑器包。`buildMainExtensions()` 继续负责换行、GitHub 主题、`EditorView.theme()` 和 `HighlightStyle`，[SnippetEditor.tsx](../src/components/SnippetEditor.tsx) 内的 `MiniMap` 继续负责 Canvas codeglance、主滚动同步和 viewport 拖拽。
+CodeMirror 的语言扩展由 [languageExtensions.ts](../src/components/languageExtensions.ts) 隔离：它从轻量 [languages.ts](../src/utils/languages.ts) 的 `LanguageId` 建立 exhaustively typed 分类和 factory；元数据文件不导入编辑器包。`buildMainExtensions()` 继续负责换行、GitHub 主题、`EditorView.theme()` 和 `HighlightStyle`，并先注册项目复合 highlighter、后注册 UIW GitHub 主题，以确保项目复合样式是编辑器中实际生效的 token 色彩来源。[syntaxHighlight.ts](../src/components/syntaxHighlight.ts) 使用同一语言 factory、受限 `ensureSyntaxTree()` 和共享 `HighlightStyle` 导出有序 token 范围；[SnippetEditor.tsx](../src/components/SnippetEditor.tsx) 的 `MiniMap` 再读取编辑区实际计算的 class 前景色绘制 Canvas。因此编辑区和 codeglance 共用语法语义与最终颜色，解析未完成、无 token 与 plaintext 区域统一使用编辑器默认前景色；MiniMap 仍只负责 Canvas 几何、主滚动同步和 viewport 拖拽。
 
 语言 factory 分三类：官方/维护包提供的 parser-backed 扩展；基于 `@codemirror/legacy-modes` 的 `StreamLanguage` 语法着色；以及 plaintext 的显式空扩展。Stream mode 只提供 token stream 高亮，不是完整 Lezer parser，不能假定具备 parser-backed 折叠、结构选择或语言服务语义。
 

@@ -49,6 +49,12 @@ Snippet data is stored locally in SQLite and remains available offline. Optional
 
 > WebDAV v2 requires server support for strong ETags and conditional PUT. Its one-way cutover, immutable-object retention, conflict UI, and verification boundaries are documented in [Known limitations](docs/known-limitations.md). Keep an independent backup before activating a v1 directory and do not use old clients against it afterward.
 
+### What's New in v2.1.3
+
+- Made Canvas Codeglance consume the same CodeMirror syntax ranges and final token palette as the editor.
+- Corrected CodeMirror highlighter cascade order so GitHub theme base classes cannot override the palette Codeglance measures.
+- Keep whitespace geometry in Codeglance without drawing it as dark code bars.
+
 ### What's New in v2.1.2
 
 - Added WebDAV auth mode selection: `Auto`, `Basic`, `Digest`, `Bearer`, and `None`.
@@ -206,6 +212,12 @@ Feature design and development changes must update the relevant development docu
 - **同步历史** — 保留最近 20 条成功同步记录。
 
 > WebDAV v2 要求服务器支持 strong ETag 和 conditional PUT。单向升级、不可变对象保留、冲突 UI 与验证边界见[已知限制](docs/known-limitations.md)。激活 v1 目录前请保留独立备份，激活后不要再让旧客户端访问该目录。
+
+### v2.1.3 更新内容
+
+- Canvas Codeglance 现在复用编辑器的 CodeMirror 语法范围与最终 token 配色。
+- 调整 CodeMirror highlighter 级联顺序，避免 GitHub 主题基础 class 覆盖 Codeglance 所测量的配色。
+- Codeglance 保留空白的水平几何位置，但不再将空白绘制为深色代码条。
 
 ### v2.1.2 更新内容
 

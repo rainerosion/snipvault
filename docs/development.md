@@ -182,8 +182,8 @@ src-tauri/
 - 新增语言：先在 [utils/languages.ts](../src/utils/languages.ts) 增加 metadata/`LanguageId`，再在 [languageExtensions.ts](../src/components/languageExtensions.ts) 的 `LANGUAGE_SUPPORT` 和 `getLanguageExtensions()` 增加穷尽分支，并更新 [LanguageExtensions.test.ts](../src/test/LanguageExtensions.test.ts)。
 - 优先使用官方 CodeMirror 6/维护中的 Lezer language package；若只存在 reviewed legacy mode，可使用 `StreamLanguage.define()`，但文档和 UI 不得把它描述为完整 Lezer parser。
 - Plaintext 以及有意不支持的兼容 ID 必须显式返回空 `Extension`，不要通过漏掉 switch 分支获得隐式 fallback。
-- 修改编辑器主题、光标、选区、滚动或换行：更新 `buildMainExtensions()` 中的 `EditorView.theme()` / `HighlightStyle`。
-- 修改 Codeglance：复用 `MiniMap`、`tokenizeForMinimap()`、`colorForToken()`、`minimapPalette()`。
+- 修改编辑器主题、光标、选区、滚动或换行：更新 `buildMainExtensions()` 中的 `EditorView.theme()` / `HighlightStyle`。编辑器必须先注册项目复合 `HighlightStyle`，再注册 UIW GitHub 主题，使它与 Codeglance 共用的 class 颜色在真实编辑区中具有最终级联优先级；不得额外添加会覆盖该顺序的 syntax highlighter。
+- 修改 Codeglance：复用 `MiniMap` 与 [syntaxHighlight.ts](../src/components/syntaxHighlight.ts) 的共享语言/语法高亮范围适配器；不要再建立独立正则 tokenizer 或硬编码 token 调色板。
 - 修改滚动：以 `EditorView.scrollDOM` 为主滚动源，不额外截获 wheel 事件。
 
 ### 6.2 DOM 和样式事实
@@ -203,7 +203,7 @@ src-tauri/
 
 ### 6.3 MiniMap 约束
 
-- 预览是启发式 tokenizer，不等于实际语法树。
+- 预览的 token 范围和颜色与编辑器共用 CodeMirror 语言扩展与 `HighlightStyle`；受限解析预算未完成、无 token 或 plaintext 的文本使用编辑器默认前景色。空白字符只占用缩略图水平位置而不绘制色条。
 - Canvas 高度随行数增长，大文件可能有性能和浏览器 Canvas 尺寸限制。
 - viewport 比例依赖主 scroller 的 `scrollHeight/clientHeight`。
 - 宽度 state 当前不持久化。

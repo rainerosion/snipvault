@@ -4,7 +4,8 @@ import CodeMirror from "@uiw/react-codemirror";
 import { EditorView } from "@codemirror/view";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
-import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
+import { getSyntaxHighlightRanges, type SyntaxHighlightRange } from "./syntaxHighlight";
+import { githubDark, githubDarkStyle, githubLight, githubLightStyle } from "@uiw/codemirror-theme-github";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Snippet, SnippetForm } from "../types";
 import { LANGUAGES, type LanguageId } from "../utils/languages";
@@ -26,7 +27,7 @@ interface SnippetEditorProps {
   tagOptions: string[];
 }
 
-const DARK_MINIMAP_COLORS = {
+const DARK_SYNTAX_COLORS = {
   keyword: "#ff7b72",
   name: "#ffa657",
   functionName: "#d2a8ff",
@@ -38,7 +39,7 @@ const DARK_MINIMAP_COLORS = {
   plain: "#c9d1d9",
 };
 
-const LIGHT_MINIMAP_COLORS = {
+const LIGHT_SYNTAX_COLORS = {
   keyword: "#cf222e",
   name: "#953800",
   functionName: "#8250df",
@@ -50,47 +51,52 @@ const LIGHT_MINIMAP_COLORS = {
   plain: "#24292f",
 };
 
-const darkHighlight = syntaxHighlighting(HighlightStyle.define([
-  { tag: t.keyword, color: DARK_MINIMAP_COLORS.keyword },
-  { tag: [t.name, t.deleted, t.character, t.propertyName, t.macroName], color: DARK_MINIMAP_COLORS.name },
-  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: DARK_MINIMAP_COLORS.functionName },
+const darkHighlightStyle = HighlightStyle.define([
+  ...githubDarkStyle,
+  { tag: t.keyword, color: DARK_SYNTAX_COLORS.keyword },
+  { tag: [t.name, t.deleted, t.character, t.propertyName, t.macroName], color: DARK_SYNTAX_COLORS.name },
+  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: DARK_SYNTAX_COLORS.functionName },
   { tag: [t.labelName], color: "#7ee787" },
-  { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: DARK_MINIMAP_COLORS.name },
-  { tag: [t.definition(t.name), t.separator], color: DARK_MINIMAP_COLORS.plain },
-  { tag: [t.typeName, t.className, t.number, t.changed, t.annotation, t.modifier, t.self, t.namespace], color: DARK_MINIMAP_COLORS.type },
-  { tag: [t.operator, t.operatorKeyword, t.url, t.escape, t.regexp, t.link, t.special(t.string)], color: DARK_MINIMAP_COLORS.punctuation },
-  { tag: [t.meta, t.comment], color: DARK_MINIMAP_COLORS.comment, fontStyle: "italic" },
+  { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: DARK_SYNTAX_COLORS.name },
+  { tag: [t.definition(t.name), t.separator], color: DARK_SYNTAX_COLORS.plain },
+  { tag: [t.typeName, t.className, t.number, t.changed, t.annotation, t.modifier, t.self, t.namespace], color: DARK_SYNTAX_COLORS.type },
+  { tag: [t.operator, t.operatorKeyword, t.url, t.escape, t.regexp, t.link, t.special(t.string)], color: DARK_SYNTAX_COLORS.punctuation },
+  { tag: [t.meta, t.comment], color: DARK_SYNTAX_COLORS.comment, fontStyle: "italic" },
   { tag: t.strong, fontWeight: "bold" },
   { tag: t.emphasis, fontStyle: "italic" },
   { tag: t.strikethrough, textDecoration: "line-through" },
-  { tag: t.link, color: DARK_MINIMAP_COLORS.string, textDecoration: "underline" },
-  { tag: t.heading, fontWeight: "bold", color: DARK_MINIMAP_COLORS.type },
-  { tag: [t.atom, t.bool, t.special(t.variableName)], color: DARK_MINIMAP_COLORS.keyword },
-  { tag: [t.processingInstruction, t.string, t.inserted], color: DARK_MINIMAP_COLORS.string },
-  { tag: t.number, color: DARK_MINIMAP_COLORS.number },
-  { tag: t.invalid, color: DARK_MINIMAP_COLORS.keyword },
-]));
+  { tag: t.link, color: DARK_SYNTAX_COLORS.string, textDecoration: "underline" },
+  { tag: t.heading, fontWeight: "bold", color: DARK_SYNTAX_COLORS.type },
+  { tag: [t.atom, t.bool, t.special(t.variableName)], color: DARK_SYNTAX_COLORS.keyword },
+  { tag: [t.processingInstruction, t.string, t.inserted], color: DARK_SYNTAX_COLORS.string },
+  { tag: t.number, color: DARK_SYNTAX_COLORS.number },
+  { tag: t.invalid, color: DARK_SYNTAX_COLORS.keyword },
+]);
 
-const lightHighlight = syntaxHighlighting(HighlightStyle.define([
-  { tag: t.keyword, color: LIGHT_MINIMAP_COLORS.keyword },
-  { tag: [t.name, t.deleted, t.character, t.propertyName, t.macroName], color: LIGHT_MINIMAP_COLORS.name },
-  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: LIGHT_MINIMAP_COLORS.functionName },
+const lightHighlightStyle = HighlightStyle.define([
+  ...githubLightStyle,
+  { tag: t.keyword, color: LIGHT_SYNTAX_COLORS.keyword },
+  { tag: [t.name, t.deleted, t.character, t.propertyName, t.macroName], color: LIGHT_SYNTAX_COLORS.name },
+  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: LIGHT_SYNTAX_COLORS.functionName },
   { tag: [t.labelName], color: "#116329" },
-  { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: LIGHT_MINIMAP_COLORS.name },
-  { tag: [t.definition(t.name), t.separator], color: LIGHT_MINIMAP_COLORS.plain },
-  { tag: [t.typeName, t.className, t.number, t.changed, t.annotation, t.modifier, t.self, t.namespace], color: LIGHT_MINIMAP_COLORS.type },
-  { tag: [t.operator, t.operatorKeyword, t.url, t.escape, t.regexp, t.link, t.special(t.string)], color: LIGHT_MINIMAP_COLORS.punctuation },
-  { tag: [t.meta, t.comment], color: LIGHT_MINIMAP_COLORS.comment, fontStyle: "italic" },
+  { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: LIGHT_SYNTAX_COLORS.name },
+  { tag: [t.definition(t.name), t.separator], color: LIGHT_SYNTAX_COLORS.plain },
+  { tag: [t.typeName, t.className, t.number, t.changed, t.annotation, t.modifier, t.self, t.namespace], color: LIGHT_SYNTAX_COLORS.type },
+  { tag: [t.operator, t.operatorKeyword, t.url, t.escape, t.regexp, t.link, t.special(t.string)], color: LIGHT_SYNTAX_COLORS.punctuation },
+  { tag: [t.meta, t.comment], color: LIGHT_SYNTAX_COLORS.comment, fontStyle: "italic" },
   { tag: t.strong, fontWeight: "bold" },
   { tag: t.emphasis, fontStyle: "italic" },
   { tag: t.strikethrough, textDecoration: "line-through" },
-  { tag: t.link, color: LIGHT_MINIMAP_COLORS.string, textDecoration: "underline" },
-  { tag: t.heading, fontWeight: "bold", color: LIGHT_MINIMAP_COLORS.type },
-  { tag: [t.atom, t.bool, t.special(t.variableName)], color: LIGHT_MINIMAP_COLORS.keyword },
-  { tag: [t.processingInstruction, t.string, t.inserted], color: LIGHT_MINIMAP_COLORS.string },
-  { tag: t.number, color: LIGHT_MINIMAP_COLORS.number },
-  { tag: t.invalid, color: LIGHT_MINIMAP_COLORS.keyword },
-]));
+  { tag: t.link, color: LIGHT_SYNTAX_COLORS.string, textDecoration: "underline" },
+  { tag: t.heading, fontWeight: "bold", color: LIGHT_SYNTAX_COLORS.type },
+  { tag: [t.atom, t.bool, t.special(t.variableName)], color: LIGHT_SYNTAX_COLORS.keyword },
+  { tag: [t.processingInstruction, t.string, t.inserted], color: LIGHT_SYNTAX_COLORS.string },
+  { tag: t.number, color: LIGHT_SYNTAX_COLORS.number },
+  { tag: t.invalid, color: LIGHT_SYNTAX_COLORS.keyword },
+]);
+
+const darkHighlight = syntaxHighlighting(darkHighlightStyle);
+const lightHighlight = syntaxHighlighting(lightHighlightStyle);
 
 function buildMainExtensions(isDark: boolean, lang: string, lineWrap: boolean) {
   const selBg = isDark ? "rgba(56,189,248,0.62)" : "rgba(2,132,199,0.42)";
@@ -140,12 +146,13 @@ function buildMainExtensions(isDark: boolean, lang: string, lineWrap: boolean) {
 
   return [
     ...(lineWrap ? [EditorView.lineWrapping] : []),
+    isDark ? darkHighlight : lightHighlight,
+    isDark ? githubDark : githubLight,
     getLanguageExtensions(
       LANGUAGES.some((language) => language.id === lang)
         ? (lang as LanguageId)
         : "plaintext",
     ),
-    isDark ? githubDark : githubLight,
     cmLayout,
     isDark ? darkHighlight : lightHighlight,
   ];
@@ -153,9 +160,12 @@ function buildMainExtensions(isDark: boolean, lang: string, lineWrap: boolean) {
 
 interface MiniMapProps {
   content: string;
+  language: string;
+  highlightStyle: HighlightStyle;
   isDark: boolean;
   width: number;
   mainScrollEl: HTMLElement | null;
+  editorView: EditorView | null;
   scrollMainTo: (scrollTop: number) => void;
 }
 
@@ -166,44 +176,83 @@ const GLANCE_MIN_BASELINE = 24;
 const GLANCE_IQR_MULTIPLIER = 1.5;
 const GLANCE_MIN_OUTLIER_GAP = 12;
 
-function minimapPalette(isDark: boolean) {
-  return isDark ? DARK_MINIMAP_COLORS : LIGHT_MINIMAP_COLORS;
+function colorForHighlightClass(
+  editorView: EditorView | null,
+  className: string | null,
+  fallbackColor: string,
+  colorCache: Map<string, string>,
+): string {
+  if (!className) return fallbackColor;
+
+  const cached = colorCache.get(className);
+  if (cached) return cached;
+
+  const parent = editorView?.contentDOM;
+  if (!parent) return fallbackColor;
+
+  const sample = document.createElement("span");
+  sample.className = className;
+  sample.textContent = "x";
+  sample.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;";
+  parent.appendChild(sample);
+  const color = getComputedStyle(sample).color || fallbackColor;
+  sample.remove();
+  colorCache.set(className, color);
+  return color;
 }
 
-function colorForToken(token: string, isDark: boolean): string {
-  const p = minimapPalette(isDark);
-  if (!token.trim()) return isDark ? "#30363d" : "#d0d7de";
-  if (/^(\/\/|#|\/\*)/.test(token)) return p.comment;
-  if (/^("[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*'|`[^`\\]*(?:\\.[^`\\]*)*`)$/.test(token)) return p.string;
-  if (/^(true|false|null|undefined|let|const|var|function|class|return|if|else|for|while|switch|case|break|continue|try|catch|throw|new|import|export|from|default|async|await|interface|type|enum|extends|implements|public|private|protected|static)$/.test(token)) {
-    return p.keyword;
-  }
-  if (/^\d+(\.\d+)?$/.test(token)) return p.number;
-  if (/^[A-Z][\w$]*$/.test(token)) return p.type;
-  if (/^[{}()\[\];,.<>:=+\-*/%!&|^~?]+$/.test(token)) return p.punctuation;
-  return p.plain;
-}
+function getLineHighlightSegments(
+  lineText: string,
+  lineStart: number,
+  highlightRanges: SyntaxHighlightRange[],
+  resolveColor: (className: string | null) => string,
+): { length: number; color: string; visible: boolean }[] {
+  if (!lineText) return [];
 
-function tokenizeForMinimap(lineText: string, isDark: boolean): { text: string; color: string }[] {
-  if (!lineText.trim()) return [];
+  const lineEnd = lineStart + lineText.length;
+  const segments: { length: number; color: string; visible: boolean }[] = [];
+  let position = lineStart;
 
-  const parts = lineText.match(/\/\/.*$|\/\*.*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b[A-Za-z_][\w$]*\b|\d+(?:\.\d+)?|[{}()\[\];,.<>:=+\-*/%!&|^~?]+|\s+|./g) ?? [];
+  const addSegment = (from: number, to: number, className: string | null) => {
+    const length = to - from;
+    if (length <= 0) return;
 
-  const segments: { text: string; color: string }[] = [];
-  for (const part of parts) {
-    const color = colorForToken(part, isDark);
-    const prev = segments[segments.length - 1];
-    if (prev && prev.color === color) {
-      prev.text += part;
+    const text = lineText.slice(from - lineStart, to - lineStart);
+    const visible = /\S/.test(text);
+    const color = resolveColor(className);
+    const previous = segments[segments.length - 1];
+    if (previous?.color === color && previous.visible === visible) {
+      previous.length += length;
     } else {
-      segments.push({ text: part, color });
+      segments.push({ length, color, visible });
     }
+  };
+
+  for (const range of highlightRanges) {
+    if (range.to <= position) continue;
+    if (range.from >= lineEnd) break;
+
+    const from = Math.max(position, range.from, lineStart);
+    const to = Math.min(range.to, lineEnd);
+    addSegment(position, from, null);
+    addSegment(from, to, range.className);
+    position = to;
   }
 
+  addSegment(position, lineEnd, null);
   return segments;
 }
 
-function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMapProps) {
+function MiniMap({
+  content,
+  language,
+  highlightStyle,
+  isDark,
+  width,
+  mainScrollEl,
+  editorView,
+  scrollMainTo,
+}: MiniMapProps) {
   const paneRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -214,6 +263,28 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMap
   const [isViewportDragging, setIsViewportDragging] = useState(false);
   const [paneClientHeight, setPaneClientHeight] = useState(0);
   const [mainCanScroll, setMainCanScroll] = useState(false);
+  const [fallbackColor, setFallbackColor] = useState("");
+  const colorCacheRef = useRef(new Map<string, string>());
+  const highlightRanges = useMemo(
+    () => getSyntaxHighlightRanges(content, language, highlightStyle),
+    [content, language, highlightStyle],
+  );
+  useEffect(() => {
+    colorCacheRef.current.clear();
+    const contentElement = editorView?.contentDOM;
+    setFallbackColor(contentElement ? getComputedStyle(contentElement).color : "");
+  }, [editorView, isDark]);
+
+  const resolveColor = useCallback(
+    (className: string | null) =>
+      colorForHighlightClass(
+        editorView,
+        className,
+        fallbackColor || (isDark ? DARK_SYNTAX_COLORS.plain : LIGHT_SYNTAX_COLORS.plain),
+        colorCacheRef.current,
+      ),
+    [editorView, fallbackColor, isDark],
+  );
 
   const bg = isDark ? "#0d1117" : "#ffffff";
   const viewportBg = isDark ? "rgba(56,189,248,0.26)" : "rgba(2,132,199,0.22)";
@@ -264,39 +335,53 @@ function MiniMap({ content, isDark, width, mainScrollEl, scrollMainTo }: MiniMap
 
     ctx.clearRect(0, 0, width, totalH);
 
+    let lineStart = 0;
     lines.forEach((lineText, i) => {
       const y = i * GLANCE_LINE_H;
       ctx.fillStyle = bg;
       ctx.fillRect(0, y, width, GLANCE_LINE_H);
-      if (!lineText.trim()) return;
+      if (!lineText.trim()) {
+        lineStart += lineText.length + 1;
+        return;
+      }
 
-      const segments = tokenizeForMinimap(lineText, isDark);
+      const segments = getLineHighlightSegments(
+        lineText,
+        lineStart,
+        highlightRanges,
+        resolveColor,
+      );
       let x = GLANCE_PADDING_X;
 
-      for (const seg of segments) {
-        const segW = Math.min(seg.text.length * scaleX, width - x - 1);
-        if (segW > 0.5) {
-          ctx.fillStyle = seg.color;
-          ctx.beginPath();
-          ctx.roundRect(x, y + 0.5, segW, GLANCE_LINE_H - 1, 1);
-          ctx.fill();
-          x += segW;
+      for (const segment of segments) {
+        const segmentWidth = Math.min(segment.length * scaleX, width - x - 1);
+        if (segmentWidth > 0.5) {
+          if (segment.visible) {
+            ctx.fillStyle = segment.color;
+            ctx.beginPath();
+            ctx.roundRect(x, y + 0.5, segmentWidth, GLANCE_LINE_H - 1, 1);
+            ctx.fill();
+          }
+          x += segmentWidth;
           if (x >= width - GLANCE_PADDING_X) break;
         }
       }
 
       if (hasExtremeLine && lineText.length > effectiveMaxLen && x < width - GLANCE_PADDING_X) {
         const remainW = width - GLANCE_PADDING_X - x;
-        ctx.fillStyle = minimapPalette(isDark).plain;
+        ctx.fillStyle = resolveColor(null);
         ctx.fillRect(x, y + 1, remainW, GLANCE_LINE_H - 2);
       }
+
+      lineStart += lineText.length + 1;
     });
   }, [
     lines,
     width,
     totalH,
     bg,
-    isDark,
+    highlightRanges,
+    resolveColor,
     scaleX,
     hasExtremeLine,
     effectiveMaxLen,
@@ -675,6 +760,7 @@ export function SnippetEditor({
 
   const cmRef = useRef<EditorView | null>(null);
   const [mainScrollEl, setMainScrollEl] = useState<HTMLElement | null>(null);
+  const [editorView, setEditorView] = useState<EditorView | null>(null);
 
   const splitRef = useRef<HTMLDivElement | null>(null);
   const [copied, setCopied] = useState(false);
@@ -808,6 +894,7 @@ export function SnippetEditor({
             onChange={(val) => onChange({ content: val })}
             onCreateEditor={(view) => {
               cmRef.current = view;
+              setEditorView(view);
               setMainScrollEl(view.scrollDOM as HTMLElement);
             }}
             basicSetup={{
@@ -833,9 +920,12 @@ export function SnippetEditor({
 
         <MiniMap
           content={form.content}
+          language={form.language}
+          highlightStyle={isDark ? darkHighlightStyle : lightHighlightStyle}
           isDark={isDark}
           width={minimapWidth}
           mainScrollEl={mainScrollEl}
+          editorView={editorView}
           scrollMainTo={scrollMainTo}
         />
       </div>

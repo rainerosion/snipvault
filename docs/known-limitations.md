@@ -1,6 +1,6 @@
 # SnipVault 已知限制与技术债
 
-> 本文记录 v2.1.2 在 2026-08-02 production WebDAV protocol-v2 activation 与发布链路硬化检查点后仍可验证的限制。已解决问题及方案见 [第一轮问题修复记录](remediation-2026-07-31.md) 与 [第二轮修复记录](remediation-round-2.md)。本文不是修复承诺。
+> 本文记录 v2.1.3 在 2026-08-11 production WebDAV protocol-v2 activation 与发布链路硬化检查点后仍可验证的限制。已解决问题及方案见 [第一轮问题修复记录](remediation-2026-07-31.md) 与 [第二轮修复记录](remediation-round-2.md)。本文不是修复承诺。
 
 ## 优先级概览
 
@@ -79,7 +79,7 @@ worker 每 15 秒观察一次设置。有效配置首次出现时会在该次观
 
 可选语言现在都有明确扩展策略：Go、HTML、C# 和 Elixir 使用对应 parser-backed 包；Ruby、Swift、Kotlin、Bash、Dockerfile、TOML、Lua、R、Scala 使用 `@codemirror/legacy-modes` 的 `StreamLanguage`；plaintext 有意保持空扩展。
 
-Stream mode 能提供对应语言的词法语法着色，但不构建完整 Lezer 语法树。因此这些语言不能保证具备与 parser-backed 语言相同的结构折叠、语法树导航、结构选择或未来语言服务能力。语言元数据与编辑器扩展已分层，并由 exhaustively typed test 防止新 ID 静默落空。
+Stream mode 能提供对应语言的词法语法着色，但不构建完整 Lezer 语法树。因此这些语言不能保证具备与 parser-backed 语言相同的结构折叠、语法树导航、结构选择或未来语言服务能力。Canvas codeglance 复用该语言扩展产生的 token 范围和编辑器的实际高亮颜色，所以它与编辑区匹配 StreamLanguage 的词法着色，但不会由此获得完整 Lezer 结构。语言元数据与编辑器扩展已分层，并由 exhaustively typed test 防止新 ID 静默落空。
 
 ## 4. 安全与隐私
 
