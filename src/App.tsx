@@ -92,7 +92,7 @@ export default function App() {
     | { status: "loading"; summary: SnippetSummary }
     | { status: "error"; summary: SnippetSummary; error: unknown }
   >({ status: "idle" });
-  const { theme, setTheme } = useContext(ThemeContext);
+  const { theme, accentPreset, setTheme } = useContext(ThemeContext);
   const [searchQuery, setSearchQuery] = useState("");
   const [langFilter, setLangFilter] = useState("");
   const [favFilter, setFavFilter] = useState<boolean | null>(null);
@@ -320,10 +320,6 @@ export default function App() {
       unlisteners.forEach((unlisten) => unlisten());
     };
   }, [reconcileSyncCompletion, reloadSettings]);
-
-  useEffect(() => {
-    document.getElementById("root")!.setAttribute("data-theme", theme);
-  }, [theme]);
 
   useEffect(() => {
     const schedule = () => import("./components/SnippetEditor").catch(() => {});
@@ -909,7 +905,7 @@ export default function App() {
 
   return (
     <>
-      <Dialog ref={dialogRef} theme={theme} />
+      <Dialog ref={dialogRef} />
       {settingsOpen && (
         <div
           className="app-modal-layer"
@@ -921,8 +917,6 @@ export default function App() {
         >
           <SettingsPanel
             ref={settingsPanelRef}
-            theme={theme}
-            setTheme={setTheme}
             onClose={() => setSettingsOpen(false)}
             onSync={() => runManualSync("settings")}
           />
@@ -940,7 +934,7 @@ export default function App() {
                 : t("errors.syncFailedShort")
         )}
       </div>
-      <Titlebar theme={theme} />
+      <Titlebar />
       <Toolbar
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -1037,6 +1031,7 @@ export default function App() {
                   );
                 }}
                 theme={theme}
+                accentPreset={accentPreset}
                 lineWrap={lineWrap}
                 saving={saving}
                 isDirty={isDirty}

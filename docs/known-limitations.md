@@ -1,6 +1,6 @@
 # SnipVault 已知限制与技术债
 
-> 本文记录 v2.1.3 在 2026-08-11 production WebDAV protocol-v2 activation 与发布链路硬化检查点后仍可验证的限制。已解决问题及方案见 [第一轮问题修复记录](remediation-2026-07-31.md) 与 [第二轮修复记录](remediation-round-2.md)。本文不是修复承诺。
+> 本文记录 v2.2.0 在 2026-08-11 production WebDAV protocol-v2 activation 与发布链路硬化检查点后仍可验证的限制。已解决问题及方案见 [第一轮问题修复记录](remediation-2026-07-31.md) 与 [第二轮修复记录](remediation-round-2.md)。本文不是修复承诺。
 
 ## 优先级概览
 
@@ -133,11 +133,17 @@ Schema v4 的 `revision_objects` 会在 exact acknowledgement 删除 `revision_o
 
 ## 6. 前端交互与可访问性
 
-### 6.1 App 级工作流覆盖仍有限
+### 6.1 界面配色仅支持经审查的精选 preset
+
+当前主题系统将深浅模式与界面配色分离：可持久化的 `accent_preset` 只接受 `sky`、`violet`、`emerald`、`amber`、`rose`、`white`（界面名称“简约白”）。每个精选值在 dark/light 下均提供受控的完整 UI palette，覆盖背景、surface、文字层级、边框、标题栏、弹窗、控件、编辑器 chrome 和 codeglance；简约白会在各自深浅模式下复现初始版本的中性界面。语法 token、语言标签色和状态语义保持稳定。
+
+影响：已支持完整的精选 surface skin，但仍不支持任意 HEX、CSS 字符串、用户主题导入/导出或 syntax palette 编辑器。这一限制防止未校验 CSS 注入，并避免无法保证深浅模式、填充按钮文字、焦点、选区和可访问性对比度的任意配色。若未来支持自定义颜色，必须引入版本化 schema、严格颜色解析、可访问性/OKLCH 派生、重置路径和迁移策略，不能直接把用户输入写入 style/CSS variable。
+
+### 6.2 App 级工作流覆盖仍有限
 
 片段初始加载错误/空库、retry、delete/favorite rejection、结构化错误 fallback、reconciliation、共享 SettingsProvider、设置 draft/关闭 guard、background/Settings 同步单次 refresh、嵌套模态焦点/恢复、语义列表、标签 combobox、context menu 范围/导航、HTML `lang` 和语言分类已有 Vitest/RTL/user-event/axe 覆盖。完整 App 仍未通过真实 CodeMirror、Tauri desktop event、托盘和并发 save 组合测试；真实窗口行为仍依赖人工 smoke。
 
-### 6.2 自研 minimap 没有等价键盘控制
+### 6.3 自研 minimap 没有等价键盘控制
 
 Canvas codeglance、viewport 和宽度分隔器是装饰性/增强型视觉导航，已从辅助技术树隐藏；CodeMirror 本体保持可键盘滚动和编辑，因此核心内容不依赖 minimap。但 minimap 的点击跳转、viewport 拖动和宽度拖动没有等价的键盘操作。当前把这些能力视为非必要增强；若未来把 minimap 操作设为核心功能，需提供明确键盘控制。
 

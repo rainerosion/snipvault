@@ -140,6 +140,7 @@ src-tauri/
 - **Tauri IPC 与片段状态**：放在 [useSnippets.ts](../src/hooks/useSnippets.ts)。
 - **设置、同步状态与设置 IPC**：扩展 [useSettings.ts](../src/hooks/useSettings.ts) 中的 root `SettingsProvider` 和 injectable `SettingsApi`；消费者必须使用 provider，不得重新引入独立 `useSettings()` state 实例或绕过 provider 的 `get_settings` fallback。
 - **共享协议类型**：更新 [types/index.ts](../src/types/index.ts)，并同步核对 Rust 参数和序列化名称。
+- **外观与界面配色**：深浅偏好与 `sky | violet | emerald | amber | rose | white` 精选界面配色是独立的 persisted Settings 字段；类型、normalizer、启动镜像键和 `data-theme` / `data-accent` 写入集中在 [theme.ts](../src/theme.ts)。`ThemeProvider` 必须只消费根级 `SettingsProvider` 的权威 SettingsView；Settings 面板不得直接写 DOM attribute/localStorage 或成为第二个外观状态来源。六个精选值均须在 `index.css` 提供显式 dark × light 的 12 组完整 semantic token matrix（其中 `white` 的界面名称为“简约白”，并复现初始版本的中性深浅界面）。组件不得加入 palette-dependent raw 色值。不得把 preset 扩展为 raw CSS/hex 输入，也不得改变 syntax token、语言标签或状态语义。
 - **语言信息**：可选择项、颜色和 `LanguageId` 在 [utils/languages.ts](../src/utils/languages.ts)；parser/stream/plaintext 分类与 factory 在 [languageExtensions.ts](../src/components/languageExtensions.ts)。元数据层必须保持无 CodeMirror import；新增 ID 时两处都要更新，穷尽分类测试会在遗漏时失败。
 - **文案**：同步更新 [zh.json](../src/i18n/locales/zh.json) 与 [en.json](../src/i18n/locales/en.json)。
 
@@ -182,7 +183,7 @@ src-tauri/
 - 新增语言：先在 [utils/languages.ts](../src/utils/languages.ts) 增加 metadata/`LanguageId`，再在 [languageExtensions.ts](../src/components/languageExtensions.ts) 的 `LANGUAGE_SUPPORT` 和 `getLanguageExtensions()` 增加穷尽分支，并更新 [LanguageExtensions.test.ts](../src/test/LanguageExtensions.test.ts)。
 - 优先使用官方 CodeMirror 6/维护中的 Lezer language package；若只存在 reviewed legacy mode，可使用 `StreamLanguage.define()`，但文档和 UI 不得把它描述为完整 Lezer parser。
 - Plaintext 以及有意不支持的兼容 ID 必须显式返回空 `Extension`，不要通过漏掉 switch 分支获得隐式 fallback。
-- 修改编辑器主题、光标、选区、滚动或换行：更新 `buildMainExtensions()` 中的 `EditorView.theme()` / `HighlightStyle`。编辑器必须先注册项目复合 `HighlightStyle`，再注册 UIW GitHub 主题，使它与 Codeglance 共用的 class 颜色在真实编辑区中具有最终级联优先级；不得额外添加会覆盖该顺序的 syntax highlighter。
+- 修改编辑器主题、光标、选区、滚动或换行：更新 `buildMainExtensions()` 中的 `EditorView.theme()` / `HighlightStyle`。编辑器 surface/gutter/active gutter、光标、选区、匹配括号和 MiniMap viewport 必须只使用 `--editor-*` / `--minimap-*` 语义 token，不能重新硬编码 preset 色。Canvas 的背景色应从 `.minimap-pane` 的计算 token 读取，并在有效深浅模式或精选配色变化时重绘；syntax highlighter 仍必须先注册项目复合 `HighlightStyle`，再注册 UIW GitHub 主题，使它与 Codeglance 共用的 class 颜色在真实编辑区中具有最终级联优先级；不得额外添加会覆盖该顺序的 syntax highlighter。
 - 修改 Codeglance：复用 `MiniMap` 与 [syntaxHighlight.ts](../src/components/syntaxHighlight.ts) 的共享语言/语法高亮范围适配器；不要再建立独立正则 tokenizer 或硬编码 token 调色板。
 - 修改滚动：以 `EditorView.scrollDOM` 为主滚动源，不额外截获 wheel 事件。
 
@@ -199,7 +200,7 @@ src-tauri/
 
 不要继续按旧 `.cm-editor-wrap → shadow root` 描述设计。CodeMirror 管理其内部 DOM，但当前应用并不使用 CodeMirror Shadow DOM 作为样式边界。
 
-[index.css](../src/index.css) 仍有若干 `.cm-*` 和历史样式；修改前应确认 JSX 是否仍引用选择器。对 token、光标、选择和滚动的关键样式，优先通过 CodeMirror API 保持与组件生命周期一致。
+[index.css](../src/index.css) 仍有若干 `.cm-*` 和历史样式；修改前应确认 JSX 是否仍引用选择器。对 token、光标、选择和滚动的关键样式，优先通过 CodeMirror API 保持与组件生命周期一致。界面配色更新必须保持语法 token/Codeglance class 颜色不变，同时让 editor/minimap chrome 通过 CSS variable 同步。
 
 ### 6.3 MiniMap 约束
 

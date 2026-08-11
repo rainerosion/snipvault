@@ -18,6 +18,7 @@ vi.mock("../main", async () => {
   return {
     ThemeContext: createContext({
       theme: "dark" as const,
+      accentPreset: "sky" as const,
       setTheme: () => undefined,
     }),
   };
@@ -75,7 +76,9 @@ function makeApi(overrides: Partial<SettingsApi> = {}): SettingsApi {
 function renderApp(api: SettingsApi) {
   return render(
     <SettingsProvider initialSettings={DEFAULT_SETTINGS} api={api}>
-      <ThemeContext.Provider value={{ theme: "dark", setTheme: vi.fn() }}>
+      <ThemeContext.Provider
+        value={{ theme: "dark", accentPreset: "sky", setTheme: vi.fn() }}
+      >
         <LanguageContext.Provider
           value={{ language: "en", setLanguage: vi.fn() }}
         >

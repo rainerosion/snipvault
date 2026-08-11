@@ -1,6 +1,6 @@
 # SnipVault 功能设计
 
-> 本文按用户能力描述 v2.1.3 截至 2026-08-11 已经实现的功能、交互状态和调用链。异常行为和能力缺口统一链接到 [已知限制](known-limitations.md)，不在本文中包装为预期设计。
+> 本文按用户能力描述 v2.2.0 截至 2026-08-11 已经实现的功能、交互状态和调用链。异常行为和能力缺口统一链接到 [已知限制](known-limitations.md)，不在本文中包装为预期设计。
 
 ## 1. 产品信息架构
 
@@ -54,7 +54,7 @@ flowchart TB
 | 托盘 | 系统托盘 | 显示窗口、同步、设置、自启、退出 | [tray.rs](../src-tauri/src/tray.rs) |
 | 单实例 | 再次启动程序 | 唤醒并聚焦已有窗口 | [main.rs](../src-tauri/src/main.rs) |
 | 国际化 | 设置语言 | 中文/英文运行时切换并保存 | [LanguageContext.tsx](../src/context/LanguageContext.tsx)、[i18n](../src/i18n/index.ts) |
-| 主题 | 工具栏或设置 | 工具栏临时切换有效主题；设置保存持久偏好 | [main.tsx](../src/main.tsx)、[Settings.tsx](../src/components/Settings.tsx) |
+| 主题 | 工具栏或设置 | 工具栏临时切换有效深浅模式；设置保存 `system` / `dark` / `light` 与六种完整精选界面配色，保存成功后通过权威 provider 生效 | [main.tsx](../src/main.tsx)、[theme.ts](../src/theme.ts)、[Settings.tsx](../src/components/Settings.tsx) |
 
 ## 3. 片段列表
 
@@ -307,7 +307,7 @@ SQLite v4 的 tombstone 由 production WebDAV v2 作为不可变 deletion revisi
 
 - `githubDark` / `githubLight`。
 - 自定义 GitHub 风格 `HighlightStyle`。
-- `EditorView.theme()` 设置高度、字体、滚动、光标、选区和换行。
+- `EditorView.theme()` 设置高度、字体、滚动、光标、选区和换行；完整界面配色通过语义 token 同时控制编辑器 surface、gutter、active gutter、光标、选区、匹配括号和 Canvas viewport。Canvas 背景从 minimap pane 的计算 token 读取；syntax token 颜色不随界面配色变化。
 
 主题由当前有效 `dark` / `light` 值驱动，而不是直接读取持久化的 `system` 偏好。
 
@@ -460,7 +460,7 @@ flowchart LR
 
 - 开机自启。
 - 关闭时最小化到托盘。
-- 主题：跟随系统、暗色、亮色。
+- 主题：跟随系统、暗色、亮色；界面配色可选天空蓝、紫罗兰、翡翠绿、琥珀金、玫瑰红或简约白（内部值 `white`）。每项以可辨识的 mini palette 卡片展示深色 canvas、raised panel、交互 accent 与内容标记，而非难以分辨的单色图标；简约白会在浅色/深色模式下分别复现初始版本的中性界面。每个精选值在暗色和亮色下都有经审查的完整 surface/text/border/action token，覆盖背景、侧栏、卡片、标题栏、弹窗、输入控件、状态消息、编辑器 chrome 和 codeglance；不改变语法高亮、语言标签色或状态的语义含义。
 - 界面语言：中文、英文。
 
 ### 13.2 WebDAV 设置
@@ -494,7 +494,7 @@ flowchart LR
 4. 无 secret JSON 写入临时文件并同步，通过 `.bak` 备份替换；成功后才提交内存设置。
 5. 后续步骤失败时按相反方向恢复 autostart 和凭据；补偿失败返回安全 `recovery` 错误，标记必须 Replace/Clear 的恢复状态。
 6. 后端返回最终脱敏 `SettingsView`，provider 更新唯一权威 state，并使较旧 pending reload 失效。
-7. 面板只在全部持久化成功后更新 baseline、应用有效主题和语言、清空 secret 输入，并显示约两秒“已保存”；失败时保留面板与 draft，显示本地化安全错误。
+7. 面板只在全部持久化成功后更新 baseline、由根级 `ThemeProvider` 从返回的权威 `SettingsView` 原子应用有效深浅模式和完整界面配色、应用语言、清空 secret 输入，并显示约两秒“已保存”；失败时保留面板与 draft，显示本地化安全错误。
 8. 设置保存或托盘自启动切换成功后都会刷新托盘复选状态。
 
 Save 在 draft 干净或正在保存时禁用。X、外层 backdrop 和 Escape 都进入同一个异步关闭 guard：干净时直接关闭；dirty 时显示“保存 / 放弃 / 取消”。选择保存只有在持久化成功后才关闭；失败或取消继续停留，放弃则关闭。Settings 和内层 Dialog 共享 [ModalSurface.tsx](../src/components/ModalSurface.tsx) 的模态栈：只有栈顶处理 Tab/Escape，背景临时 inert/ARIA 隔离，内层关闭后恢复到触发按钮，Settings 最终关闭后恢复到设置入口。
@@ -517,14 +517,15 @@ Save 在 draft 干净或正在保存时禁用。X、外层 backdrop 和 Escape �
 
 ### 14.1 主题
 
-持久偏好：`dark`、`light`、`system`。
+持久深浅偏好：`dark`、`light`、`system`；持久主题色：`sky`、`violet`、`emerald`、`amber`、`rose`、`white`（界面名称“简约白”）。两者独立：前者只决定浅/深 surface，后者决定完整界面配色与交互色；`white` 在对应深浅模式下恢复初始版本的中性 UI。
 
-- 设置页选择主题并保存：更新后端设置和运行时 Context。
-- 工具栏按钮：只在当前 `dark` / `light` 间切换有效主题，不调用 `save_settings`。
-- `system` 模式下监听 `prefers-color-scheme`。
-- 启动时结合后端设置、本地缓存和系统偏好降低颜色闪烁。
+- 设置页选择深浅偏好和主题色并保存：更新后端设置和运行时 Context；选择时只修改 draft，不提供未保存预览。
+- 工具栏按钮：只在当前 `dark` / `light` 间切换有效主题，不调用 `save_settings`，也不更改主题色。
+- `system` 模式下监听 `prefers-color-scheme`，主题色不变。
+- 启动时由 `boot.ts` 用经过 allowlist 校验的 localStorage 镜像同步 `data-theme` 和 `data-accent`；随后 `ThemeProvider` 以权威 `SettingsView` 纠正它们，降低外观闪烁。
+- [index.css](../src/index.css) 为每个深浅模式 × 主题色组合提供已验证的语义 token，填充控件使用 `--accent-on` 保持可读对比。
 
-因此工具栏按钮是临时有效主题切换，设置页才是持久主题入口。
+因此工具栏按钮是临时有效主题切换，设置页才是深浅偏好和主题色的持久入口。
 
 ### 14.2 国际化
 
@@ -590,6 +591,7 @@ ask(message, title?): Promise<"save" | "discard" | "cancel">
 - 最大化和还原。
 - 关闭。
 - 监听 resize，同步最大化状态。
+- 标题栏、窗口控制图标和非关闭按钮 hover 使用当前完整界面配色的 semantic token；简约白保留初始中性标题栏，其他精选配色使用对应色调的标题栏 surface。
 
 关闭调用最终是否退出由 Rust 的 `CloseRequested` 监听决定。
 

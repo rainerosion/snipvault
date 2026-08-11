@@ -1,9 +1,9 @@
 # SnipVault 开发文档
 
-> 本目录面向 SnipVault 的维护者和功能开发者，记录 **v2.1.3 当前源码的真实实现**，包括 production WebDAV protocol-v2 activation。它不是产品愿景，也不表示已知问题已经修复。
+> 本目录面向 SnipVault 的维护者和功能开发者，记录 **v2.2.0 当前源码的真实实现**，包括 production WebDAV protocol-v2 activation。它不是产品愿景，也不表示已知问题已经修复。
 
 - 核对日期：2026-08-11
-- 应用版本：2.1.3
+- 应用版本：2.2.0
 - 主要技术：Tauri 2、React 19、TypeScript、CodeMirror 6、Rust、SQLite、WebDAV
 - 事实来源：仓库源码；当文档与源码冲突时，以源码为准，并应在同一变更中修正文档
 

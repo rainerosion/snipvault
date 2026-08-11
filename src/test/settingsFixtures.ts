@@ -4,6 +4,7 @@ export const DEFAULT_SETTINGS: Settings = {
   auto_start: false,
   minimize_to_tray: true,
   theme: "system",
+  accent_preset: "sky",
   language: "en",
   webdav_url: "https://example.test/dav",
   webdav_username: "user",

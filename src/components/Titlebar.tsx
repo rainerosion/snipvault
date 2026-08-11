@@ -4,10 +4,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import appIcon from "../../assets/app-icon.png";
 
 interface TitlebarProps {
-  theme: "dark" | "light";
+  /** @deprecated Titlebar colors are supplied by global semantic tokens. */
+  theme?: "dark" | "light";
 }
 
-export function Titlebar({ theme }: TitlebarProps) {
+export function Titlebar(_props: TitlebarProps) {
   const { t } = useTranslation();
   const [maximized, setMaximized] = useState(false);
 
@@ -32,7 +33,7 @@ export function Titlebar({ theme }: TitlebarProps) {
   const handleClose = () => getCurrentWindow().close();
 
   return (
-    <div data-tauri-drag-region className={`titlebar ${theme}`}>
+    <div data-tauri-drag-region className="titlebar">
       <div className="titlebar-icon" data-tauri-drag-region>
         <img src={appIcon} alt="SnipVault" width="16" height="16" />
       </div>

@@ -21,15 +21,17 @@ import {
 import { LanguageContext } from "../context/LanguageContext";
 import { LANGUAGES } from "../i18n";
 import { localizeCommandError } from "../utils/commandErrors";
+import { ACCENT_PRESETS } from "../theme";
 import { Dialog, type DialogHandle } from "./Dialog";
 import { ModalSurface } from "./ModalSurface";
 
 const APP_NAME = "灵藏 · SnipVault";
 const APP_VERSION = import.meta.env.VITE_APP_VERSION;
-
 interface SettingsPanelProps {
-  theme: "dark" | "light";
-  setTheme: (theme: "dark" | "light") => void;
+  /** @deprecated Appearance is derived from the root ThemeProvider. */
+  theme?: "dark" | "light";
+  /** @deprecated Appearance is derived from the root ThemeProvider. */
+  setTheme?: (theme: "dark" | "light") => void;
   onClose: () => void;
   onSync: () => Promise<SyncCompletionEvent>;
 }
@@ -64,7 +66,7 @@ function isWebDavDraftDirty(
 export const SettingsPanel = forwardRef<
   SettingsPanelHandle,
   SettingsPanelProps
->(function SettingsPanel({ theme, setTheme, onClose, onSync }, ref) {
+>(function SettingsPanel({ onClose, onSync }, ref) {
   const { t } = useTranslation();
   const { setLanguage } = useContext(LanguageContext);
   const {
@@ -79,7 +81,6 @@ export const SettingsPanel = forwardRef<
     reload,
     save,
     reloadHistory,
-    getSystemTheme,
   } = useSettings();
   const [draft, setDraft] = useState<SettingsDraft | null>(null);
   const [baseline, setBaseline] = useState<SettingsDraft | null>(null);
@@ -195,29 +196,6 @@ export const SettingsPanel = forwardRef<
     [setDraftState],
   );
 
-  const applyTheme = useCallback(
-    async (themeValue: string) => {
-      if (themeValue === "dark" || themeValue === "light") {
-        setTheme(themeValue);
-        window.dispatchEvent(
-          new CustomEvent("snipvault-theme-pref-changed", {
-            detail: { pref: themeValue, effective: themeValue },
-          }),
-        );
-      } else {
-        const systemTheme = await getSystemTheme().catch(() => "dark");
-        const effective = systemTheme === "light" ? "light" : "dark";
-        setTheme(effective);
-        window.dispatchEvent(
-          new CustomEvent("snipvault-theme-pref-changed", {
-            detail: { pref: "system", effective },
-          }),
-        );
-      }
-    },
-    [getSystemTheme, setTheme],
-  );
-
   const handleSave = useCallback(async (): Promise<boolean> => {
     const submitted = draftRef.current;
     if (!submitted || saving) return false;
@@ -229,7 +207,6 @@ export const SettingsPanel = forwardRef<
       setDraftState(savedDraft);
       setBaselineState(savedDraft);
       setExternalChange(false);
-      await applyTheme(savedDraft.theme);
       if (savedDraft.language !== settings?.language) {
         setLanguage(savedDraft.language);
       }
@@ -245,7 +222,6 @@ export const SettingsPanel = forwardRef<
       return false;
     }
   }, [
-    applyTheme,
     save,
     saving,
     secretAction,
@@ -380,9 +356,6 @@ export const SettingsPanel = forwardRef<
     );
   }
 
-  const effectiveTheme = (
-    draft.theme === "system" ? theme : draft.theme
-  ) as "dark" | "light";
   const syncDisabled =
     syncing ||
     !draft.webdav_url.trim() ||
@@ -395,7 +368,7 @@ export const SettingsPanel = forwardRef<
       labelledBy="settings-title"
       onEscape={() => void requestCloseRef.current()}
     >
-      <Dialog ref={dialogRef} theme={effectiveTheme} />
+      <Dialog ref={dialogRef} />
       <div className="settings-header">
         <h2 id="settings-title" className="settings-title">
           {t("settings.title")}
@@ -490,6 +463,67 @@ export const SettingsPanel = forwardRef<
               <option value="light">{t("settings.themeLight")}</option>
             </select>
           </label>
+
+          <div className="settings-accent-group">
+            <div className="settings-row-info">
+              <span id="accent-preset-label" className="settings-row-label">
+                {t("settings.accentPreset")}
+              </span>
+              <span id="accent-preset-desc" className="settings-row-desc">
+                {t("settings.accentPresetDesc")}
+              </span>
+            </div>
+            <div
+              className="settings-accent-options"
+              role="radiogroup"
+              aria-labelledby="accent-preset-label"
+              aria-describedby="accent-preset-desc"
+            >
+              {ACCENT_PRESETS.map((preset) => {
+                const selected = draft.accent_preset === preset;
+                return (
+                  <button
+                    key={preset}
+                    type="button"
+                    className={`settings-accent-option${selected ? " selected" : ""}`}
+                    role="radio"
+                    aria-checked={selected}
+                    tabIndex={selected ? 0 : -1}
+                    aria-label={t("settings.accentPresetOption", {
+                      color: t(`settings.accent${preset[0].toUpperCase()}${preset.slice(1)}`),
+                      selected: selected ? t("settings.accentPresetSelected") : "",
+                    })}
+                    onClick={() => updateDraft("accent_preset", preset)}
+                    onKeyDown={(event) => {
+                      const currentIndex = ACCENT_PRESETS.indexOf(preset);
+                      let nextIndex: number | null = null;
+                      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                        nextIndex = (currentIndex + 1) % ACCENT_PRESETS.length;
+                      } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                        nextIndex = (currentIndex - 1 + ACCENT_PRESETS.length) % ACCENT_PRESETS.length;
+                      } else if (event.key === "Home") {
+                        nextIndex = 0;
+                      } else if (event.key === "End") {
+                        nextIndex = ACCENT_PRESETS.length - 1;
+                      }
+
+                      if (nextIndex === null) return;
+                      event.preventDefault();
+                      updateDraft("accent_preset", ACCENT_PRESETS[nextIndex]);
+                      const radios = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+                        '[role="radio"]',
+                      );
+                      radios?.[nextIndex]?.focus();
+                    }}
+                  >
+                    <span className={`settings-accent-swatch ${preset}`} aria-hidden="true" />
+                    <span className="settings-accent-name">{t(`settings.accent${preset[0].toUpperCase()}${preset.slice(1)}`)}</span>
+                    {selected && <span className="settings-accent-check" aria-hidden="true">✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           <label className="settings-row">
             <div className="settings-row-info">

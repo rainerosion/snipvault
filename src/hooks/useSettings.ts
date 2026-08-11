@@ -16,6 +16,13 @@ import {
 } from "../utils/commandErrors";
 
 export type ThemePreference = "system" | "dark" | "light";
+export type AccentPreset =
+  | "sky"
+  | "violet"
+  | "emerald"
+  | "amber"
+  | "rose"
+  | "white";
 export type AppLanguage = "zh" | "en";
 export type WebDavAuthMode = "auto" | "basic" | "digest" | "bearer" | "none";
 export type CredentialStatusKind =
@@ -41,6 +48,7 @@ export interface SettingsView {
   auto_start: boolean;
   minimize_to_tray: boolean;
   theme: ThemePreference;
+  accent_preset: AccentPreset;
   language: AppLanguage;
   webdav_url: string;
   webdav_username: string;
@@ -59,6 +67,7 @@ export interface SettingsDraft {
   auto_start: boolean;
   minimize_to_tray: boolean;
   theme: ThemePreference;
+  accent_preset: AccentPreset;
   language: AppLanguage;
   webdav_url: string;
   webdav_username: string;
@@ -168,6 +177,7 @@ export function settingsToDraft(settings: SettingsView): SettingsDraft {
     auto_start: settings.auto_start,
     minimize_to_tray: settings.minimize_to_tray,
     theme: settings.theme,
+    accent_preset: settings.accent_preset,
     language: settings.language,
     webdav_url: settings.webdav_url,
     webdav_username: settings.webdav_username,

@@ -616,6 +616,7 @@ mod tests {
             auto_start: current.auto_start,
             minimize_to_tray: current.minimize_to_tray,
             theme: current.theme.clone(),
+            accent_preset: current.accent_preset.clone(),
             language: current.language.clone(),
             webdav_url: current.webdav_url.clone(),
             webdav_username: current.webdav_username.clone(),

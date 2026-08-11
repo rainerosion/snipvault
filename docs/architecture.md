@@ -1,6 +1,6 @@
 # SnipVault 架构设计
 
-> 本文描述 v2.1.3 源码截至 2026-08-11 的当前架构。已发现但尚未修复的问题集中记录在 [已知限制](known-limitations.md)。
+> 本文描述 v2.2.0 源码截至 2026-08-11 的当前架构。已发现但尚未修复的问题集中记录在 [已知限制](known-limitations.md)。
 
 ## 1. 系统定位与边界
 
@@ -33,6 +33,7 @@ flowchart LR
         UI[React Components]
         APP[App.tsx<br/>业务与同步协调]
         SETTINGS_PROVIDER[SettingsProvider<br/>权威设置状态]
+        APPEARANCE[theme.ts / ThemeProvider<br/>权威设置 + session 深浅覆盖 + 完整精选界面配色]
         SNIPPETS[useSnippets]
         MODAL[ModalSurface<br/>模态栈与焦点所有权]
         EDITOR[SnippetEditor<br/>CodeMirror + Canvas MiniMap]
@@ -41,6 +42,8 @@ flowchart LR
         LANGUAGE_EXT[languageExtensions.ts<br/>编辑器 parser / stream factory]
         UI --> APP
         SETTINGS_PROVIDER --> APP
+        SETTINGS_PROVIDER --> APPEARANCE
+        APPEARANCE --> UI
         SETTINGS_PROVIDER --> UI
         APP --> SNIPPETS
         APP --> EDITOR
@@ -123,14 +126,15 @@ flowchart LR
 - 创建 React Root。
 - 以单次 `getBootSettings()` promise 同时初始化根级 `SettingsProvider`、主题和语言，避免为三个入口重复读取设置。
 - 在 `SettingsProvider` 之内提供运行时 `ThemeContext` 和 [LanguageProvider](../src/context/LanguageProvider.tsx)；设置 Context 本身不依赖主题或语言 Context，因此没有 provider cycle。
-- 使用 `localStorage` 缓存主题偏好和有效主题，降低启动时主题闪烁。
-- 同步 `data-theme` 到 `documentElement` 和 `#root`，并由 `LanguageProvider` 把有效语言同步为 HTML `lang="zh-CN"` 或 `lang="en"`。
+- [theme.ts](../src/theme.ts) 统一严格的主题/界面配色 allowlist、启动缓存键和对 `documentElement`、`#root` 的 `data-theme` / `data-accent` 写入；[ThemeProvider](../src/main.tsx) 消费根级 `SettingsProvider` 的权威 `SettingsView`，因此首次读取、保存成功和后台刷新只经一条外观更新路径。
+- 使用 `localStorage` 镜像持久主题偏好、其解析后的有效主题和精选界面配色，降低启动时外观闪烁。`system` 在启动和运行时通过 `matchMedia` 解析为 `dark` 或 `light`；工具栏深浅切换是 session-only override，不写入 Rust 设置或启动缓存，并会在权威主题偏好改变时清除。
 - 上报启动性能阶段，移除 HTML splash，并调用 `frontend_ready`。
 
-主题分为两层：
+主题外观分为三层：
 
-- **持久偏好**：`dark`、`light`、`system`，来自后端设置。
-- **当前有效主题**：`dark` 或 `light`，由偏好和系统主题共同解析。
+- **持久深浅偏好**：`dark`、`light`、`system`，来自后端设置。
+- **当前有效主题**：`dark` 或 `light`，由偏好、系统主题与仅限当前会话的工具栏 override 共同解析。
+- **持久精选界面配色**：`sky`、`violet`、`emerald`、`amber`、`rose`、`white`（界面名称“简约白”）；与深浅模式正交。`white` 在 light/dark 下复现初始版本的中性界面，其余每个值定义完整的 background/surface/text/border/action/editor/minimap token 矩阵；旧 JSON 缺省为 `sky`。启动时的 localStorage 只是一份经过 allowlist 归一化的反闪烁镜像，最终事实源仍是后端 `SettingsView`。
 
 [LanguageContext.tsx](../src/context/LanguageContext.tsx) 定义运行时 `zh` / `en` 契约；[LanguageProvider.tsx](../src/context/LanguageProvider.tsx) 负责异步启动语言、i18next 和文档 `lang` 同步，使 provider 可脱离 `main.tsx` 的启动副作用测试。
 
@@ -197,7 +201,7 @@ flowchart LR
 └── .minimap-wrap
 ```
 
-CodeMirror 的语言扩展由 [languageExtensions.ts](../src/components/languageExtensions.ts) 隔离：它从轻量 [languages.ts](../src/utils/languages.ts) 的 `LanguageId` 建立 exhaustively typed 分类和 factory；元数据文件不导入编辑器包。`buildMainExtensions()` 继续负责换行、GitHub 主题、`EditorView.theme()` 和 `HighlightStyle`，并先注册项目复合 highlighter、后注册 UIW GitHub 主题，以确保项目复合样式是编辑器中实际生效的 token 色彩来源。[syntaxHighlight.ts](../src/components/syntaxHighlight.ts) 使用同一语言 factory、受限 `ensureSyntaxTree()` 和共享 `HighlightStyle` 导出有序 token 范围；[SnippetEditor.tsx](../src/components/SnippetEditor.tsx) 的 `MiniMap` 再读取编辑区实际计算的 class 前景色绘制 Canvas。因此编辑区和 codeglance 共用语法语义与最终颜色，解析未完成、无 token 与 plaintext 区域统一使用编辑器默认前景色；MiniMap 仍只负责 Canvas 几何、主滚动同步和 viewport 拖拽。
+CodeMirror 的语言扩展由 [languageExtensions.ts](../src/components/languageExtensions.ts) 隔离：它从轻量 [languages.ts](../src/utils/languages.ts) 的 `LanguageId` 建立 exhaustively typed 分类和 factory；元数据文件不导入编辑器包。`buildMainExtensions()` 继续负责换行、GitHub 主题、`EditorView.theme()` 和 `HighlightStyle`，并先注册项目复合 highlighter、后注册 UIW GitHub 主题，以确保项目复合样式是编辑器中实际生效的 token 色彩来源。编辑器 surface、gutter、光标、选区和匹配括号使用 [index.css](../src/index.css) 的完整界面配色语义 token，而不改变 syntax token palette。[syntaxHighlight.ts](../src/components/syntaxHighlight.ts) 使用同一语言 factory、受限 `ensureSyntaxTree()` 和共享 `HighlightStyle` 导出有序 token 范围；[SnippetEditor.tsx](../src/components/SnippetEditor.tsx) 的 `MiniMap` 再读取编辑区实际计算的 class 前景色绘制 Canvas，并从 minimap pane 读取计算后的 surface token 作为 Canvas 背景。因此编辑区和 codeglance 共用语法语义与最终颜色，解析未完成、无 token 与 plaintext 区域统一使用编辑器默认前景色；MiniMap viewport 同样使用语义 token，仍只负责 Canvas 几何、主滚动同步和 viewport 拖拽。
 
 语言 factory 分三类：官方/维护包提供的 parser-backed 扩展；基于 `@codemirror/legacy-modes` 的 `StreamLanguage` 语法着色；以及 plaintext 的显式空扩展。Stream mode 只提供 token stream 高亮，不是完整 Lezer parser，不能假定具备 parser-backed 折叠、结构选择或语言服务语义。
 
@@ -568,7 +572,7 @@ v2 同步 seam 包括一致 snapshot、完整预验证的 remote plan no-echo ap
 
 | 类别 | 字段 |
 |---|---|
-| 通用 | `auto_start`, `minimize_to_tray`, `theme`, `language` |
+| 通用 | `auto_start`, `minimize_to_tray`, `theme`, `accent_preset`, `language` |
 | WebDAV 非敏感配置 | `webdav_url`, `webdav_username`, `webdav_auth_mode`, `webdav_timeout_secs` |
 | 自动同步 | `auto_sync`, `sync_interval_minutes`, `last_sync_at` |
 | 编辑器 | `editor_line_wrap` |
@@ -578,7 +582,7 @@ v2 同步 seam 包括一致 snapshot、完整预验证的 remote plan no-echo ap
 
 Rust 使用三个不同边界：
 
-- `Settings`：后端内存和 JSON 的无 secret 模型。
+- `Settings`：后端内存和 JSON 的无 secret 模型，包含严格 allowlist 的 `theme` 与 `accent_preset`；`theme` 为 `system | dark | light`，`accent_preset` 为 `sky | violet | emerald | amber | rose | white` 的完整精选界面配色，其中 `white` 的用户界面名称为“简约白”，并恢复初始中性界面。
 - `SettingsView`：返回 WebView 的只读脱敏 DTO，包含非敏感字段、`webdav_secret_configured`、`credential_status` 和 `settings_recovery_status`。
 - `SettingsInput` + `SecretAction`：WebView 保存时提交的非敏感候选值以及 `Keep`、`Replace(value)` 或 `Clear`；`last_sync_at` 继续由后端所有。
 

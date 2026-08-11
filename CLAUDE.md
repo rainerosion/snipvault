@@ -142,7 +142,7 @@ Do not add `overflow: hidden` to an ancestor in a way that prevents the CodeMirr
 
 The runtime effective theme is `dark` or `light`; the persisted preference can also be `system`. Startup resolution uses persisted settings, local cache, and system preference to reduce flashing.
 
-`data-theme` is synchronized to both `document.documentElement` and `#root`. The toolbar toggle changes the effective theme temporarily; the Settings panel is the persistent theme preference entry point.
+`data-theme` and `data-accent` are synchronized to both `document.documentElement` and `#root`. The toolbar toggle changes the effective theme temporarily; the Settings panel is the persistent theme preference and curated palette entry point. `accent_preset` accepts only `sky`, `violet`, `emerald`, `amber`, `rose`, or `white`; `white` is labeled Minimal White in the interface and restores the original neutral surfaces for each effective theme.
 
 ### Settings
 

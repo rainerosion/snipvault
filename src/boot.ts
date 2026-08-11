@@ -1,4 +1,10 @@
 import "./boot.css";
+import {
+  ACCENT_PRESET_KEY,
+  applyAppearance,
+  normalizeAccentPreset,
+  resolveBootTheme,
+} from "./theme";
 
 declare global {
   interface Window {
@@ -15,18 +21,10 @@ window.__bootMark = (stage: string) => {
 
 window.__bootMark("boot_module_start");
 
-const preference = localStorage.getItem("snipvault-theme-pref");
-const cached = localStorage.getItem("snipvault-theme-effective");
-let theme: "dark" | "light";
-if (preference === "dark" || preference === "light") {
-  theme = preference;
-} else if (cached === "dark" || cached === "light") {
-  theme = cached;
-} else {
-  theme = window.matchMedia?.("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-}
-document.documentElement.setAttribute("data-theme", theme);
+const theme = resolveBootTheme();
+const accentPreset = normalizeAccentPreset(
+  localStorage.getItem(ACCENT_PRESET_KEY),
+);
+applyAppearance(theme, accentPreset);
 window.__bootMark("theme_applied");
 window.__bootMark("splash_dom_ready");

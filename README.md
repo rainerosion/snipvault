@@ -42,12 +42,20 @@ Snippet data is stored locally in SQLite and remains available offline. Optional
 - **Clipboard tools** — Copy the full snippet or use the custom text context menu for cut/copy/paste/select-all.
 - **JSON import/export** — Versioned exports include format/schema/app/time metadata and use collision-safe filenames; imports also accept legacy top-level arrays and merge by ID and `updated_at`.
 - **Accessible interaction** — Semantic snippet lists, named controls, nested modal focus management/restoration, visible keyboard focus, reduced motion, and native context menus outside supported editable text targets.
-- **Dark/Light/System theme** and **Chinese/English UI**, including synchronized document language metadata.
+- **Curated interface palettes** — Keep Dark/Light/System mode separate from six persistent curated palettes (Sky, Violet, Emerald, Amber, Rose, Minimal White). Minimal White restores the original neutral light/dark surfaces; every palette recolors the full application canvas, surfaces, text hierarchy, borders, titlebar, dialogs, controls, editor chrome, and codeglance while syntax and language colors remain stable.
+- **Chinese/English UI** — Includes synchronized document language metadata.
 - **WebDAV synchronization** — Auto, Basic, Digest, Bearer, and no-auth modes; revision ancestry, cross-device deletion tombstones, deterministic conflict copies, manifest CAS, HTTPS for remote servers, and OS credential-store protection for passwords/tokens.
 - **Desktop integration** — Custom titlebar, system tray, single-instance behavior, minimize-to-tray, autostart, and backend-controlled trusted-folder/repository opening.
 - **Sync history** — The latest 20 successful synchronization records.
 
 > WebDAV v2 requires server support for strong ETags and conditional PUT. Its one-way cutover, immutable-object retention, conflict UI, and verification boundaries are documented in [Known limitations](docs/known-limitations.md). Keep an independent backup before activating a v1 directory and do not use old clients against it afterward.
+
+### What's New in v2.2.0
+
+- Added six curated full-interface palettes: Sky, Violet, Emerald, Amber, Rose, and Minimal White.
+- Made every palette recolor the application canvas, surfaces, titlebar, dialogs, controls, editor chrome, and Canvas Codeglance across Dark, Light, and System modes.
+- Added Minimal White to restore the original neutral light/dark interface surfaces.
+- Kept CodeMirror syntax highlighting and Codeglance token colors aligned and unchanged by palette selection.
 
 ### What's New in v2.1.3
 
@@ -206,12 +214,19 @@ Feature design and development changes must update the relevant development docu
 - **剪贴板工具** — 一键复制完整代码，以及文本区域剪切/复制/粘贴/全选右键菜单。
 - **JSON 导入/导出** — 版本化导出包含格式/schema/应用/时间元数据并使用防冲突文件名；导入兼容旧顶层数组，按 ID 和 `updated_at` 合并。
 - **无障碍交互** — 语义片段列表、具名控件、嵌套模态焦点约束/恢复、可见键盘焦点、减少动画，以及在非受支持编辑目标上保留原生右键菜单。
-- **主题与语言** — 暗色、亮色、跟随系统；中文和英文界面，并同步文档语言元数据。
+- **主题与语言** — 暗色、亮色、跟随系统的深浅模式，与可持久化的天空蓝、紫罗兰、翡翠绿、琥珀金、玫瑰红、简约白精选界面配色独立配置；简约白会恢复最初版本的中性深浅界面。每种配色会改变完整应用的背景、面板、文字层级、边框、标题栏、弹窗、控件、编辑器 chrome 和 codeglance，语法和语言颜色保持稳定。中文和英文界面同步文档语言元数据。
 - **WebDAV 同步** — Auto、Basic、Digest、Bearer、无认证；基于 revision ancestry 合并、跨设备删除 tombstone、确定性冲突副本、manifest CAS，远端服务器要求 HTTPS，并通过操作系统凭据库保护密码/token。
 - **桌面集成** — 自定义标题栏、系统托盘、单实例、最小化到托盘、开机自启，以及后端受控打开可信目录/仓库。
 - **同步历史** — 保留最近 20 条成功同步记录。
 
 > WebDAV v2 要求服务器支持 strong ETag 和 conditional PUT。单向升级、不可变对象保留、冲突 UI 与验证边界见[已知限制](docs/known-limitations.md)。激活 v1 目录前请保留独立备份，激活后不要再让旧客户端访问该目录。
+
+### v2.2.0 更新内容
+
+- 新增六种精选完整界面配色：天空蓝、紫罗兰、翡翠绿、琥珀金、玫瑰红和简约白。
+- 各配色会在深色、浅色与跟随系统模式下同步调整应用画布、面板、标题栏、弹窗、控件、编辑器 chrome 与 Canvas Codeglance。
+- 新增简约白，用于恢复最初版本的中性深浅界面表面。
+- 保持 CodeMirror 语法高亮与 Codeglance token 配色对齐，且不随界面配色选择而改变。
 
 ### v2.1.3 更新内容
 

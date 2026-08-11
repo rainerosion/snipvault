@@ -16,11 +16,12 @@ export interface DialogHandle {
 }
 
 export interface DialogProps {
-  theme: "dark" | "light";
+  /** @deprecated Dialog colors are supplied by global semantic tokens. */
+  theme?: "dark" | "light";
 }
 
 export const Dialog = forwardRef<DialogHandle, DialogProps>(function Dialog(
-  { theme },
+  _props,
   ref
 ) {
   const { t, i18n } = useTranslation();
@@ -93,7 +94,7 @@ export const Dialog = forwardRef<DialogHandle, DialogProps>(function Dialog(
   return (
     <div className="dialog-overlay" ref={overlayRef} onClick={handleOverlayClick}>
       <ModalSurface
-        className={`dialog-box ${theme}`}
+        className="dialog-box"
         role={type === "alert" ? "alertdialog" : "dialog"}
         labelledBy="promise-dialog-title"
         describedBy="promise-dialog-message"

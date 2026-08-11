@@ -91,8 +91,6 @@ function renderPanel(
     ...render(
       <SettingsPanel
         ref={options.panelRef}
-        theme="dark"
-        setTheme={vi.fn()}
         onClose={onClose}
         onSync={onSync}
       />,

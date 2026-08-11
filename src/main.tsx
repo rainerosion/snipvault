@@ -1,11 +1,28 @@
-import React, { createContext, useState, useEffect } from "react";
+import React, {
+  createContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
 import "./index.css";
 import { LanguageProvider } from "./context/LanguageProvider";
-import type { SettingsView } from "./hooks/useSettings";
-import { SettingsProvider, settingsToDraft } from "./hooks/useSettings";
+import type { AccentPreset, SettingsView } from "./hooks/useSettings";
+import { SettingsProvider, settingsToDraft, useSettings } from "./hooks/useSettings";
+import {
+  ACCENT_PRESET_KEY,
+  THEME_EFFECTIVE_KEY,
+  THEME_PREF_KEY,
+  applyAppearance,
+  getSystemTheme,
+  normalizeAccentPreset,
+  normalizeThemePreference,
+  resolveBootTheme,
+  type EffectiveTheme,
+} from "./theme";
 
 declare global {
   interface Window {
@@ -15,36 +32,8 @@ declare global {
   }
 }
 
-const THEME_PREF_KEY = "snipvault-theme-pref";
-const THEME_EFFECTIVE_KEY = "snipvault-theme-effective";
-const THEME_PREF_EVENT = "snipvault-theme-pref-changed";
-type ThemePref = "dark" | "light" | "system";
-
-function getSystemTheme(): "dark" | "light" {
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
-function normalizeThemePref(value: string | null | undefined): ThemePref {
-  if (value === "dark" || value === "light" || value === "system") {
-    return value;
-  }
-  return "system";
-}
-
-function resolveTheme(pref: ThemePref): "dark" | "light" {
-  return pref === "system" ? getSystemTheme() : pref;
-}
-
-function resolveBootTheme(): "dark" | "light" {
-  const pref = normalizeThemePref(localStorage.getItem(THEME_PREF_KEY));
-  if (pref !== "system") return pref;
-
-  const cached = localStorage.getItem(THEME_EFFECTIVE_KEY);
-  if (cached === "dark" || cached === "light") {
-    return cached;
-  }
-
-  return getSystemTheme();
+function getCachedAccentPreset(): AccentPreset {
+  return normalizeAccentPreset(localStorage.getItem(ACCENT_PRESET_KEY));
 }
 
 window.__bootMarkToNative = (stage: string) => {
@@ -57,8 +46,8 @@ window.__bootMarkToNative("main_eval_start");
 
 const root = document.getElementById("root")!;
 const bootTheme = resolveBootTheme();
-document.documentElement.setAttribute("data-theme", bootTheme);
-root.setAttribute("data-theme", bootTheme);
+const bootAccentPreset = getCachedAccentPreset();
+applyAppearance(bootTheme, bootAccentPreset);
 
 let bootSettingsPromise: Promise<SettingsView | null> | null = null;
 
@@ -66,19 +55,27 @@ function getBootSettings() {
   if (!bootSettingsPromise) {
     const t = performance.now() - (window.__bootT0 ?? 0);
     window.__bootMark?.("get_settings_start");
-    void invoke("boot_mark", { stage: "get_settings_start", tMs: t }).catch(() => {});
+    void invoke("boot_mark", { stage: "get_settings_start", tMs: t }).catch(
+      () => {},
+    );
 
     bootSettingsPromise = invoke<SettingsView>("get_settings")
       .then((settings) => {
         const done = performance.now() - (window.__bootT0 ?? 0);
         window.__bootMark?.("get_settings_done");
-        void invoke("boot_mark", { stage: "get_settings_done", tMs: done }).catch(() => {});
+        void invoke("boot_mark", {
+          stage: "get_settings_done",
+          tMs: done,
+        }).catch(() => {});
         return settings;
       })
       .catch(() => {
         const fail = performance.now() - (window.__bootT0 ?? 0);
         window.__bootMark?.("get_settings_fail");
-        void invoke("boot_mark", { stage: "get_settings_fail", tMs: fail }).catch(() => {});
+        void invoke("boot_mark", {
+          stage: "get_settings_fail",
+          tMs: fail,
+        }).catch(() => {});
         return null;
       });
   }
@@ -106,12 +103,16 @@ function getBootLanguage(): Promise<string> {
 }
 
 export const ThemeContext = createContext<{
-  theme: "dark" | "light";
-  setTheme: (t: "dark" | "light") => void;
-}>({ theme: bootTheme, setTheme: () => {} });
+  theme: EffectiveTheme;
+  accentPreset: AccentPreset;
+  setTheme: (theme: EffectiveTheme) => void;
+}>({ theme: bootTheme, accentPreset: bootAccentPreset, setTheme: () => {} });
 
 window.__bootMark?.("react_render_start");
-void invoke("boot_mark", { stage: "react_render_start", tMs: performance.now() - (window.__bootT0 ?? 0) }).catch(() => {});
+void invoke("boot_mark", {
+  stage: "react_render_start",
+  tMs: performance.now() - (window.__bootT0 ?? 0),
+}).catch(() => {});
 
 ReactDOM.createRoot(root).render(
   <React.StrictMode>
@@ -122,99 +123,104 @@ ReactDOM.createRoot(root).render(
         </LanguageProvider>
       </ThemeProvider>
     </SettingsProvider>
-  </React.StrictMode>
+  </React.StrictMode>,
 );
 
 window.__bootMark?.("react_render_called");
-void invoke("boot_mark", { stage: "react_render_called", tMs: performance.now() - (window.__bootT0 ?? 0) }).catch(() => {});
+void invoke("boot_mark", {
+  stage: "react_render_called",
+  tMs: performance.now() - (window.__bootT0 ?? 0),
+}).catch(() => {});
 
 void invoke("frontend_ready", { phase: "react_render_called" }).catch(() => {});
 window.__bootMark?.("frontend_ready_sent");
-void invoke("boot_mark", { stage: "frontend_ready_sent", tMs: performance.now() - (window.__bootT0 ?? 0) }).catch(() => {});
+void invoke("boot_mark", {
+  stage: "frontend_ready_sent",
+  tMs: performance.now() - (window.__bootT0 ?? 0),
+}).catch(() => {});
 
 requestAnimationFrame(() => {
   window.__bootMark?.("raf_1");
-  void invoke("boot_mark", { stage: "raf_1", tMs: performance.now() - (window.__bootT0 ?? 0) }).catch(() => {});
+  void invoke("boot_mark", {
+    stage: "raf_1",
+    tMs: performance.now() - (window.__bootT0 ?? 0),
+  }).catch(() => {});
 
   requestAnimationFrame(() => {
     window.__bootMark?.("raf_2");
-    void invoke("boot_mark", { stage: "raf_2", tMs: performance.now() - (window.__bootT0 ?? 0) }).catch(() => {});
+    void invoke("boot_mark", {
+      stage: "raf_2",
+      tMs: performance.now() - (window.__bootT0 ?? 0),
+    }).catch(() => {});
 
     document.getElementById("boot-splash")?.remove();
     window.__bootMark?.("splash_removed");
-    void invoke("boot_mark", { stage: "splash_removed", tMs: performance.now() - (window.__bootT0 ?? 0) }).catch(() => {});
+    void invoke("boot_mark", {
+      stage: "splash_removed",
+      tMs: performance.now() - (window.__bootT0 ?? 0),
+    }).catch(() => {});
 
     void invoke("frontend_ready", { phase: "splash_removed" }).catch(() => {});
     window.__bootMark?.("frontend_ready_sent_after_splash");
-    void invoke("boot_mark", { stage: "frontend_ready_sent_after_splash", tMs: performance.now() - (window.__bootT0 ?? 0) }).catch(() => {});
+    void invoke("boot_mark", {
+      stage: "frontend_ready_sent_after_splash",
+      tMs: performance.now() - (window.__bootT0 ?? 0),
+    }).catch(() => {});
   });
 });
 
 function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<"dark" | "light">(bootTheme);
-  const [themePref, setThemePref] = useState<ThemePref>(() =>
-    normalizeThemePref(localStorage.getItem(THEME_PREF_KEY))
+  const { settings } = useSettings();
+  const [sessionThemeOverride, setSessionThemeOverride] =
+    useState<EffectiveTheme | null>(null);
+  const [systemTheme, setSystemTheme] = useState<EffectiveTheme>(bootTheme);
+  const previousThemePreference = useRef<string | null>(null);
+
+  const themePreference = normalizeThemePreference(
+    settings?.theme ?? localStorage.getItem(THEME_PREF_KEY),
+  );
+  const accentPreset = normalizeAccentPreset(
+    settings?.accent_preset ?? localStorage.getItem(ACCENT_PRESET_KEY),
   );
 
   useEffect(() => {
-    let cancelled = false;
-
-    getBootSettings()
-      .then((settings) => {
-        if (cancelled || !settings) return;
-        const pref = normalizeThemePref(settings.theme);
-        const effective = resolveTheme(pref);
-        setThemePref(pref);
-        setTheme(effective);
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (
+      previousThemePreference.current !== null &&
+      previousThemePreference.current !== themePreference
+    ) {
+      setSessionThemeOverride(null);
+    }
+    previousThemePreference.current = themePreference;
+  }, [themePreference]);
 
   useEffect(() => {
-    const onThemePrefChanged = (event: Event) => {
-      const detail = (event as CustomEvent<{ pref?: string; effective?: string }>).detail;
-      const pref = normalizeThemePref(detail?.pref);
-      const effective = detail?.effective === "dark" || detail?.effective === "light"
-        ? detail.effective
-        : resolveTheme(pref);
-      setThemePref(pref);
-      setTheme(effective);
-    };
-
-    window.addEventListener(THEME_PREF_EVENT, onThemePrefChanged);
-    return () => {
-      window.removeEventListener(THEME_PREF_EVENT, onThemePrefChanged);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (themePref !== "system") return;
+    if (themePreference !== "system") return;
 
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = (event: MediaQueryListEvent) => {
-      setTheme(event.matches ? "dark" : "light");
-    };
+    const syncSystemTheme = () => setSystemTheme(getSystemTheme());
+    syncSystemTheme();
+    media.addEventListener("change", syncSystemTheme);
+    return () => media.removeEventListener("change", syncSystemTheme);
+  }, [themePreference]);
 
-    media.addEventListener("change", onChange);
-    return () => media.removeEventListener("change", onChange);
-  }, [themePref]);
-
-  useEffect(() => {
-    localStorage.setItem(THEME_PREF_KEY, themePref);
-  }, [themePref]);
+  const persistedTheme =
+    themePreference === "system" ? systemTheme : themePreference;
+  const theme = sessionThemeOverride ?? persistedTheme;
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    root.setAttribute("data-theme", theme);
-    localStorage.setItem(THEME_EFFECTIVE_KEY, theme);
-  }, [theme]);
+    localStorage.setItem(THEME_PREF_KEY, themePreference);
+    localStorage.setItem(ACCENT_PRESET_KEY, accentPreset);
+    localStorage.setItem(THEME_EFFECTIVE_KEY, persistedTheme);
+  }, [accentPreset, persistedTheme, themePreference]);
+
+  useLayoutEffect(() => {
+    applyAppearance(theme, accentPreset);
+  }, [accentPreset, theme]);
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
+    <ThemeContext.Provider
+      value={{ theme, accentPreset, setTheme: setSessionThemeOverride }}
+    >
       {children}
     </ThemeContext.Provider>
   );

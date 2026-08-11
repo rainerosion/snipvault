@@ -33,6 +33,7 @@ pub struct Settings {
     pub auto_start: bool,
     pub minimize_to_tray: bool,
     pub theme: String,
+    pub accent_preset: String,
     pub language: String,
     pub webdav_url: String,
     pub webdav_username: String,
@@ -53,6 +54,7 @@ impl Default for Settings {
             auto_start: false,
             minimize_to_tray: true,
             theme: "system".into(),
+            accent_preset: "sky".into(),
             language: "zh".into(),
             webdav_url: String::new(),
             webdav_username: String::new(),
@@ -75,6 +77,7 @@ struct LegacySettings {
     auto_start: bool,
     minimize_to_tray: bool,
     theme: String,
+    accent_preset: String,
     language: String,
     webdav_url: String,
     webdav_username: String,
@@ -103,6 +106,7 @@ impl LegacySettings {
             auto_start: defaults.auto_start,
             minimize_to_tray: defaults.minimize_to_tray,
             theme: defaults.theme,
+            accent_preset: defaults.accent_preset,
             language: defaults.language,
             webdav_url: defaults.webdav_url,
             webdav_username: defaults.webdav_username,
@@ -127,6 +131,7 @@ impl LegacySettings {
                 auto_start: self.auto_start,
                 minimize_to_tray: self.minimize_to_tray,
                 theme: self.theme,
+                accent_preset: self.accent_preset,
                 language: self.language,
                 webdav_url: self.webdav_url,
                 webdav_username: self.webdav_username,
@@ -176,6 +181,7 @@ pub struct SettingsView {
     pub auto_start: bool,
     pub minimize_to_tray: bool,
     pub theme: String,
+    pub accent_preset: String,
     pub language: String,
     pub webdav_url: String,
     pub webdav_username: String,
@@ -195,6 +201,7 @@ pub struct SettingsInput {
     pub auto_start: bool,
     pub minimize_to_tray: bool,
     pub theme: String,
+    pub accent_preset: String,
     pub language: String,
     pub webdav_url: String,
     pub webdav_username: String,
@@ -211,6 +218,7 @@ impl SettingsInput {
             auto_start: self.auto_start,
             minimize_to_tray: self.minimize_to_tray,
             theme: self.theme.clone(),
+            accent_preset: self.accent_preset.clone(),
             language: self.language.clone(),
             webdav_url: self.webdav_url.clone(),
             webdav_username: self.webdav_username.clone(),
@@ -238,6 +246,12 @@ pub enum SecretAction {
 pub fn validate_settings(settings: &Settings) -> Result<(), String> {
     if !matches!(settings.theme.as_str(), "system" | "dark" | "light") {
         return Err("invalid theme setting".into());
+    }
+    if !matches!(
+        settings.accent_preset.as_str(),
+        "sky" | "violet" | "emerald" | "amber" | "rose" | "white"
+    ) {
+        return Err("invalid accent preset".into());
     }
     if !matches!(settings.language.as_str(), "zh" | "en") {
         return Err("invalid language setting".into());
@@ -681,6 +695,7 @@ pub fn get_settings_view() -> SettingsView {
         auto_start: settings.auto_start,
         minimize_to_tray: settings.minimize_to_tray,
         theme: settings.theme.clone(),
+        accent_preset: settings.accent_preset.clone(),
         language: settings.language.clone(),
         webdav_url: settings.webdav_url.clone(),
         webdav_username: settings.webdav_username.clone(),

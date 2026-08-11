@@ -9,6 +9,7 @@ import { githubDark, githubDarkStyle, githubLight, githubLightStyle } from "@uiw
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Snippet, SnippetForm } from "../types";
 import { LANGUAGES, type LanguageId } from "../utils/languages";
+import type { AccentPreset } from "../hooks/useSettings";
 import { LanguageContext } from "../context/LanguageContext";
 import { getLanguageExtensions } from "./languageExtensions";
 
@@ -21,6 +22,7 @@ interface SnippetEditorProps {
   onCancel: () => void;
   onClipboardError?: (error: unknown) => void;
   theme: "dark" | "light";
+  accentPreset: AccentPreset;
   lineWrap: boolean;
   saving: boolean;
   isDirty: boolean;
@@ -99,10 +101,6 @@ const darkHighlight = syntaxHighlighting(darkHighlightStyle);
 const lightHighlight = syntaxHighlighting(lightHighlightStyle);
 
 function buildMainExtensions(isDark: boolean, lang: string, lineWrap: boolean) {
-  const selBg = isDark ? "rgba(56,189,248,0.62)" : "rgba(2,132,199,0.42)";
-  const selBgF = isDark ? "rgba(56,189,248,0.74)" : "rgba(2,132,199,0.56)";
-  const cursor = isDark ? "#38bdf8" : "#0284c7";
-
   const cmLayout = EditorView.theme({
     "&": {
       height: "100%",
@@ -123,7 +121,7 @@ function buildMainExtensions(isDark: boolean, lang: string, lineWrap: boolean) {
     },
     ".cm-content": {
       fontFamily: "ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace",
-      caretColor: cursor,
+      caretColor: "var(--editor-cursor)",
       whiteSpace: lineWrap ? "pre-wrap" : "pre",
       width: lineWrap ? "auto" : "max-content",
       minWidth: lineWrap ? "0" : "100%",
@@ -139,9 +137,9 @@ function buildMainExtensions(isDark: boolean, lang: string, lineWrap: boolean) {
       maxWidth: lineWrap ? "100%" : "none",
       boxSizing: "border-box",
     },
-    ".cm-cursor, .cm-dropCursor": { borderLeftColor: cursor },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { background: selBg },
-    "&.cm-focused .cm-selectionBackground": { background: selBgF },
+    ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--editor-cursor)" },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { background: "var(--editor-selection)" },
+    "&.cm-focused .cm-selectionBackground": { background: "var(--editor-selection-focused)" },
   });
 
   return [
@@ -163,6 +161,7 @@ interface MiniMapProps {
   language: string;
   highlightStyle: HighlightStyle;
   isDark: boolean;
+  accentPreset: AccentPreset;
   width: number;
   mainScrollEl: HTMLElement | null;
   editorView: EditorView | null;
@@ -248,6 +247,7 @@ function MiniMap({
   language,
   highlightStyle,
   isDark,
+  accentPreset,
   width,
   mainScrollEl,
   editorView,
@@ -264,6 +264,7 @@ function MiniMap({
   const [paneClientHeight, setPaneClientHeight] = useState(0);
   const [mainCanScroll, setMainCanScroll] = useState(false);
   const [fallbackColor, setFallbackColor] = useState("");
+  const [backgroundColor, setBackgroundColor] = useState("");
   const colorCacheRef = useRef(new Map<string, string>());
   const highlightRanges = useMemo(
     () => getSyntaxHighlightRanges(content, language, highlightStyle),
@@ -273,7 +274,12 @@ function MiniMap({
     colorCacheRef.current.clear();
     const contentElement = editorView?.contentDOM;
     setFallbackColor(contentElement ? getComputedStyle(contentElement).color : "");
-  }, [editorView, isDark]);
+    setBackgroundColor(
+      paneRef.current
+        ? getComputedStyle(paneRef.current).backgroundColor
+        : "",
+    );
+  }, [accentPreset, editorView, isDark]);
 
   const resolveColor = useCallback(
     (className: string | null) =>
@@ -286,9 +292,7 @@ function MiniMap({
     [editorView, fallbackColor, isDark],
   );
 
-  const bg = isDark ? "#0d1117" : "#ffffff";
-  const viewportBg = isDark ? "rgba(56,189,248,0.26)" : "rgba(2,132,199,0.22)";
-  const viewportBorder = isDark ? "rgba(56,189,248,0.95)" : "rgba(2,132,199,0.90)";
+  const bg = backgroundColor || (isDark ? "#0d1117" : "#ffffff");
 
   const lines = useMemo(() => content.split("\n"), [content]);
   const lineContentH = useMemo(() => Math.max(lines.length * GLANCE_LINE_H, 1), [lines.length]);
@@ -548,7 +552,6 @@ function MiniMap({
       <div
         ref={paneRef}
         className="minimap-pane"
-        style={{ background: bg }}
         onClick={handleClick}
       >
         <div className="minimap-content" style={{ height: totalH, minHeight: "100%" }}>
@@ -557,7 +560,7 @@ function MiniMap({
           <div
             ref={viewportRef}
             className={`minimap-viewport ${isViewportDragging ? "dragging" : ""}`}
-            style={{ background: viewportBg, borderColor: viewportBorder }}
+            style={{ background: "var(--minimap-viewport-bg)", borderColor: "var(--minimap-viewport-border)" }}
             onPointerDown={handleViewportPointerDown}
           />
         </div>
@@ -753,7 +756,7 @@ export const SnippetTagCombobox = TagCombobox;
 
 export function SnippetEditor({
   snippet, isNew, form, onChange, onSave, onCancel, onClipboardError,
-  theme, lineWrap, saving, isDirty, tagOptions,
+  theme, accentPreset, lineWrap, saving, isDirty, tagOptions,
 }: SnippetEditorProps) {
   const { t } = useTranslation();
   const { language } = useContext(LanguageContext);
@@ -923,6 +926,7 @@ export function SnippetEditor({
           language={form.language}
           highlightStyle={isDark ? darkHighlightStyle : lightHighlightStyle}
           isDark={isDark}
+          accentPreset={accentPreset}
           width={minimapWidth}
           mainScrollEl={mainScrollEl}
           editorView={editorView}
