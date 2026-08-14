@@ -1,9 +1,10 @@
 # SnipVault 开发文档
 
-> 本目录面向 SnipVault 的维护者和功能开发者，记录 **v2.2.0 当前源码的真实实现**，包括 production WebDAV protocol-v2 activation。它不是产品愿景，也不表示已知问题已经修复。
+> 本目录面向 SnipVault 的维护者和功能开发者，记录当前已发布的 v2.3.0 功能与约束。它不是产品愿景，也不表示已知问题已经修复。
 
-- 核对日期：2026-08-11
-- 应用版本：2.2.0
+- 核对日期：2026-08-14
+- 发布基线：2.3.0
+- 当前工作树：v2.3.0 发布内容
 - 主要技术：Tauri 2、React 19、TypeScript、CodeMirror 6、Rust、SQLite、WebDAV
 - 事实来源：仓库源码；当文档与源码冲突时，以源码为准，并应在同一变更中修正文档
 
@@ -14,6 +15,7 @@
 | [架构设计](architecture.md) | 系统边界、模块职责、启动和窗口生命周期、IPC、持久化、WebDAV、权限与发布架构 |
 | [功能设计](feature-design.md) | 当前所有用户功能的入口、交互、状态流、调用链和实现边界 |
 | [开发指南](development.md) | 环境、构建命令、常见扩展路径、开发约束和文档影响评估 |
+| [功能扩展路线](feature-roadmap.md) | 已实施与规划中功能的边界、优先级和设计约束 |
 | [问题修复记录（2026-07-31）](remediation-2026-07-31.md) | 架构审查发现的问题、影响、根因、解决方案、兼容行为和验证 |
 | [第二轮修复](remediation-round-2.md) | 前端质量工具、结构化错误、共享 SettingsProvider、同步/托盘、凭据/设置安全、CSP、可测试 WebDAV v1 engine、SQLite v3/v4 foundation、production protocol-v2 activation，以及发布链路硬化的历史检查点记录 |
 | [已知限制](known-limitations.md) | 修复后仍存在的安全风险、缺失能力和候选遗留项 |
@@ -26,6 +28,7 @@ flowchart LR
     INDEX --> ARCH[架构设计]
     INDEX --> FEATURE[功能设计]
     INDEX --> DEV[开发指南]
+    INDEX --> ROADMAP[功能扩展路线]
     INDEX --> FIX[问题修复记录]
     INDEX --> QUALITY[第二轮修复与 v2 activation]
     INDEX --> LIMIT[已知限制]

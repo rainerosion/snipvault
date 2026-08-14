@@ -102,6 +102,19 @@ pub fn get_snippet(id: String) -> Result<Snippet, CommandError> {
 }
 
 #[command]
+pub fn record_snippet_usage(id: String) -> Result<(), CommandError> {
+    db::record_snippet_usage(&id).map_err(|error| {
+        log::error!("record_snippet_usage failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn take_quick_capture_completion() -> Option<crate::capture::QuickCaptureCompletion> {
+    crate::capture::take_completion()
+}
+
+#[command]
 pub fn get_snippet_tags() -> Result<Vec<String>, CommandError> {
     db::list_distinct_tags().map_err(|error| {
         log::error!("get_snippet_tags failed");
@@ -201,6 +214,25 @@ pub fn search_snippets(
 pub fn toggle_favorite(id: String) -> Result<Snippet, CommandError> {
     db::toggle_favorite(&id).map_err(|error| {
         log::error!("toggle_favorite failed");
+        CommandError::mutation(&error)
+    })
+}
+
+#[command]
+pub fn set_snippets_favorite(
+    ids: Vec<String>,
+    is_favorite: bool,
+) -> Result<db::BulkMutationResult, CommandError> {
+    db::set_snippets_favorite(&ids, is_favorite).map_err(|error| {
+        log::error!("set_snippets_favorite failed");
+        CommandError::mutation(&error)
+    })
+}
+
+#[command]
+pub fn delete_snippets(ids: Vec<String>) -> Result<db::BulkMutationResult, CommandError> {
+    db::delete_snippets(&ids).map_err(|error| {
+        log::error!("delete_snippets failed");
         CommandError::mutation(&error)
     })
 }

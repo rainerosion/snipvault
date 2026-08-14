@@ -26,6 +26,7 @@ fn main() {
             snipvault::tray::reveal_main_window(app);
         }))
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(snipvault::capture::global_shortcut_plugin())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
@@ -47,6 +48,7 @@ fn main() {
 
             snipvault::commands::boot_log("setup_before_build_tray", "start");
             snipvault::tray::initialize(app.handle())?;
+            snipvault::capture::register_global_shortcut(app.handle());
             snipvault::commands::boot_log("setup_after_build_tray", "done");
 
             if start_minimized {
@@ -94,12 +96,16 @@ fn main() {
             snipvault::commands::get_snippets,
             snipvault::commands::query_snippets,
             snipvault::commands::get_snippet,
+            snipvault::commands::record_snippet_usage,
+            snipvault::commands::take_quick_capture_completion,
             snipvault::commands::get_snippet_tags,
             snipvault::commands::create_snippet,
             snipvault::commands::update_snippet,
             snipvault::commands::delete_snippet,
             snipvault::commands::search_snippets,
             snipvault::commands::toggle_favorite,
+            snipvault::commands::set_snippets_favorite,
+            snipvault::commands::delete_snippets,
             snipvault::commands::export_snippets,
             snipvault::commands::export_snippets_to_file,
             snipvault::commands::open_project_repository,

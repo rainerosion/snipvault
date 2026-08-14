@@ -5,7 +5,9 @@ import {
   SnippetForm,
   SnippetQuery,
   SnippetQueryResult,
+  SnippetSort,
   SnippetSummary,
+  type BulkMutationResult,
 } from "../types";
 import { normalizeCommandError, type CommandError } from "../utils/commandErrors";
 
@@ -25,6 +27,7 @@ export interface ListRequest {
   language?: string | null;
   favorite?: boolean | null;
   exact_tag?: string | null;
+  sort?: SnippetSort;
 }
 
 const PAGE_SIZE = 100;
@@ -35,6 +38,7 @@ function normalizeRequest(request: ListRequest = {}): ListRequest {
     language: request.language || null,
     favorite: request.favorite ?? null,
     exact_tag: request.exact_tag || null,
+    sort: request.sort ?? "updated",
   };
 }
 
@@ -93,6 +97,7 @@ export function useSnippets() {
           language: normalized.language ?? null,
           favorite: normalized.favorite ?? null,
           exact_tag: normalized.exact_tag ?? null,
+          sort: normalized.sort ?? "updated",
           limit: PAGE_SIZE,
           cursor: null,
         };
@@ -135,6 +140,7 @@ export function useSnippets() {
         language: active.language ?? null,
         favorite: active.favorite ?? null,
         exact_tag: active.exact_tag ?? null,
+        sort: active.sort ?? "updated",
         limit: PAGE_SIZE,
         cursor,
       };
@@ -212,6 +218,19 @@ export function useSnippets() {
   const toggleFavorite = useCallback(async (id: string) => {
     return invoke<Snippet>("toggle_favorite", { id });
   }, []);
+  const recordUsage = useCallback(
+    async (id: string) => invoke<void>("record_snippet_usage", { id }),
+    [],
+  );
+  const setManyFavorite = useCallback(
+    async (ids: string[], isFavorite: boolean) =>
+      invoke<BulkMutationResult>("set_snippets_favorite", { ids, isFavorite }),
+    [],
+  );
+  const removeMany = useCallback(
+    async (ids: string[]) => invoke<BulkMutationResult>("delete_snippets", { ids }),
+    [],
+  );
 
   const exportAll = useCallback(async () => invoke<string>("export_snippets"), []);
   const exportAllToFile = useCallback(
@@ -239,6 +258,9 @@ export function useSnippets() {
     update,
     remove,
     toggleFavorite,
+    recordUsage,
+    setManyFavorite,
+    removeMany,
     exportAll,
     exportAllToFile,
     importAll,

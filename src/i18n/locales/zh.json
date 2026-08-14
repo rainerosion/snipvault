@@ -12,7 +12,45 @@
   },
   "filter": {
     "all": "全部语言",
-    "favorites": "只看收藏"
+    "language": "按语言筛选",
+    "favorites": "只看收藏",
+    "sortUpdated": "最近更新",
+    "sortRecent": "最近使用",
+    "sortToggle": "排序方式：{{current}}。激活后切换为{{next}}。",
+    "sortTooltipCurrent": "当前排序：{{current}}",
+    "sortTooltipHint": "点击切换"
+  },
+  "quickCapture": {
+    "success": "已将剪贴板内容捕获为新的代码片段。",
+    "failed": "未能完成剪贴板快速捕获。"
+  },
+  "bulk": {
+    "actions": "批量操作",
+    "selected": "已选择 {{count}} 条",
+    "selectLoaded": "选择已加载项",
+    "clear": "清除选择",
+    "favorite": "设为收藏",
+    "unfavorite": "取消收藏",
+    "delete": "删除",
+    "selectSnippet": "选择 {{title}}"
+  },
+  "commandPalette": {
+    "title": "命令面板",
+    "description": "搜索可用应用命令，然后用方向键和回车键执行。",
+    "placeholder": "搜索命令...",
+    "empty": "没有匹配的命令。",
+    "open": "打开命令面板 (Ctrl/Cmd+K)",
+    "commands": {
+      "new": "新建代码片段",
+      "save": "保存当前代码片段",
+      "export": "导出代码片段",
+      "sync": "立即同步",
+      "settings": "打开设置",
+      "focusSearch": "聚焦代码片段搜索",
+      "toggleTheme": "切换当前主题",
+      "favorite": "收藏当前代码片段",
+      "unfavorite": "取消收藏当前代码片段"
+    }
   },
   "snippet": {
     "selectHint": "选择一个代码片段开始编辑",
@@ -38,6 +76,9 @@
     "titleRequired": "请输入标题",
     "untitled": "无标题",
     "loadingDetail": "正在加载代码片段...",
+    "loadUnavailable": "代码编辑器暂时不可用。",
+    "loadUnavailableDevHint": "请重启 Vite 开发服务器，然后重试加载编辑器。",
+    "retryLoad": "重试加载编辑器",
     "select": "选择代码片段 {{title}}",
     "favoriteTitle": "收藏 {{title}}",
     "unfavoriteTitle": "取消收藏 {{title}}",
@@ -147,6 +188,7 @@
     "title": "提示",
     "unsavedChanges": "当前编辑内容未保存，是否保存？",
     "confirmDelete": "确定要删除这个代码片段吗？",
+    "confirmBulkDelete": "确定要删除已选择的 {{count}} 条代码片段吗？此操作不可撤销。",
     "save": "保存",
     "discard": "不保存",
     "cancel": "取消",
@@ -250,6 +292,7 @@
     "settingsLoadFailed": "无法加载设置。",
     "deleteFailed": "删除失败：{{error}}",
     "favoriteFailed": "收藏状态更新失败：{{error}}",
+    "bulkMutationFailed": "未能完成批量更改：{{error}}",
     "clipboardFailed": "剪贴板操作失败：{{error}}",
     "reloadAfterMutationFailed": "更改已保存，但无法重新加载最新代码片段：{{error}}",
     "reloadAfterSyncFailed": "同步已完成，但无法重新加载最新本地状态：{{error}}",

@@ -1,4 +1,4 @@
-import React, { useRef, useImperativeHandle, forwardRef } from "react";
+import React, { useEffect, useRef, useImperativeHandle, forwardRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ModalSurface } from "./ModalSurface";
 
@@ -18,10 +18,11 @@ export interface DialogHandle {
 export interface DialogProps {
   /** @deprecated Dialog colors are supplied by global semantic tokens. */
   theme?: "dark" | "light";
+  onOpenChange?: (open: boolean) => void;
 }
 
 export const Dialog = forwardRef<DialogHandle, DialogProps>(function Dialog(
-  _props,
+  { onOpenChange },
   ref
 ) {
   const { t, i18n } = useTranslation();
@@ -37,6 +38,10 @@ export const Dialog = forwardRef<DialogHandle, DialogProps>(function Dialog(
   const resolveAskRef = useRef<(v: DialogResponse) => void>(() => {});
   const overlayRef = useRef<HTMLDivElement>(null);
   const initialFocusRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    onOpenChange?.(open);
+  }, [onOpenChange, open]);
 
   useImperativeHandle(ref, () => ({
     async confirm(message: string, title = "dialog.title", options?: ConfirmOptions) {

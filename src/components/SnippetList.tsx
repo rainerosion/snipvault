@@ -4,12 +4,22 @@ import { SnippetSummary } from "../types";
 import { getLang } from "../utils/languages";
 import { LanguageContext } from "../context/LanguageContext";
 
+const EMPTY_SELECTION = new Set<string>();
+const NOOP = () => {};
+
 interface SnippetListProps {
   snippets: SnippetSummary[];
   selectedId: string | null;
   onSelect: (s: SnippetSummary) => void;
   onDelete: (id: string) => void;
   onToggleFavorite: (id: string) => void;
+  selectedIds?: Set<string>;
+  onToggleSelection?: (id: string) => void;
+  onSelectLoaded?: () => void;
+  onClearSelection?: () => void;
+  onSetFavorite?: (isFavorite: boolean) => void;
+  onBulkDelete?: () => void;
+  bulkBusy?: boolean;
   loading: boolean;
   loadingMore: boolean;
   hasMore: boolean;
@@ -37,6 +47,13 @@ export function SnippetList({
   onSelect,
   onDelete,
   onToggleFavorite,
+  selectedIds = EMPTY_SELECTION,
+  onToggleSelection = NOOP,
+  onSelectLoaded = NOOP,
+  onClearSelection = NOOP,
+  onSetFavorite = NOOP,
+  onBulkDelete = NOOP,
+  bulkBusy = false,
   loading,
   loadingMore,
   hasMore,
@@ -91,15 +108,49 @@ export function SnippetList({
           </button>
         </div>
       )}
+      <div className="bulk-actions" aria-label={t("bulk.actions")}>
+        <span className="bulk-count">
+          {t("bulk.selected", "{{count}} selected", { count: selectedIds.size })}
+        </span>
+        <button type="button" onClick={onSelectLoaded} disabled={bulkBusy || snippets.length === 0}>
+          {t("bulk.selectLoaded")}
+        </button>
+        <button type="button" onClick={onClearSelection} disabled={bulkBusy || selectedIds.size === 0}>
+          {t("bulk.clear")}
+        </button>
+        {selectedIds.size > 0 && (
+          <>
+            <button type="button" onClick={() => onSetFavorite(true)} disabled={bulkBusy}>
+              {t("bulk.favorite")}
+            </button>
+            <button type="button" onClick={() => onSetFavorite(false)} disabled={bulkBusy}>
+              {t("bulk.unfavorite")}
+            </button>
+            <button type="button" className="bulk-delete" onClick={onBulkDelete} disabled={bulkBusy}>
+              {t("bulk.delete")}
+            </button>
+          </>
+        )}
+      </div>
       <ul className="snippet-items" aria-label={t("sidebar.snippetList")}>
         {snippets.map((s) => {
         const lang = getLang(s.language);
         const isSelected = s.id === selectedId;
+        const selectionLimitReached = selectedIds.size >= 200 && !selectedIds.has(s.id);
         return (
           <li
             key={s.id}
-            className={`snippet-item ${isSelected ? "selected" : ""}`}
+            className={`snippet-item ${isSelected ? "selected" : ""} ${selectedIds.has(s.id) ? "bulk-selected" : ""}`}
           >
+            <label className="snippet-select-check">
+              <input
+                type="checkbox"
+                checked={selectedIds.has(s.id)}
+                onChange={() => onToggleSelection(s.id)}
+                disabled={bulkBusy || selectionLimitReached}
+                aria-label={t("bulk.selectSnippet", { title: s.title || t("snippet.untitled") })}
+              />
+            </label>
             <button
               type="button"
               className="snippet-select-btn"

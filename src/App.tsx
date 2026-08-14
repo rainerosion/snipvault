@@ -1,7 +1,6 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useRef, useContext, lazy, Suspense } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, useContext, Suspense } from "react";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { invoke } from "@tauri-apps/api/core";
-import { EditorView } from "@codemirror/view";
 import { useTranslation } from "react-i18next";
 import { useSnippets } from "./hooks/useSnippets";
 import {
@@ -13,10 +12,12 @@ import {
 import { Toolbar } from "./components/Toolbar";
 import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
-const SnippetEditor = lazy(() => import("./components/SnippetEditor").then((m) => ({ default: m.SnippetEditor })));
+import { CommandPalette, type CommandDefinition } from "./components/CommandPalette";
+import { SnippetEditorLoadBoundary } from "./components/SnippetEditorLoadBoundary";
+import { LazySnippetEditor } from "./components/LazySnippetEditor";
 import { SettingsPanel, type SettingsPanelHandle } from "./components/Settings";
 import { Dialog, DialogHandle } from "./components/Dialog";
-import { Snippet, SnippetForm, SnippetSummary } from "./types";
+import { Snippet, SnippetForm, SnippetSummary, type QuickCaptureCompletion, type SnippetSort } from "./types";
 import { localizeCommandError, normalizeCommandError } from "./utils/commandErrors";
 import { ThemeContext } from "./main";
 
@@ -69,6 +70,9 @@ export default function App() {
     update,
     remove,
     toggleFavorite,
+    recordUsage,
+    setManyFavorite,
+    removeMany,
     exportAllToFile,
     importAll,
   } = useSnippets();
@@ -86,6 +90,7 @@ export default function App() {
   const [selected, setSelected] = useState<Snippet | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [form, setForm] = useState<SnippetForm>(EMPTY_FORM);
+  const [editorLoadAttempt, setEditorLoadAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [detailState, setDetailState] = useState<
     | { status: "idle" }
@@ -96,13 +101,29 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [langFilter, setLangFilter] = useState("");
   const [favFilter, setFavFilter] = useState<boolean | null>(null);
+  const [sort, setSort] = useState<SnippetSort>("updated");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [focusSearchAfterPaletteClose, setFocusSearchAfterPaletteClose] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [quickCaptureStatus, setQuickCaptureStatus] = useState<"success" | "failed" | null>(null);
+  const quickCaptureStatusTimerRef = useRef<number | undefined>(undefined);
   const [refreshStatus, setRefreshStatus] = useState<"applied" | "stale" | null>(null);
   const lineWrap = settings?.editor_line_wrap ?? true;
   const [textMenu, setTextMenu] = useState<{ visible: boolean; x: number; y: number; isEditorContext: boolean }>({ visible: false, x: 0, y: 0, isEditorContext: false });
   const textMenuRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const textMenuTargetRef = useRef<HTMLElement | null>(null);
   const textMenuRestoreFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!focusSearchAfterPaletteClose || commandPaletteOpen) return;
+
+    setFocusSearchAfterPaletteClose(false);
+    searchInputRef.current?.focus();
+  }, [commandPaletteOpen, focusSearchAfterPaletteClose]);
 
   const originalFormRef = useRef<SnippetForm>(EMPTY_FORM);
   const formRef = useRef<SnippetForm>(EMPTY_FORM);
@@ -113,12 +134,17 @@ export default function App() {
   const isDirty = isFormDirty(form, originalFormRef.current);
 
   const detailRequestRef = useRef(0);
+  const processedQuickCaptureIdsRef = useRef<Set<string>>(new Set());
+  const handleEditorLoadRetry = useCallback(() => {
+    setEditorLoadAttempt((attempt) => attempt + 1);
+  }, []);
   const activeListRequest = useCallback(() => ({
     query: searchQuery,
     language: langFilter || null,
     favorite: favFilter,
     exact_tag: null,
-  }), [favFilter, langFilter, searchQuery]);
+    sort,
+  }), [favFilter, langFilter, searchQuery, sort]);
 
   const reconcileAuthoritative = useCallback(async () => {
     const currentTarget = editorTargetRef.current;
@@ -281,11 +307,45 @@ export default function App() {
 
   useEffect(() => {
     clearTimeout(searchTimer.current);
+    setSelectedIds(new Set());
     searchTimer.current = setTimeout(() => {
       void reloadSnippets().catch(() => {});
     }, 150);
     return () => clearTimeout(searchTimer.current);
   }, [reloadSnippets]);
+
+  const showQuickCaptureStatus = useCallback((status: "success" | "failed") => {
+    clearTimeout(quickCaptureStatusTimerRef.current);
+    setQuickCaptureStatus(status);
+    quickCaptureStatusTimerRef.current = window.setTimeout(() => {
+      setQuickCaptureStatus(null);
+    }, 5000);
+  }, []);
+
+  useEffect(() => () => clearTimeout(quickCaptureStatusTimerRef.current), []);
+
+  const handleQuickCaptureCompletion = useCallback(async (completion: QuickCaptureCompletion) => {
+    if (completion.snippet_id) {
+      if (processedQuickCaptureIdsRef.current.has(completion.snippet_id)) return;
+      processedQuickCaptureIdsRef.current.add(completion.snippet_id);
+    }
+
+    if (!completion.success) {
+      showQuickCaptureStatus("failed");
+      return;
+    }
+
+    showQuickCaptureStatus("success");
+    try {
+      await reloadSnippets();
+    } catch (cause) {
+      await dialogRef.current?.alert(
+        t("errors.reloadAfterMutationFailed", {
+          error: localizeCommandError(cause, t),
+        }),
+      );
+    }
+  }, [reloadSnippets, showQuickCaptureStatus, t]);
 
   useEffect(() => {
     let disposed = false;
@@ -301,6 +361,10 @@ export default function App() {
               showDialog: source === "tray",
             });
           }),
+          tauriWindow.listen<QuickCaptureCompletion>("quick-capture-complete", (event) => {
+            void invoke("take_quick_capture_completion").catch(() => {});
+            void handleQuickCaptureCompletion(event.payload);
+          }),
           tauriWindow.listen("open-settings", () => setSettingsOpen(true)),
           tauriWindow.listen("autostart-toggled", () => {
             void reloadSettings().catch(() => {});
@@ -309,8 +373,13 @@ export default function App() {
 
         if (disposed) {
           registered.forEach((unlisten) => unlisten());
-        } else {
-          unlisteners.push(...registered);
+          return;
+        }
+
+        unlisteners.push(...registered);
+        const pending = await invoke<QuickCaptureCompletion | null>("take_quick_capture_completion");
+        if (!disposed && pending) {
+          await handleQuickCaptureCompletion(pending);
         }
       })
       .catch(() => {});
@@ -319,25 +388,7 @@ export default function App() {
       disposed = true;
       unlisteners.forEach((unlisten) => unlisten());
     };
-  }, [reconcileSyncCompletion, reloadSettings]);
-
-  useEffect(() => {
-    const schedule = () => import("./components/SnippetEditor").catch(() => {});
-    const win = window as Window & { requestIdleCallback?: (cb: () => void) => number; cancelIdleCallback?: (id: number) => void };
-
-    if (typeof win.requestIdleCallback === "function") {
-      const id = win.requestIdleCallback(schedule);
-      return () => {
-        if (typeof win.cancelIdleCallback === "function") {
-          win.cancelIdleCallback(id);
-        }
-      };
-    }
-
-    const timer = window.setTimeout(schedule, 800);
-    return () => window.clearTimeout(timer);
-  }, []);
-
+  }, [handleQuickCaptureCompletion, reconcileSyncCompletion, reloadSettings]);
 
   useEffect(() => {
     const onContextMenu = (e: MouseEvent) => {
@@ -585,11 +636,14 @@ export default function App() {
       const detail = await get(snippet.id);
       if (requestId !== detailRequestRef.current || editorTargetRef.current !== snippet.id) return;
       loadSnippet(detail);
+      void recordUsage(snippet.id)
+        .then(() => (sort === "recent" ? reloadSnippets() : undefined))
+        .catch(() => {});
     } catch (cause) {
       if (requestId !== detailRequestRef.current || editorTargetRef.current !== snippet.id) return;
       setDetailState({ status: "error", summary: snippet, error: cause });
     }
-  }, [get, loadSnippet]);
+  }, [get, loadSnippet, recordUsage, reloadSnippets, sort]);
 
   const handleSelect = useCallback(async (snippet: SnippetSummary) => {
     if (selected?.id === snippet.id || (
@@ -686,6 +740,90 @@ export default function App() {
     [toggleFavorite, reloadSnippets, t]
   );
 
+  const ensureBulkDraftSafety = useCallback(async (ids: string[]) => {
+    const currentId = selected?.id ?? (isNew ? "new" : null);
+    if (!isDirty || !currentId || currentId === "new" || !ids.includes(currentId)) return true;
+    const action = await dialogRef.current?.ask(t("dialog.unsavedChanges"));
+    if (action === "save") return handleSave();
+    return action === "discard";
+  }, [handleSave, isDirty, isNew, selected?.id, t]);
+
+  const handleSetManyFavorite = useCallback(async (isFavorite: boolean) => {
+    const ids = [...selectedIds];
+    if (ids.length === 0 || bulkBusy) return;
+    if (!(await ensureBulkDraftSafety(ids))) return;
+    setBulkBusy(true);
+    try {
+      try {
+        await setManyFavorite(ids, isFavorite);
+      } catch (cause) {
+        await dialogRef.current?.alert(
+          t("errors.bulkMutationFailed", { error: localizeCommandError(cause, t) }),
+        );
+        return;
+      }
+
+      setSelectedIds(new Set());
+      try {
+        await reloadSnippets();
+      } catch (cause) {
+        await dialogRef.current?.alert(
+          t("errors.reloadAfterMutationFailed", { error: localizeCommandError(cause, t) }),
+        );
+      }
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [bulkBusy, ensureBulkDraftSafety, reloadSnippets, selectedIds, setManyFavorite, t]);
+
+  const handleBulkDelete = useCallback(async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0 || bulkBusy) return;
+    if (!(await ensureBulkDraftSafety(ids))) return;
+    const confirmed = await dialogRef.current?.confirm(
+      t("dialog.confirmBulkDelete", { count: ids.length }),
+    );
+    if (!confirmed) return;
+    setBulkBusy(true);
+    try {
+      try {
+        await removeMany(ids);
+      } catch (cause) {
+        await dialogRef.current?.alert(
+          t("errors.bulkMutationFailed", { error: localizeCommandError(cause, t) }),
+        );
+        return;
+      }
+
+      if (selected?.id && ids.includes(selected.id)) resetToEmpty();
+      setSelectedIds(new Set());
+      try {
+        await reloadSnippets();
+      } catch (cause) {
+        await dialogRef.current?.alert(
+          t("errors.reloadAfterMutationFailed", { error: localizeCommandError(cause, t) }),
+        );
+      }
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [bulkBusy, ensureBulkDraftSafety, reloadSnippets, removeMany, resetToEmpty, selected?.id, selectedIds, t]);
+
+  const toggleBulkSelection = useCallback((id: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else if (next.size < 200) next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectLoadedForBulk = useCallback(() => {
+    setSelectedIds(new Set(snippets.slice(0, 200).map((snippet) => snippet.id)));
+  }, [snippets]);
+
+  const clearBulkSelection = useCallback(() => setSelectedIds(new Set()), []);
+
   const handleExport = useCallback(async () => {
     try {
       const result = await exportAllToFile();
@@ -739,14 +877,21 @@ export default function App() {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (event.isComposing || event.repeat) return;
       const ctrl = event.ctrlKey || event.metaKey;
       if (!ctrl) return;
 
       const key = event.key.toLowerCase();
-      if (settingsOpen) {
-        if (key === "n" || key === "s" || key === "e") {
-          event.preventDefault();
+      if (key === "k") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!settingsOpen && !dialogOpen) {
+          setCommandPaletteOpen((open) => !open);
         }
+        return;
+      }
+      if (settingsOpen || commandPaletteOpen || dialogOpen) {
+        if (key === "n" || key === "s" || key === "e") event.preventDefault();
         return;
       }
 
@@ -763,7 +908,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleNew, handleSave, handleExport, settingsOpen]);
+  }, [commandPaletteOpen, dialogOpen, handleNew, handleSave, handleExport, settingsOpen]);
 
   const handleThemeToggle = useCallback(() => {
     setTheme(theme === "dark" ? "light" : "dark");
@@ -798,14 +943,79 @@ export default function App() {
     setSettingsOpen(true);
   }, []);
 
+  const commandDefinitions = useMemo<CommandDefinition[]>(() => [
+    {
+      id: "new",
+      label: t("commandPalette.commands.new"),
+      keywords: [t("snippet.new"), "new create"],
+      shortcut: "Ctrl/Cmd+N",
+      execute: handleNew,
+    },
+    {
+      id: "save",
+      label: t("commandPalette.commands.save"),
+      keywords: [t("snippet.save"), "save"],
+      shortcut: "Ctrl/Cmd+S",
+      disabled: !isDirty || saving,
+      execute: handleSave,
+    },
+    {
+      id: "export",
+      label: t("commandPalette.commands.export"),
+      keywords: [t("toolbar.export"), "export backup"],
+      shortcut: "Ctrl/Cmd+E",
+      execute: handleExport,
+    },
+    {
+      id: "sync",
+      label: t("commandPalette.commands.sync"),
+      keywords: [t("toolbar.sync"), "sync webdav"],
+      disabled: syncing,
+      execute: handleSync,
+    },
+    {
+      id: "settings",
+      label: t("commandPalette.commands.settings"),
+      keywords: [t("toolbar.settings"), "settings preferences"],
+      execute: handleOpenSettings,
+    },
+    {
+      id: "focus-search",
+      label: t("commandPalette.commands.focusSearch"),
+      keywords: [t("search.placeholder"), "search find"],
+      execute: () => {
+        setFocusSearchAfterPaletteClose(true);
+      },
+    },
+    {
+      id: "theme",
+      label: t("commandPalette.commands.toggleTheme"),
+      keywords: [t("toolbar.toggleTheme"), "theme dark light"],
+      execute: handleThemeToggle,
+    },
+    {
+      id: "favorite",
+      label: selected?.is_favorite
+        ? t("commandPalette.commands.unfavorite")
+        : t("commandPalette.commands.favorite"),
+      keywords: [t("snippet.favorite"), t("snippet.unfavorite")],
+      disabled: !selected || saving,
+      execute: async () => {
+        if (selected) await handleToggleFav(selected.id);
+      },
+    },
+  ], [handleExport, handleNew, handleSave, handleSync, handleThemeToggle, handleToggleFav, handleOpenSettings, isDirty, saving, selected, syncing, t]);
+
   const focusTextTarget = useCallback(() => {
     const target = textMenuTargetRef.current;
     if (!target) return;
     target.focus();
   }, []);
 
-  const resolveCodeMirrorView = useCallback((target: HTMLElement): EditorView | null => {
+  const resolveCodeMirrorView = useCallback(async (target: HTMLElement) => {
+    if (!target.closest(".cm-editor")) return null;
     try {
+      const { EditorView } = await import("@codemirror/view");
       return EditorView.findFromDOM(target);
     } catch {
       return null;
@@ -821,7 +1031,11 @@ export default function App() {
     const inputTarget = (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)
       ? target
       : null;
-    const cm = resolveCodeMirrorView(target);
+    const cm = inputTarget ? null : await resolveCodeMirrorView(target);
+    if (!inputTarget && target.closest(".cm-editor") && !cm) {
+      setTextMenu((prev) => ({ ...prev, visible: false }));
+      return;
+    }
     if (cm) cm.focus();
 
     if (action === "selectAll") {
@@ -905,7 +1119,12 @@ export default function App() {
 
   return (
     <>
-      <Dialog ref={dialogRef} />
+      <Dialog ref={dialogRef} onOpenChange={setDialogOpen} />
+      <CommandPalette
+        open={commandPaletteOpen}
+        commands={commandDefinitions}
+        onClose={() => setCommandPaletteOpen(false)}
+      />
       {settingsOpen && (
         <div
           className="app-modal-layer"
@@ -934,6 +1153,11 @@ export default function App() {
                 : t("errors.syncFailedShort")
         )}
       </div>
+      {quickCaptureStatus && (
+        <div className={`toast ${quickCaptureStatus === "success" ? "success" : "error"}`} role="status">
+          {t(quickCaptureStatus === "success" ? "quickCapture.success" : "quickCapture.failed")}
+        </div>
+      )}
       <Titlebar />
       <Toolbar
         searchQuery={searchQuery}
@@ -947,6 +1171,10 @@ export default function App() {
         theme={theme}
         onThemeToggle={handleThemeToggle}
         onFavoriteFilter={setFavFilter}
+        sort={sort}
+        onSortChange={setSort}
+        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+        searchInputRef={searchInputRef}
         onOpenSettings={handleOpenSettings}
         onSync={handleSync}
         syncing={syncing}
@@ -961,6 +1189,13 @@ export default function App() {
           onSelect={handleSelect}
           onDelete={handleDelete}
           onToggleFavorite={handleToggleFav}
+          selectedIds={selectedIds}
+          onToggleSelection={toggleBulkSelection}
+          onSelectLoaded={selectLoadedForBulk}
+          onClearSelection={clearBulkSelection}
+          onSetFavorite={handleSetManyFavorite}
+          onBulkDelete={handleBulkDelete}
+          bulkBusy={bulkBusy}
           loading={loading}
           loadingMore={loadingMore}
           hasMore={hasMore}
@@ -1006,38 +1241,53 @@ export default function App() {
               <p className="hint">{t("snippet.shortcutHint")}</p>
             </div>
           ) : (
-            <Suspense
-              fallback={
-                <div className="editor-empty">
-                  <div className="spinner" />
-                  <p>{t("sidebar.loading")}</p>
-                </div>
-              }
+            <SnippetEditorLoadBoundary
+              key={editorLoadAttempt}
+              developmentHint={import.meta.env.DEV ? t("snippet.loadUnavailableDevHint") : undefined}
+              onRetry={handleEditorLoadRetry}
+              retryLabel={t("snippet.retryLoad")}
+              title={t("snippet.loadUnavailable")}
             >
-              <SnippetEditor
-                snippet={selected}
-                isNew={isNew}
-                form={form}
-                onChange={(f) => {
-                  const next = { ...formRef.current, ...f };
-                  formRef.current = next;
-                  setForm(next);
-                }}
-                onSave={handleSave}
-                onCancel={handleCancel}
-                onClipboardError={(cause) => {
-                  void dialogRef.current?.alert(
-                    t("errors.clipboardFailed", { error: localizeCommandError(cause, t) })
-                  );
-                }}
-                theme={theme}
-                accentPreset={accentPreset}
-                lineWrap={lineWrap}
-                saving={saving}
-                isDirty={isDirty}
-                tagOptions={allTagOptions}
-              />
-            </Suspense>
+              <Suspense
+                fallback={
+                  <div className="editor-empty" role="status">
+                    <div className="spinner" />
+                    <p>{t("sidebar.loading")}</p>
+                  </div>
+                }
+              >
+                <LazySnippetEditor
+                  attempt={editorLoadAttempt}
+                  snippet={selected}
+                  isNew={isNew}
+                  form={form}
+                  onChange={(f) => {
+                    const next = { ...formRef.current, ...f };
+                    formRef.current = next;
+                    setForm(next);
+                  }}
+                  onSave={handleSave}
+                  onCancel={handleCancel}
+                  onClipboardError={(cause) => {
+                    void dialogRef.current?.alert(
+                      t("errors.clipboardFailed", { error: localizeCommandError(cause, t) })
+                    );
+                  }}
+                  onCopied={() => {
+                    if (!selected) return;
+                    void recordUsage(selected.id)
+                      .then(() => (sort === "recent" ? reloadSnippets() : undefined))
+                      .catch(() => {});
+                  }}
+                  theme={theme}
+                  accentPreset={accentPreset}
+                  lineWrap={lineWrap}
+                  saving={saving}
+                  isDirty={isDirty}
+                  tagOptions={allTagOptions}
+                />
+              </Suspense>
+            </SnippetEditorLoadBoundary>
           )}
         </div>
       </div>

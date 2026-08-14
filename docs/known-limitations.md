@@ -1,6 +1,6 @@
 # SnipVault 已知限制与技术债
 
-> 本文记录 v2.2.0 在 2026-08-11 production WebDAV protocol-v2 activation 与发布链路硬化检查点后仍可验证的限制。已解决问题及方案见 [第一轮问题修复记录](remediation-2026-07-31.md) 与 [第二轮修复记录](remediation-round-2.md)。本文不是修复承诺。
+> 本文记录 v2.3.0 中仍可验证的限制。已解决问题及方案见 [第一轮问题修复记录](remediation-2026-07-31.md) 与 [第二轮修复记录](remediation-round-2.md)。本文不是修复承诺。
 
 ## 优先级概览
 
@@ -73,7 +73,7 @@ worker 每 15 秒观察一次设置。有效配置首次出现时会在该次观
 
 主列表现已通过后端有界摘要页和详情懒加载避免把全部正文送入 WebView。SQLite bundled 构建优先使用 FTS5 trigram，至少 3 字符查询走字面量化 MATCH；如果运行时 SQLite 不支持 trigram，v2 会安全建立 `unicode61` FTS，但为了保持现有任意子串和 CJK 语义，当前所有非空查询改走转义 LIKE。
 
-影响：fallback 模式保持正确性和字面量 wildcard 安全，但正文搜索仍可能扫描较多行；当前也不实现相关度排序，固定按 `updated_at DESC, id DESC`。开发 benchmark 是可重复 checkpoint，不是 SLA。
+影响：fallback 模式保持正确性和字面量 wildcard 安全，但正文搜索仍可能扫描较多行；`updated` 固定按 `updated_at DESC, id DESC`，而 `recent` 只在本机按 usage 时间稳定排序。两者均不实现相关度排序，开发 benchmark 是可重复 checkpoint，不是 SLA。
 
 ### 3.2 StreamLanguage 语言不是完整 Lezer parser
 
@@ -119,13 +119,13 @@ CSP 已启用本地 script、精确 IPC scheme，并禁用 `unsafe-eval`、远�
 
 ### 5.1 数据库升级备份是保留的恢复工件
 
-任何既有磁盘 v0/v1/v2/v3 数据库升级到当前 schema v4 前都会创建并验证唯一 `pre-v4` online backup；迁移链任一步失败时恢复并重新验证原来源版本，同时保留失败数据库副本供人工诊断。成功升级后 preflight backup 也有意保留，不会由应用自动轮转或删除。
+任何既有磁盘 v0/v1/v2/v3/v4 数据库升级到当前 schema v5 前都会创建并验证唯一 `pre-v5` online backup；迁移链任一步失败时恢复并重新验证原来源版本，同时保留失败数据库副本供人工诊断。成功升级后 preflight backup 也有意保留，不会由应用自动轮转或删除。
 
 影响：多次历史升级可能留下额外同级备份文件，需要用户在确认新版本数据正常且另有备份后人工归档。公开 IPC/错误不会返回这些绝对路径。
 
 ### 5.2 没有通用 migrations 目录
 
-当前已有 temp-DB 覆盖的 v0→v1→v2→v3→v4 顺序路径、未来版本拒绝、重复初始化、transaction rollback，以及历史版本 preflight restore，但迁移代码仍集中在 [db.rs](../src-tauri/src/db.rs)，不是可声明式扩展的 migration framework。每个未来 schema 版本仍必须新增专门步骤、全部历史 fixture、来源版本 backup/restore 和 import/WebDAV compatibility 测试。
+当前已有 temp-DB 覆盖的 v0→v1→v2→v3→v4→v5 顺序路径、未来版本拒绝、重复初始化、transaction rollback，以及历史版本 preflight restore，但迁移代码仍集中在 [db.rs](../src-tauri/src/db.rs)，不是可声明式扩展的 migration framework。v5 的 `snippet_usage` 是有意本地化的 usage 元数据：它不进入 JSON、revision、outbox 或 WebDAV，既有片段升级后没有虚构 usage。每个未来 schema 版本仍必须新增专门步骤、全部历史 fixture、来源版本 backup/restore 和 import/WebDAV compatibility 测试。
 
 ### 5.3 本地 revision archive 不是用户可用版本历史
 
@@ -139,11 +139,23 @@ Schema v4 的 `revision_objects` 会在 exact acknowledgement 删除 `revision_o
 
 影响：已支持完整的精选 surface skin，但仍不支持任意 HEX、CSS 字符串、用户主题导入/导出或 syntax palette 编辑器。这一限制防止未校验 CSS 注入，并避免无法保证深浅模式、填充按钮文字、焦点、选区和可访问性对比度的任意配色。若未来支持自定义颜色，必须引入版本化 schema、严格颜色解析、可访问性/OKLCH 派生、重置路径和迁移策略，不能直接把用户输入写入 style/CSS variable。
 
-### 6.2 App 级工作流覆盖仍有限
+### 6.2 Vite 开发服务器中断仍需单独诊断
 
-片段初始加载错误/空库、retry、delete/favorite rejection、结构化错误 fallback、reconciliation、共享 SettingsProvider、设置 draft/关闭 guard、background/Settings 同步单次 refresh、嵌套模态焦点/恢复、语义列表、标签 combobox、context menu 范围/导航、HTML `lang` 和语言分类已有 Vitest/RTL/user-event/axe 覆盖。完整 App 仍未通过真实 CodeMirror、Tauri desktop event、托盘和并发 save 组合测试；真实窗口行为仍依赖人工 smoke。
+编辑器仍按需从 Vite dev server 懒加载；若 `http://localhost:1420` 已停止监听，首次打开片段或新建草稿的模块请求会被拒绝。`SnippetEditorLoadBoundary` 会将 [LazySnippetEditor.tsx](../src/components/LazySnippetEditor.tsx) 的 rejected import 或编辑器 render error 限制在右侧 pane，保留侧栏、工具栏和 App 持有的草稿，并允许用户在恢复 server 后手动 Retry；它不会自动重试、重启 Vite、轮询端口或确定进程退出的根因。
 
-### 6.3 自研 minimap 没有等价键盘控制
+影响：运行中的 Tauri window 可能在 Vite 子进程结束后继续存在，生产构建不受 localhost dev server 依赖。开发者必须从 Vite 终端的 stdout/stderr 与 exit code 区分 port-owner、Node/Vite/esbuild、资源或 transform 问题；浏览器的 `ERR_CONNECTION_REFUSED` 只能证明当时 server 不可用。隔离诊断必须避免真实用户数据、凭据和 WebDAV 配置，并且 native 开发时只能让 `npm run tauri:dev` 拥有 1420 端口。
+
+### 6.3 高频效率层仍需真实桌面验证
+
+命令面板、原生全局/托盘快速捕获、批量选择和本机“最近使用”排序已接入现有业务链路，但本阶段遵循“不新增测试代码”的约束，没有为这些路径添加新的 focused unit、RTL 或 Tauri 自动化用例。既有测试与静态 gate 不能替代真实全局快捷键注册、系统剪贴板、托盘菜单、CodeMirror 焦点和窗口隐藏/最小化时序。
+
+影响：不同桌面环境可能已占用 `Ctrl/Cmd+Shift+V`、禁止应用注册全局快捷键，或限制剪贴板访问；应用会保留托盘捕获入口并以非模态失败反馈，不应承诺全局快捷键一定可用。全局捕获只在显式快捷键/托盘动作中读取文本，不记录或向 WebView 发送正文；当前 completion fallback 只保留 listener 就绪前的最新一条结果，因此它不是隐藏窗口期间任意次数捕获的可靠队列。需要在隔离数据目录、无真实凭据/同步且使用非敏感剪贴板文本的实际 Tauri 窗口中完成 smoke，确认事件/日志脱敏、排序刷新、批量 dirty guard 和焦点恢复。
+
+### 6.4 本地 usage 不等于跨设备近期语义
+
+“最近使用”只由本机成功打开详情、复制已保存正文或快速捕获写入，不改变 `updated_at`，也不会通过 revision/outbox/WebDAV/JSON 传播。未使用项稳定排在已有 usage 项之后；它不是全文搜索相关度、跨设备最近打开记录或可审计的使用历史。
+
+影响：不同设备、导入/导出恢复后和升级前既有片段会看到不同排序；删除后本地 usage 会一起清除。当前没有 usage 浏览、清空/编辑、跨设备合并或用户可配置的 usage retention 功能。
 
 Canvas codeglance、viewport 和宽度分隔器是装饰性/增强型视觉导航，已从辅助技术树隐藏；CodeMirror 本体保持可键盘滚动和编辑，因此核心内容不依赖 minimap。但 minimap 的点击跳转、viewport 拖动和宽度拖动没有等价的键盘操作。当前把这些能力视为非必要增强；若未来把 minimap 操作设为核心功能，需提供明确键盘控制。
 
@@ -217,18 +229,19 @@ WebDAV v2 activation 已解决下列旧 P0 缺口；剩余约束见第 1 节：
 
 以下前端可访问性与语言扩展问题也已解决：
 
-- Settings/Dialog 共享嵌套模态栈，具备语义、topmost Tab/Escape、focus trap、背景隔离和焦点恢复，同时保留 Save/Discard/Cancel guard。
+- Settings/Dialog/命令面板共享嵌套模态栈，具备语义、topmost Tab/Escape、focus trap、背景隔离和焦点恢复，同时保留 Save/Discard/Cancel guard。
 - 片段列表改为语义 list/listitem 与同级按钮；图标按钮补充名称/type，二态按钮暴露 pressed 状态，异步区域补充 busy/live 反馈。
 - 标签建议采用完整 combobox/listbox/option 键盘模型；文本菜单只接管支持的编辑目标并支持菜单键盘导航/恢复焦点。
 - HTML `lang` 跟随运行时语言；minimap 对辅助技术隐藏，CodeMirror 保持唯一主 scroller 和键盘可访问。
 - 语言 factory 独立于 metadata；HTML、Go、C#、Elixir 使用对应 parser-backed 包，9 种 legacy mode 使用显式 StreamLanguage，plaintext 有意 fallback。
+- 原生快速捕获仅在显式全局快捷键或托盘动作读取剪贴板，写入普通 revision/outbox 链路并发送脱敏完成事件；全局快捷键不可注册时托盘入口仍可用。
 - 全局 focus-visible、reduced-motion、双主题缺失变量和系统字体栈已落实。
 
 
-- 主列表改为有界 `SnippetSummary` cursor pages，完整正文选择后懒加载；generation/query/cursor guards 抑制 stale response。
+- 主列表改为有界 `SnippetSummary` cursor pages，完整正文选择后懒加载；`updated` 与本机 `recent` 使用独立 cursor，generation/query/cursor guards 抑制 stale response；使用记录不参与同步或导入导出。
 - schema v2 建立同步 FTS5 external-content 索引；schema v3 保持 `snippets`/FTS 不变，并增加稳定 device identity、revision head/tombstone、bounded immutable outbox、remote state/conflict index 和扩展 sync history；schema v4 增加 durable `revision_objects`，用于 outbox 确认后的本地 ancestry 保留。
-- create/update/favorite/delete/import winner 现在原子维护 live row、FTS、head、durable revision object 与按需 outbox；update 在同一 transaction 比较 `base_revision_id`，stale rejection 保留前端 dirty draft；delete 从 FTS 移除 live row并保留 tombstone。
-- v0/v1/v2/v3 既有磁盘库升级到当前 v4 前创建/验证唯一 backup，任一步失败恢复来源版本；v2 live rows 获得确定性 legacy head 且不批量进入 outbox，v4 会从 pending outbox、当前 live heads 和 tombstones 回填 durable revision objects。
+- create/update/favorite/delete/import winner 以及最多 200 项的批量收藏/删除现在原子维护 live row、FTS、head、durable revision object 与按需 outbox；批量操作先验证整组，收藏只为实际状态改变生成 revision，delete 从 FTS 移除 live row并保留 tombstone。
+- v0/v1/v2/v3/v4 既有磁盘库升级到当前 v5 前创建/验证唯一 backup，任一步失败恢复来源版本；v2 live rows 获得确定性 legacy head 且不批量进入 outbox，v4 会从 pending outbox、当前 live heads 和 tombstones 回填 durable revision objects，v5 增加不参与同步/导入导出的本地 `snippet_usage`。
 - v4 的 snapshot、validated no-echo remote plan、durable revision-object archive、deterministic conflict index/copy 与 exact revision acknowledgement seams 已由 production WebDAV v2 engine 消费；即时结果契约包含 deletion、conflict、pending、protocol 与 manifest generation，历史包含除 pending 外的对应计数与 protocol/generation。
 - WebDAV v2 通过 `protocol-v2.json`、immutable `objects/<revision_uuid>.json`、tombstone revisions、strong ETag 和 conditional manifest PUT 实现单向 v1→v2 activation 与跨设备 CAS；v1 legacy payload 保留但激活后忽略。
 - Snippet、summary、head/outbox/remote state 和 sync history 行解码严格验证必需类型、tags JSON、boolean、revision/hash 约束和 RFC 3339，不再静默默认。

@@ -1,6 +1,8 @@
-import React, { useRef } from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Plus, Upload, Download, Sun, Moon } from "lucide-react";
+import { Plus, Upload, Download, Sun, Moon, Command, ArrowDownWideNarrow, History } from "lucide-react";
+import { type SnippetSort } from "../types";
 import { LANGUAGES } from "../utils/languages";
 
 interface ToolbarProps {
@@ -15,6 +17,10 @@ interface ToolbarProps {
   theme: "dark" | "light";
   onThemeToggle: () => void;
   onFavoriteFilter: (fav: boolean | null) => void;
+  sort?: SnippetSort;
+  onSortChange?: (sort: SnippetSort) => void;
+  onOpenCommandPalette?: () => void;
+  searchInputRef?: React.RefObject<HTMLInputElement | null>;
   onOpenSettings: () => void;
   onSync?: () => void;
   syncing?: boolean;
@@ -34,6 +40,10 @@ export function Toolbar({
   theme,
   onThemeToggle,
   onFavoriteFilter,
+  sort = "updated",
+  onSortChange,
+  onOpenCommandPalette,
+  searchInputRef,
   onOpenSettings,
   onSync,
   syncing,
@@ -42,6 +52,63 @@ export function Toolbar({
 }: ToolbarProps) {
   const { t } = useTranslation();
   const importRef = useRef<HTMLInputElement>(null);
+  const sortButtonRef = useRef<HTMLButtonElement>(null);
+  const sortTooltipRef = useRef<HTMLDivElement>(null);
+  const [sortHovered, setSortHovered] = useState(false);
+  const [sortFocused, setSortFocused] = useState(false);
+  const [sortTooltipPosition, setSortTooltipPosition] = useState<{
+    top: number;
+    left: number;
+    placement: "top" | "bottom";
+    ready: boolean;
+  } | null>(null);
+  const sortTooltipVisible = sortHovered || sortFocused;
+  const nextSort = sort === "updated" ? "recent" : "updated";
+  const currentSortLabel = t(sort === "updated" ? "filter.sortUpdated" : "filter.sortRecent");
+  const nextSortLabel = t(nextSort === "updated" ? "filter.sortUpdated" : "filter.sortRecent");
+  const sortDescription = t("filter.sortToggle", {
+    current: currentSortLabel,
+    next: nextSortLabel,
+  });
+  const sortTooltipCurrent = t("filter.sortTooltipCurrent", { current: currentSortLabel });
+  const sortTooltipHint = t("filter.sortTooltipHint");
+
+  useLayoutEffect(() => {
+    if (!sortTooltipVisible) {
+      setSortTooltipPosition(null);
+      return;
+    }
+
+    const updatePosition = () => {
+      const button = sortButtonRef.current;
+      const tooltip = sortTooltipRef.current;
+      if (!button || !tooltip) return;
+
+      const buttonRect = button.getBoundingClientRect();
+      const tooltipRect = tooltip.getBoundingClientRect();
+      const viewportInset = 8;
+      const gap = 8;
+      const fitsBelow = buttonRect.bottom + gap + tooltipRect.height <= window.innerHeight - viewportInset;
+      const placement = fitsBelow ? "bottom" : "top";
+      const top = placement === "bottom"
+        ? buttonRect.bottom + gap
+        : Math.max(viewportInset, buttonRect.top - gap - tooltipRect.height);
+      const left = Math.min(
+        Math.max(viewportInset, buttonRect.left + buttonRect.width / 2 - tooltipRect.width / 2),
+        window.innerWidth - tooltipRect.width - viewportInset,
+      );
+
+      setSortTooltipPosition({ top, left, placement, ready: true });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [sortTooltipCurrent, sortTooltipHint, sortTooltipVisible]);
 
   return (
     <div className="toolbar">
@@ -69,6 +136,7 @@ export function Toolbar({
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
           <input
+            ref={searchInputRef}
             className="search-input"
             placeholder={t("search.placeholder")}
             value={searchQuery}
@@ -92,6 +160,7 @@ export function Toolbar({
           className="lang-select"
           value={selectedLang}
           onChange={(e) => onLangChange(e.target.value)}
+          aria-label={t("filter.language")}
         >
           <option value="">{t("filter.all")}</option>
           {LANGUAGES.map((l) => (
@@ -100,7 +169,6 @@ export function Toolbar({
             </option>
           ))}
         </select>
-
         <button
           type="button"
           className={`filter-btn ${favoriteFilter === true ? "active" : ""}`}
@@ -113,9 +181,49 @@ export function Toolbar({
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
           </svg>
         </button>
+        <button
+          ref={sortButtonRef}
+          type="button"
+          className={`filter-btn sort-mode-btn ${sort === "recent" ? "active" : ""}`}
+          onClick={() => onSortChange?.(nextSort)}
+          onPointerEnter={() => setSortHovered(true)}
+          onPointerLeave={() => setSortHovered(false)}
+          onFocus={() => setSortFocused(true)}
+          onBlur={() => setSortFocused(false)}
+          title={sortTooltipVisible ? undefined : sortDescription}
+          aria-label={sortDescription}
+        >
+          {sort === "updated" ? <ArrowDownWideNarrow aria-hidden="true" size={16} /> : <History aria-hidden="true" size={16} />}
+        </button>
       </div>
 
+      {sortTooltipVisible && typeof document !== "undefined" && createPortal(
+        <div
+          ref={sortTooltipRef}
+          className="sort-tooltip"
+          data-placement={sortTooltipPosition?.placement ?? "bottom"}
+          aria-hidden="true"
+          style={{
+            top: sortTooltipPosition?.top ?? 0,
+            left: sortTooltipPosition?.left ?? 0,
+            visibility: sortTooltipPosition?.ready ? "visible" : "hidden",
+          }}
+        >
+          <span className="sort-tooltip-current">{sortTooltipCurrent}</span>
+          <span className="sort-tooltip-hint">{sortTooltipHint}</span>
+        </div>,
+        document.body,
+      )}
       <div className="toolbar-actions">
+        <button
+          type="button"
+          className="action-btn"
+          onClick={onOpenCommandPalette}
+          title={t("commandPalette.open")}
+          aria-label={t("commandPalette.open")}
+        >
+          <Command aria-hidden="true" size={16} />
+        </button>
         <button type="button" className="action-btn" onClick={onExport} title={t("toolbar.export")} aria-label={t("toolbar.export")}>
           <Download aria-hidden="true" size={16} />
         </button>

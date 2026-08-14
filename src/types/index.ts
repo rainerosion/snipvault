@@ -11,11 +11,23 @@ export interface SnippetSummary {
   content_preview: string;
 }
 
+export type SnippetSort = "updated" | "recent";
+
+export type QuickCaptureSource = "global_shortcut" | "tray";
+
+/** A de-identified native quick-capture outcome; clipboard contents are never returned. */
+export interface QuickCaptureCompletion {
+  source: QuickCaptureSource;
+  success: boolean;
+  snippet_id?: string;
+}
+
 export interface SnippetQuery {
   query: string;
   language: string | null;
   favorite: boolean | null;
   exact_tag: string | null;
+  sort?: SnippetSort;
   limit: number;
   cursor: string | null;
 }
@@ -46,4 +58,10 @@ export interface SnippetForm {
   description: string;
   tags: string[];
   is_favorite: boolean;
+}
+
+export interface BulkMutationResult {
+  requested_count: number;
+  changed_count: number;
+  unchanged_count: number;
 }

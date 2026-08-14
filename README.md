@@ -33,22 +33,32 @@ Snippet data is stored locally in SQLite and remains available offline. Optional
 
 ### Features
 
-- **Local snippet management** — Create, edit, delete, favorite, tag, and browse snippets stored in SQLite.
-- **Scalable local search** — Backend-composed substring-compatible search over title, content, description, and tags, with language/favorites filters, bounded summary pages, Load More, CJK support, and lazy full-detail loading.
+> **Release status:** v2.3.0 is the current release. It includes phase-one productivity capabilities: Recently Used ordering, batch organization, quick capture, and the command palette.
+
+- **Local snippet management** — Create, edit, delete, favorite, tag, browse, and select up to 200 currently loaded snippets for one all-or-nothing favorite, unfavorite, or delete action.
+- **Scalable local search** — Backend-composed substring-compatible search over title, content, description, and tags, with language/favorites filters, selectable Recently Updated/Recently Used ordering, bounded summary pages, Load More, CJK support, and lazy full-detail loading.
 - **CodeMirror editing** — Line numbers, bracket matching, completion, folding, light/dark highlighting, and persistent line wrapping.
 - **Language labels** — Around 30 selectable language labels. Parser-backed highlighting covers JavaScript/TypeScript/JSX/TSX, Python, Rust, Go, Java, C/C++, C#, PHP, SQL, HTML, CSS, JSON, YAML, XML, Markdown, and Elixir. Ruby, Swift, Kotlin, Bash, Dockerfile, TOML, Lua, R, and Scala use legacy stream syntax highlighting rather than full Lezer parsers; plaintext intentionally has no parser.
 - **Tags and favorites** — Add tags with an accessible keyboard/mouse combobox (Enter/comma, arrows, Escape), reuse suggestions, and mark important snippets.
 - **Canvas codeglance** — Click to jump, drag the viewport, and resize the minimap.
-- **Clipboard tools** — Copy the full snippet or use the custom text context menu for cut/copy/paste/select-all.
+- **Clipboard tools** — Copy the full snippet or use the custom text context menu for cut/copy/paste/select-all; explicitly capture non-empty clipboard text as a new plaintext snippet with `Ctrl/Cmd+Shift+V` or the tray menu.
+- **Command palette** — Open `Ctrl/Cmd+K` to search and run existing create, save, export, sync, settings, search-focus, theme, and current-favorite actions from the keyboard.
 - **JSON import/export** — Versioned exports include format/schema/app/time metadata and use collision-safe filenames; imports also accept legacy top-level arrays and merge by ID and `updated_at`.
 - **Accessible interaction** — Semantic snippet lists, named controls, nested modal focus management/restoration, visible keyboard focus, reduced motion, and native context menus outside supported editable text targets.
 - **Curated interface palettes** — Keep Dark/Light/System mode separate from six persistent curated palettes (Sky, Violet, Emerald, Amber, Rose, Minimal White). Minimal White restores the original neutral light/dark surfaces; every palette recolors the full application canvas, surfaces, text hierarchy, borders, titlebar, dialogs, controls, editor chrome, and codeglance while syntax and language colors remain stable.
 - **Chinese/English UI** — Includes synchronized document language metadata.
 - **WebDAV synchronization** — Auto, Basic, Digest, Bearer, and no-auth modes; revision ancestry, cross-device deletion tombstones, deterministic conflict copies, manifest CAS, HTTPS for remote servers, and OS credential-store protection for passwords/tokens.
-- **Desktop integration** — Custom titlebar, system tray, single-instance behavior, minimize-to-tray, autostart, and backend-controlled trusted-folder/repository opening.
+- **Desktop integration** — Custom titlebar, system tray with quick capture, single-instance behavior, minimize-to-tray, autostart, a native quick-capture shortcut, and backend-controlled trusted-folder/repository opening.
 - **Sync history** — The latest 20 successful synchronization records.
 
 > WebDAV v2 requires server support for strong ETags and conditional PUT. Its one-way cutover, immutable-object retention, conflict UI, and verification boundaries are documented in [Known limitations](docs/known-limitations.md). Keep an independent backup before activating a v1 directory and do not use old clients against it afterward.
+
+### What's New in v2.3.0
+
+- Added phase-one productivity workflows: native shortcut/tray clipboard quick capture, a keyboard command palette, batch favorite/unfavorite/delete for up to 200 loaded snippets, and local-only Recently Used ordering.
+- Added a focused command-palette action that returns keyboard focus to the snippet search field after the modal closes.
+- Kept the editor lazy-loaded while containing an unavailable editor module or render failure to the editor pane, with explicit retry after Vite development recovery.
+- Split the production CodeMirror graph into editor-runtime, service, UI, and language-family chunks without increasing Vite's chunk warning threshold.
 
 ### What's New in v2.2.0
 
@@ -133,7 +143,7 @@ Files:
 
 Older `settings.json` files containing `webdav_password` are migrated once. SnipVault removes that legacy field only after the credential is written securely; if migration cannot complete, it preserves the legacy file, does not use or expose its secret, and asks you to replace or clear the credential in Settings. Invalid settings files are quarantined, then SnipVault restores a valid backup or safe defaults and offers a controlled action to open the data folder.
 
-Exports prefer `Downloads/SnipVault` and fall back to `<data_dir>/exports`. Export files use a versioned JSON envelope and collision-safe numeric suffixes, so repeated same-second exports are not overwritten. Before an existing schema-v0/v1/v2/v3 database is automatically upgraded to schema v4, SnipVault creates and verifies one unique sibling `pre-v4` backup; the backup is retained for recovery. Schema v4 provides revision heads, deletion tombstones, durable immutable revision objects, a bounded pending outbox, remote state, and conflict indexing used by active WebDAV v2 synchronization.
+Exports prefer `Downloads/SnipVault` and fall back to `<data_dir>/exports`. Export files use a versioned JSON envelope and collision-safe numeric suffixes, so repeated same-second exports are not overwritten. Before an existing schema-v0/v1/v2/v3/v4 database is automatically upgraded to schema v5, SnipVault creates and verifies one unique sibling `pre-v5` backup; the backup is retained for recovery. Schema v5 retains v4 revision heads, deletion tombstones, durable immutable revision objects, a bounded pending outbox, remote state, and conflict indexing used by active WebDAV v2 synchronization, and adds local-only `snippet_usage` metadata for Recently Used ordering. Usage metadata is not serialized in JSON export/import, revision objects, the outbox, or WebDAV, and existing snippets start without usage history after migration.
 
 ### WebDAV Configuration
 
@@ -165,6 +175,8 @@ Passwords/tokens are not returned to the WebView or written to current `settings
 | `Ctrl/Cmd+N` | New snippet |
 | `Ctrl/Cmd+S` | Save the current snippet |
 | `Ctrl/Cmd+E` | Export all snippets |
+| `Ctrl/Cmd+K` | Open or close the in-app command palette |
+| `Ctrl/Cmd+Shift+V` | Globally capture non-empty clipboard text as a new plaintext snippet; an unavailable shortcut never blocks the tray capture entry |
 
 ### Development Documentation
 
@@ -205,21 +217,31 @@ Feature design and development changes must update the relevant development docu
 
 ### 功能特性
 
-- **本地片段管理** — 新建、编辑、删除、收藏、标签和 SQLite 持久化。
-- **可扩展本地搜索** — 后端组合标题、代码、描述和标签的子串兼容搜索与语言/收藏筛选，提供有界摘要页、加载更多、CJK 支持和完整详情懒加载。
+> **发布状态：**v2.3.0 是当前发布版本，包含第一阶段效率能力：最近使用排序、批量整理、快速捕获和命令面板。
+
+- **本地片段管理** — 新建、编辑、删除、收藏、标签和 SQLite 持久化；可在当前已加载结果中选择最多 200 项，执行全有或全无的批量收藏、取消收藏或删除。
+- **可扩展本地搜索** — 后端组合标题、代码、描述和标签的子串兼容搜索与语言/收藏筛选；工具栏将筛选与排序分开显示，默认按“最近更新”排序，也可切换“最近使用”，并提供有界摘要页、加载更多、CJK 支持和完整详情懒加载。
 - **CodeMirror 编辑器** — 行号、括号匹配、补全、折叠、深浅主题和持久化自动换行。
 - **语言标签与高亮** — UI 可选择约 30 种语言；JavaScript/TypeScript/JSX/TSX、Python、Rust、Go、Java、C/C++、C#、PHP、SQL、HTML、CSS、JSON、YAML、XML、Markdown、Elixir 使用对应 parser-backed 扩展。Ruby、Swift、Kotlin、Bash、Dockerfile、TOML、Lua、R、Scala 使用 legacy stream 语法着色而非完整 Lezer parser；plaintext 有意不使用 parser。
 - **标签与收藏** — 使用支持键盘/鼠标的可访问 combobox 添加标签（Enter/逗号、方向键、Escape）、复用已有建议和收藏标记。
 - **Canvas Codeglance** — 点击跳转、拖拽视窗和调整宽度。
-- **剪贴板工具** — 一键复制完整代码，以及文本区域剪切/复制/粘贴/全选右键菜单。
+- **剪贴板工具** — 一键复制完整代码，以及文本区域剪切/复制/粘贴/全选右键菜单；可通过 `Ctrl/Cmd+Shift+V` 或托盘菜单显式将非空剪贴板文本捕获为新的 plaintext 片段。
+- **命令面板** — 按 `Ctrl/Cmd+K` 搜索并通过键盘执行既有的新建、保存、导出、同步、设置、聚焦搜索、切换主题和当前片段收藏操作。
 - **JSON 导入/导出** — 版本化导出包含格式/schema/应用/时间元数据并使用防冲突文件名；导入兼容旧顶层数组，按 ID 和 `updated_at` 合并。
 - **无障碍交互** — 语义片段列表、具名控件、嵌套模态焦点约束/恢复、可见键盘焦点、减少动画，以及在非受支持编辑目标上保留原生右键菜单。
 - **主题与语言** — 暗色、亮色、跟随系统的深浅模式，与可持久化的天空蓝、紫罗兰、翡翠绿、琥珀金、玫瑰红、简约白精选界面配色独立配置；简约白会恢复最初版本的中性深浅界面。每种配色会改变完整应用的背景、面板、文字层级、边框、标题栏、弹窗、控件、编辑器 chrome 和 codeglance，语法和语言颜色保持稳定。中文和英文界面同步文档语言元数据。
 - **WebDAV 同步** — Auto、Basic、Digest、Bearer、无认证；基于 revision ancestry 合并、跨设备删除 tombstone、确定性冲突副本、manifest CAS，远端服务器要求 HTTPS，并通过操作系统凭据库保护密码/token。
-- **桌面集成** — 自定义标题栏、系统托盘、单实例、最小化到托盘、开机自启，以及后端受控打开可信目录/仓库。
+- **桌面集成** — 自定义标题栏、含快速捕获入口的系统托盘、单实例、最小化到托盘、开机自启、原生快速捕获快捷键，以及后端受控打开可信目录/仓库。
 - **同步历史** — 保留最近 20 条成功同步记录。
 
 > WebDAV v2 要求服务器支持 strong ETag 和 conditional PUT。单向升级、不可变对象保留、冲突 UI 与验证边界见[已知限制](docs/known-limitations.md)。激活 v1 目录前请保留独立备份，激活后不要再让旧客户端访问该目录。
+
+### v2.3.0 更新内容
+
+- 新增第一阶段效率工作流：原生快捷键/托盘剪贴板快速捕获、键盘命令面板、当前已加载最多 200 项的批量收藏/取消收藏/删除，以及仅本机的“最近使用”排序。
+- 命令面板新增聚焦搜索动作，会在模态层关闭后将键盘焦点放回代码片段搜索框。
+- 编辑器继续按需加载；若开发期编辑器模块不可用或渲染失败，错误被限制在编辑器 pane 内，并在 Vite 恢复后提供显式重试。
+- 将生产 CodeMirror 依赖拆分为 editor runtime、服务、UI 与语言族 chunks，未提高 Vite chunk 警告阈值。
 
 ### v2.2.0 更新内容
 
@@ -304,7 +326,7 @@ Tag 发布会附带 `SHA256SUMS` 和 GitHub artifact attestations。手动 relea
 
 旧 `settings.json` 中若含 `webdav_password`，应用会执行一次迁移：只有凭据安全写入成功后才移除旧字段；迁移失败时保留旧文件，但不使用或暴露其中 secret，并要求用户在设置中替换或清除凭据。损坏设置会先隔离，再恢复有效备份或安全默认值，设置页可通过受控命令打开数据目录。
 
-导出优先写入 `Downloads/SnipVault`，不可写时回退到 `<data_dir>/exports`。导出文件使用版本化 JSON envelope 和防冲突数字后缀，同一秒重复导出不会覆盖。既有 schema v0/v1/v2/v3 数据库自动升级到 schema v4 前会创建并验证一个唯一同级 `pre-v4` 备份，并保留用于恢复。Schema v4 的 revision head、删除 tombstone、持久不可变 revision objects、有界 pending outbox、remote state 和 conflict index 已供当前 WebDAV v2 同步使用。
+导出优先写入 `Downloads/SnipVault`，不可写时回退到 `<data_dir>/exports`。导出文件使用版本化 JSON envelope 和防冲突数字后缀，同一秒重复导出不会覆盖。既有 schema v0/v1/v2/v3/v4 数据库自动升级到 schema v5 前会创建并验证一个唯一同级 `pre-v5` 备份，并保留用于恢复。Schema v5 保留 v4 的 revision head、删除 tombstone、持久不可变 revision objects、有界 pending outbox、remote state 和 conflict index，供当前 WebDAV v2 同步使用；并增加只在本机保存的 `snippet_usage` 元数据用于“最近使用”排序。该使用元数据不进入 JSON 导入导出、revision objects、outbox 或 WebDAV；迁移后的既有片段没有使用历史。
 
 ### WebDAV 配置
 
@@ -336,6 +358,8 @@ Fresh 或合法 v1 目录的激活是**单向 v1→v2 切换**。既有 v1 逐�
 | `Ctrl/Cmd+N` | 新建片段 |
 | `Ctrl/Cmd+S` | 保存当前片段 |
 | `Ctrl/Cmd+E` | 导出所有片段 |
+| `Ctrl/Cmd+K` | 打开或关闭应用内命令面板 |
+| `Ctrl/Cmd+Shift+V` | 在全局范围捕获非空剪贴板文本为新的 plaintext 片段；快捷键不可用时托盘捕获入口仍可使用 |
 
 ### 开发文档
 

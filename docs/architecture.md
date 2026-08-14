@@ -1,6 +1,6 @@
 # SnipVault 架构设计
 
-> 本文描述 v2.2.0 源码截至 2026-08-11 的当前架构。已发现但尚未修复的问题集中记录在 [已知限制](known-limitations.md)。
+> 本文描述当前 v2.3.0 发布架构，截至 2026-08-14。已发现但尚未修复的问题集中记录在 [已知限制](known-limitations.md)。
 
 ## 1. 系统定位与边界
 
@@ -31,11 +31,13 @@ SnipVault 是一个本地优先的桌面代码片段管理器。应用的主要�
 flowchart LR
     subgraph WEBVIEW[WebView / React]
         UI[React Components]
-        APP[App.tsx<br/>业务与同步协调]
+        APP[App.tsx<br/>业务、同步与快速捕获协调]
+        PALETTE[CommandPalette<br/>命令注册与键盘入口]
         SETTINGS_PROVIDER[SettingsProvider<br/>权威设置状态]
         APPEARANCE[theme.ts / ThemeProvider<br/>权威设置 + session 深浅覆盖 + 完整精选界面配色]
         SNIPPETS[useSnippets]
         MODAL[ModalSurface<br/>模态栈与焦点所有权]
+        EDITOR_BOUNDARY[SnippetEditorLoadBoundary<br/>编辑器失败隔离与手动重试]
         EDITOR[SnippetEditor<br/>CodeMirror + Canvas MiniMap]
         SYNTAX_HIGHLIGHT[syntaxHighlight.ts<br/>共享语法范围适配器]
         LANGUAGE_META[languages.ts<br/>轻量语言元数据]
@@ -46,7 +48,9 @@ flowchart LR
         APPEARANCE --> UI
         SETTINGS_PROVIDER --> UI
         APP --> SNIPPETS
-        APP --> EDITOR
+        APP --> PALETTE
+        APP --> EDITOR_BOUNDARY
+        EDITOR_BOUNDARY --> EDITOR
         UI --> MODAL
         EDITOR --> LANGUAGE_META
         EDITOR --> LANGUAGE_EXT
@@ -56,7 +60,8 @@ flowchart LR
     end
 
     subgraph TAURI[Tauri / Rust]
-        MAIN[main.rs<br/>启动与窗口生命周期]
+        MAIN[main.rs<br/>启动、窗口与插件生命周期]
+        CAPTURE[capture.rs<br/>原生快捷键与脱敏完成事件]
         TRAY[tray.rs<br/>托盘所有权与事件]
         SYNC[sync.rs<br/>同步来源事件与调度]
         CMD[commands.rs<br/>IPC 适配]
@@ -73,8 +78,10 @@ flowchart LR
         DAV_PROTOCOL[webdav/protocol.rs<br/>v1/v2 DTO / URL / 边界]
         OPEN[opener<br/>受控打开]
         MAIN --> TRAY
+        MAIN --> CAPTURE
         MAIN --> SYNC
         MAIN --> CMD
+        TRAY --> CAPTURE
         TRAY --> SYNC
         TRAY --> CMD
         CMD --> ERROR
@@ -106,8 +113,10 @@ flowchart LR
     SNIPPETS -->|invoke| CMD
     SETTINGS_PROVIDER -->|invoke| CMD
     APP -->|Window.listen| TRAY
+    APP -->|Window.listen| CAPTURE
     APP -->|Window.listen| SYNC
     TRAY -->|open-settings / autostart-toggled| APP
+    CAPTURE -->|quick-capture-complete, only source/success/ID| APP
     SYNC -->|typed sync-complete| APP
     DB --> SQLITE[(snippets.db)]
     SETTINGS --> JSON[(settings.json<br/>不含 secret)]
@@ -144,12 +153,13 @@ flowchart LR
 
 - 当前选中片段、是否新建、表单和原始表单快照。
 - 保存状态与脏数据检测。
-- 搜索词、语言筛选、收藏筛选和分页请求状态。
-- 设置模态层、同步状态和全局 Dialog。
-- `Ctrl/Meta+N/S/E` 快捷键。
+- 搜索词、语言筛选、收藏筛选、排序、分页请求和当前已加载项的批量选择。
+- 设置模态层、命令面板、同步状态和全局 Dialog。
+- `Ctrl/Meta+N/S/E/K` WebView 快捷键，以及 Rust 原生 `Ctrl/Meta+Shift+V` 快速捕获完成协调。
 - 自定义文本右键菜单和剪贴板操作。
-- `sync-complete`、`open-settings`、`autostart-toggled` 窗口事件。
-- 编辑器模块的 lazy load 和空闲预加载。
+- `sync-complete`、`quick-capture-complete`、`open-settings`、`autostart-toggled` 窗口事件。
+- `SnippetEditorLoadBoundary` 只包围懒加载编辑器的 `Suspense`/editor 子树。pending import 显示 pane 内 loading；rejected import 或 editor render error 被隔离为本地化的 `role="alert"` 与显式 Retry，不会卸载侧栏、工具栏、设置、Dialog 或 App 持有的选择/草稿状态。Retry 只递增 App 的加载尝试号；`LazySnippetEditor` 为每个尝试生成新的 lazy identity，开发环境使用带尝试 query 的绝对 Vite `/src` module URL 绕过已拒绝 import 的浏览器缓存，生产仍使用静态可分析的 editor import。边界不会自动轮询、重启或诊断 Vite。
+- CodeMirror view 只在编辑器右键菜单动作中按需解析，不进入初始应用依赖图。
 
 项目没有 Redux、Zustand、React Query 或前端路由。状态由组件局部 state、Context 和 Tauri 后端持久化共同组成。
 
@@ -157,7 +167,7 @@ flowchart LR
 
 [useSnippets.ts](../src/hooks/useSnippets.ts) 封装：
 
-- 分页摘要查询、按 ID 懒加载完整片段、创建、更新、删除、收藏。
+- 分页摘要查询（`updated` / `recent` 独立 cursor）、按 ID 懒加载完整片段、创建、更新、删除、收藏、使用记录和最多 200 ID 的全有或全无批量收藏/删除。
 - JSON 字符串导出、文件导出和导入。
 - 本地 `SnippetSummary[]`、总数/cursor、独立首屏与 Load More loading/error、标签元数据状态。
 - 以 generation + 查询 key/cursor 抑制迟到的旧查询或旧追加响应；筛选变化总是从第一页重新请求。
@@ -179,16 +189,19 @@ flowchart LR
 | 组件 | 当前职责 |
 |---|---|
 | [Titlebar.tsx](../src/components/Titlebar.tsx) | 自定义无边框标题栏、拖动、最小化、最大化/还原、关闭 |
-| [Toolbar.tsx](../src/components/Toolbar.tsx) | 搜索、语言/收藏过滤、新建、导入导出、同步、主题临时切换、设置入口 |
-| [Sidebar.tsx](../src/components/Sidebar.tsx) | 左侧列表容器 |
-| [SnippetList.tsx](../src/components/SnippetList.tsx) | 语义列表项、独立选择/收藏/删除按钮、相对时间和代码预览 |
+| [Toolbar.tsx](../src/components/Toolbar.tsx) | 搜索、独立语言/收藏筛选、紧凑的 `updated` / `recent` 排序图标、新建、导入导出、命令面板、同步、主题临时切换、设置入口 |
+| [Sidebar.tsx](../src/components/Sidebar.tsx) | 左侧列表容器和批量操作透传 |
+| [SnippetList.tsx](../src/components/SnippetList.tsx) | 语义列表项、独立选择/收藏/删除按钮、当前已加载项的复选选择/批量操作、相对时间和代码预览 |
+| [CommandPalette.tsx](../src/components/CommandPalette.tsx) | 基于共享 ModalSurface 的本地命令过滤、方向键/Home/End/Enter 操作与焦点恢复 |
+| [LazySnippetEditor.tsx](../src/components/LazySnippetEditor.tsx) | 将按尝试生成的 React.lazy editor identity 保持在组件边界；开发 retry 使用独立 Vite query URL |
+| [SnippetEditorLoadBoundary.tsx](../src/components/SnippetEditorLoadBoundary.tsx) | 仅隔离懒加载编辑器的 import/render 失败；保留 App 草稿并提供显式 retry |
 | [SnippetEditor.tsx](../src/components/SnippetEditor.tsx) | 表单、可访问标签 combobox、CodeMirror、主题高亮、复制、Canvas minimap |
 | [languageExtensions.ts](../src/components/languageExtensions.ts) | 编辑器专用的 parser-backed、StreamLanguage 和 plaintext 扩展分类/factory |
 | [Settings.tsx](../src/components/Settings.tsx) | 通用设置、WebDAV、同步历史和关于信息 |
 | [ModalSurface.tsx](../src/components/ModalSurface.tsx) | 共享模态栈、topmost Tab/Escape、背景 inert/ARIA、初始与恢复焦点 |
 | [Dialog.tsx](../src/components/Dialog.tsx) | 基于共享模态 surface 的 Promise 化 `alert`、`confirm`、`ask` 对话框 |
 
-[ModalSurface.tsx](../src/components/ModalSurface.tsx) 维护模块级模态栈和唯一 capture-phase `keydown` listener。Settings panel 与 Promise Dialog 都通过它注册：只有栈顶处理 Tab/Escape；打开时按显式初始目标、标记目标、首个可聚焦元素、容器的顺序决定焦点；祖先分支的背景 sibling 临时设为 `inert` 与 `aria-hidden`；关闭后恢复先前状态和触发器焦点。嵌套 Settings Dialog 因此不会与外层面板建立竞争的 document trap，且保留原有 Save/Discard/Cancel 关闭 guard。
+[ModalSurface.tsx](../src/components/ModalSurface.tsx) 维护模块级模态栈和唯一 capture-phase `keydown` listener。Settings panel、Promise Dialog 与 CommandPalette 都通过它注册：只有栈顶处理 Tab/Escape；打开时按显式初始目标、标记目标、首个可聚焦元素、容器的顺序决定焦点；祖先分支的背景 sibling 临时设为 `inert` 与 `aria-hidden`；关闭后恢复先前状态和触发器焦点。嵌套 Settings Dialog 因此不会与外层面板建立竞争的 document trap，且保留原有 Save/Discard/Cancel 关闭 guard。
 
 ### 3.5 CodeMirror 和 MiniMap
 
@@ -205,7 +218,7 @@ CodeMirror 的语言扩展由 [languageExtensions.ts](../src/components/language
 
 语言 factory 分三类：官方/维护包提供的 parser-backed 扩展；基于 `@codemirror/legacy-modes` 的 `StreamLanguage` 语法着色；以及 plaintext 的显式空扩展。Stream mode 只提供 token stream 高亮，不是完整 Lezer parser，不能假定具备 parser-backed 折叠、结构选择或语言服务语义。
 
-CodeMirror 的编辑 DOM 由库管理，但当前实现并不依靠 Shadow DOM 隔离。选择、光标、滚动和 token 颜色通过 CodeMirror 扩展配置更稳定；全局 CSS 仍负责布局和部分 `.cm-*` 规则。`EditorView.scrollDOM` 仍是唯一主滚动源；自研 minimap/canvas/viewport 对辅助技术隐藏，不取代可键盘滚动的 CodeMirror 编辑器。
+CodeMirror 的编辑 DOM 由库管理，但当前实现并不依靠 Shadow DOM 隔离。选择、光标、滚动和 token 颜色通过 CodeMirror 扩展配置更稳定；全局 CSS 仍负责布局和部分 `.cm-*` 规则。生产构建将 editor runtime、services、UI 以及 web/data/单语言/legacy parser family 输出为有界独立 chunk：它们只在 `SnippetEditor` 首次进入时加载，语言 factory 仍是 editor 内部同步契约，不能因 chunk 拆分而变为异步。`App` 不再静态引用 `EditorView`；仅当用户从 `.cm-editor` 文本菜单执行操作时按需解析 view。`SnippetEditorLoadBoundary` 处于 `App` 与 lazy editor 之间：它不会处理 Suspense 的 pending state，但会截获 rejected import 或 editor render error。`LazySnippetEditor` 在组件边界为每次手动 retry 创建新的 lazy identity；开发 retry 请求新的带 query 绝对 Vite `/src` URL，生产加载路径仍是静态 import。该 remount 继续接收 App 持有的 `selected` 和 controlled `form`，所以草稿不丢失，但 CodeMirror 的 cursor、selection、undo history、minimap 宽度与暂存标签输入等 editor-local 状态会重建。`EditorView.scrollDOM` 仍是唯一主滚动源；自研 minimap/canvas/viewport 对辅助技术隐藏，不取代可键盘滚动的 CodeMirror 编辑器。
 
 ## 4. 后端架构
 
@@ -213,12 +226,13 @@ CodeMirror 的编辑 DOM 由库管理，但当前实现并不依靠 Shadow DOM �
 
 | 模块 | 当前职责 |
 |---|---|
-| [main.rs](../src-tauri/src/main.rs) | Tauri Builder、插件、单实例、窗口显示/关闭、worker 启动和命令注册 |
-| [tray.rs](../src-tauri/src/tray.rs) | 托盘句柄、菜单构造/刷新、菜单与图标事件、窗口唤醒和 `open-settings` / `autostart-toggled` 通知 |
+| [main.rs](../src-tauri/src/main.rs) | Tauri Builder、插件、单实例、窗口显示/关闭、全局快捷键注册、worker 启动和命令注册 |
+| [capture.rs](../src-tauri/src/capture.rs) | 原生 `Ctrl/Cmd+Shift+V`、托盘快速捕获服务、Clipboard Manager 文本读取、普通 revisioned snippet 写入和脱敏完成事件 |
+| [tray.rs](../src-tauri/src/tray.rs) | 托盘句柄、菜单构造/刷新、快速捕获/同步/设置菜单与图标事件、窗口唤醒和 `open-settings` / `autostart-toggled` 通知 |
 | [sync.rs](../src-tauri/src/sync.rs) | 来源标记的同步完成事件、托盘同步适配、自动同步 scheduler、busy 快速重试和失败退避 |
-| [commands.rs](../src-tauri/src/commands.rs) | `#[tauri::command]` IPC 边界、后端时间戳、设置/凭据/自启动事务、受控 URL/目录打开、托盘状态刷新、导出文件、内部错误映射和启动打点 |
+| [commands.rs](../src-tauri/src/commands.rs) | `#[tauri::command]` IPC 边界、后端时间戳、usage/bulk/capture completion 适配、设置/凭据/自启动事务、受控 URL/目录打开、托盘状态刷新、导出文件、内部错误映射和启动打点 |
 | [error.rs](../src-tauri/src/error.rs) | 可序列化 `CommandError`、稳定错误码、安全 fallback、retryable 与可选安全 details |
-| [db.rs](../src-tauri/src/db.rs) | SQLite v4 逐版本迁移、通用升级前备份/失败恢复、严格解码、FTS5、revision head/tombstone/durable revision objects/outbox/remote state、分页摘要/详情、原子 mutation/import、v2 同步 snapshot/validated-plan/exact-ack seams、同步历史 |
+| [db.rs](../src-tauri/src/db.rs) | SQLite v5 逐版本迁移、通用升级前备份/失败恢复、严格解码、FTS5、local-only usage、revision head/tombstone/durable revision objects/outbox/remote state、双排序分页摘要/详情、原子单项与批量 mutation/import、v2 同步 snapshot/validated-plan/exact-ack seams、同步历史 |
 | [settings.rs](../src-tauri/src/settings.rs) | 无 secret `Settings`、`SettingsView` / `SettingsInput`、显式 secret action、旧 JSON 迁移、损坏文件恢复和原子持久化 |
 | [credentials.rs](../src-tauri/src/credentials.rs) | 可注入 `CredentialStore`、稳定 service/account、平台 keyring 实现和测试内存 fake |
 | [paths.rs](../src-tauri/src/paths.rs) | 安装模式判断、数据库/设置/导出路径 |
@@ -256,7 +270,8 @@ sequenceDiagram
     participant Web as React main.tsx
     participant Win as 主窗口
 
-    Main->>Main: 注册 single-instance / clipboard / autostart
+    Main->>Main: 注册 single-instance / clipboard / global-shortcut / autostart
+    Main->>Main: 尝试注册 Ctrl/Cmd+Shift+V；冲突或平台失败只记录脱敏 warning
     Main->>DB: 后台预热数据库和设置；迁移旧凭据或恢复损坏配置
     Main->>DB: 同步读取设置以创建托盘
     Main->>Win: 主窗口保持 visible=false
@@ -295,12 +310,13 @@ sequenceDiagram
 Rust 托盘菜单当前固定为中文：
 
 1. 打开灵藏 SnipVault
-2. 立即同步
-3. 设置
-4. 开机自启（复选项）
-5. 退出
+2. 从剪贴板快速捕获
+3. 立即同步
+4. 设置
+5. 开机自启（复选项）
+6. 退出
 
-左键点击托盘图标会显示主窗口。托盘同步在线程中运行，完成后由 [sync.rs](../src-tauri/src/sync.rs) emit 来源为 `tray` 的 typed `sync-complete`；托盘设置通过受支持的 `open-settings` 窗口事件打开 overlay，不再使用 `window.eval()` 或 WebView 全局函数。前端通过 Tauri 2 `Window.listen(...)` 注册 `sync-complete`、`open-settings` 和 `autostart-toggled`，并保存/清理每个 unlisten 回调。设置保存或托盘切换自启动后都会按 OS plugin 状态（失败时回退持久设置）重建复选菜单。
+左键点击托盘图标会显示主窗口。快速捕获与原生快捷键复用 [capture.rs](../src-tauri/src/capture.rs)：只在显式触发时读取非空文本、在后台建立普通 plaintext snippet 和 usage；不会抢占前台窗口，也不会记录或 emit 正文/标题。完成事件只含 source/success/ID；已挂载的前端刷新权威列表且保留 dirty draft，listener 尚未就绪时可经 `take_quick_capture_completion` 取走最近一次结果。捕获失败或快捷键冲突不阻止应用和托盘入口运行。托盘同步在线程中运行，完成后由 [sync.rs](../src-tauri/src/sync.rs) emit 来源为 `tray` 的 typed `sync-complete`；托盘设置通过受支持的 `open-settings` 窗口事件打开 overlay，不再使用 `window.eval()` 或 WebView 全局函数。前端通过 Tauri 2 `Window.listen(...)` 注册 `sync-complete`、`quick-capture-complete`、`open-settings` 和 `autostart-toggled`，并保存/清理每个 unlisten 回调。设置保存或托盘切换自启动后都会按 OS plugin 状态（失败时回退持久设置）重建复选菜单。
 
 ### 5.4 关闭和自动同步
 
@@ -323,7 +339,7 @@ sequenceDiagram
         Source->>Sync: direct sync_upload
         Sync->>DAV: sync_merge()
         DAV->>Engine: run(deadline)
-        Engine->>Store: load owned v4 snapshot / validated apply / exact commit
+        Engine->>Store: load owned sync snapshot / validated apply / exact commit
         Engine->>Remote: MKCOL / GET + strong ETag / immutable PUT / conditional PUT
         DAV-->>Source: SyncResult / CommandError
         Source->>App: source-tagged local completion
@@ -331,7 +347,7 @@ sequenceDiagram
         Source->>Sync: run_and_emit / scheduler attempt
         Sync->>DAV: sync_merge()
         DAV->>Engine: run(deadline)
-        Engine->>Store: load owned v4 snapshot / validated apply / exact commit
+        Engine->>Store: load owned sync snapshot / validated apply / exact commit
         Engine->>Remote: MKCOL / GET + strong ETag / immutable PUT / conditional PUT
         DAV-->>Sync: result / structured failure / busy
         Sync-->>App: typed sync-complete event
@@ -350,8 +366,13 @@ sequenceDiagram
 
 | 域 | 命令 | 当前用途 |
 |---|---|---|
-| 片段 | `query_snippets` | 返回按 `(updated_at DESC, id DESC)` 排序的有界 `SnippetSummary` 页、下一 cursor 和过滤总数；组合搜索/语言/收藏/精确标签 |
+| 片段 | `query_snippets` | 返回 `sort = updated | recent` 的有界 `SnippetSummary` 页、对应 cursor 和过滤总数；工具栏默认显式传递 `updated`，`updated` 按 `(updated_at DESC, id DESC)`，`recent` 先列有 usage 项再按 `(last_used_at DESC, updated_at DESC, id DESC)`；组合搜索/语言/收藏/精确标签 |
+| 片段 | `record_snippet_usage` | 仅本机写入打开/复制后的 usage，不更改 snippet `updated_at` 或 revision/outbox |
+| 片段 | `set_snippets_favorite` | 接受最多 200 个已规范化 ID，以全有或全无 transaction 设为收藏/取消收藏；只有实际变化项写 revision/object/outbox |
+| 片段 | `delete_snippets` | 接受最多 200 个 ID，先验证全部 live row，再在单一 transaction 写各自 tombstone；任一失败完整回滚 |
 | 片段 | `get_snippet` | 按 ID 返回包含完整正文的 `Snippet`，供选择后懒加载 |
+| 片段 | `take_quick_capture_completion` | 取走最近一个早于 WebView listener 注册的脱敏快速捕获完成结果 |
+| 片段事件 | `quick-capture-complete` | Rust 仅 emit `{ source: global_shortcut | tray, success, snippet_id? }`；绝不包含剪贴板正文、标题或错误细节 |
 | 片段 | `get_snippet_tags` | 返回去重标签元数据，不读取正文 |
 | 片段 | `get_snippets` | 兼容/内部全量接口；主列表不使用 |
 | 片段 | `create_snippet` | 后端生成创建/更新时间并返回最终 `Snippet` |
@@ -412,16 +433,24 @@ sequenceDiagram
     participant DB as SQLite + FTS5
     participant Editor as App / Editor
 
-    UI->>Hook: query / language / favorite 改变
-    Hook->>Cmd: query_snippets(cursor=null, limit=100)
-    Cmd->>DB: literal search + filters + stable cursor page
+    UI->>Hook: query / language / favorite / sort (updated | recent) 改变
+    Hook->>Cmd: query_snippets(sort, cursor=null, limit=100)
+    Cmd->>DB: literal search + filters + sort-specific stable cursor page
     DB-->>Hook: SnippetSummary[] + next_cursor + total
-    Hook-->>UI: replace page if generation still current
+    Hook-->>UI: replace page and clear loaded-item bulk selection if generation still current
     opt Load More
         UI->>Hook: loadMore()
-        Hook->>Cmd: query_snippets(current cursor)
+        Hook->>Cmd: query_snippets(same sort/current cursor)
         Cmd-->>Hook: next summary page
         Hook-->>UI: append if generation/query/cursor still current
+    end
+    opt 已加载项批量整理
+        UI->>Editor: dirty selected target is included
+        Editor-->>UI: Save / Discard / Cancel guard
+        UI->>Hook: setManyFavorite / removeMany (≤200 IDs)
+        Hook->>Cmd: one transaction
+        Cmd-->>Hook: requested/changed/unchanged
+        Hook-->>UI: one authoritative reload
     end
     UI->>Cmd: get_snippet(id) after selection
     Cmd->>DB: strict full row decode
@@ -464,6 +493,7 @@ erDiagram
 
     SNIPPETS ||--|| SNIPPETS_FTS : "external-content rowid"
     SNIPPETS ||--o| SNIPPET_HEADS : "live head"
+    SNIPPETS ||--o| SNIPPET_USAGE : "local use metadata"
 
     SNIPPETS_FTS {
         TEXT title
@@ -476,6 +506,12 @@ erDiagram
         INTEGER singleton PK
         TEXT device_id UK
         TEXT created_at
+    }
+
+    SNIPPET_USAGE {
+        TEXT snippet_id PK
+        TEXT last_used_at
+        INTEGER use_count
     }
 
     SNIPPET_HEADS {
@@ -556,15 +592,17 @@ erDiagram
 
 `snippets.tags` 是 JSON 字符串数组，不是独立标签表。时间使用 RFC 3339 字符串；所有活跃行解码会严格检查必需列类型、0/1 boolean、标签 JSON 数组、字段边界、revision token 和时间，损坏数据显式失败，原生诊断不包含完整正文。`Snippet` 与 `SnippetSummary` 都向 WebView 暴露当前 `revision_id`；v2 wire 通过显式 `RevisionObjectV2` DTO 固定 revision 元数据和可选 live payload，避免本地 domain struct 演进静默改变远端格式。
 
+`snippet_usage` 是 schema v5 的本机派生表：成功打开详情、复制完整正文和快速捕获时写入 `last_used_at`/`use_count`，删除 live snippet 的 trigger 会清理对应行。它既不修改 `snippets.updated_at`，也不连接到 `revision_objects`、`revision_outbox`、remote state 或 WebDAV；JSON 导入/导出同样不包含它，因此不同设备的“最近使用”互不影响。v5 migration 只创建空表，既有片段在升级后没有 usage 历史。
+
 每个本地 create/update/favorite/delete 和每个获胜 import item 都在单个 transaction 中同时更新 live `snippets`、FTS trigger、`snippet_heads`、`revision_objects`，并按需写入 `revision_outbox`。删除移除 live row 并把 head 改为 tombstone；head 因此不依赖 live row 外键。`revision_objects` 保存 canonical JSON、SHA-256、parent/device/time/deleted/origin 元数据，UPDATE trigger 禁止原地修改；outbox 只保存尚未发布确认的 pending copy，待处理上限为 10,000 条或 64 MiB，单 payload 受正文上限加固定余量约束。v2→v3 backfill 按 live row 的稳定字段生成 `legacy-<sha256>` head，不把历史库全部塞入 outbox；v3→v4 从 pending outbox、当前 live heads 和 tombstones 回填 durable objects。
 
 v2 同步 seam 包括一致 snapshot、完整预验证的 remote plan no-echo apply、确定性 conflict copy/index，以及 exact revision-ID publish commit。snapshot 会携带当前 head/outbox 所需的 durable revision-object ancestry；remote apply 不写 outbox但会写入 durable object；publish commit 只删除明确列出的 outbox revision ID，不删除 `revision_objects`，所以较晚本地编辑不会被旧上传确认误清，已确认 ancestry 仍可继续参与后续发布/验证。`sync_remote_state` 与 apply/ack transaction 记录 protocol、strong ETag/hash、generation、bootstrap 和 last-success；这些边界现在由 production `V2SyncEngine` 使用。
 
-`snippets_fts` 是 FTS5 external-content 索引，由 `snippets` 的 insert/update/delete trigger 与 CRUD、导入和 WebDAV merge 事务同步。v2 首选 trigram tokenizer；运行时不支持时记录 `unicode61` fallback，并对所有非空查询使用有界、转义的 LIKE 以保持子串语义。trigram 可用且规范化查询至少 3 字符时使用字面量化 MATCH；短查询使用 LIKE。搜索不做相关度排序，始终按 `updated_at DESC, id DESC` 稳定分页；`%`、`_`、引号和反斜线均按字面值处理，CJK 受测试覆盖。
+`snippets_fts` 是 FTS5 external-content 索引，由 `snippets` 的 insert/update/delete trigger 与 CRUD、导入和 WebDAV merge 事务同步。v2 首选 trigram tokenizer；运行时不支持时记录 `unicode61` fallback，并对所有非空查询使用有界、转义的 LIKE 以保持子串语义。trigram 可用且规范化查询至少 3 字符时使用字面量化 MATCH；短查询使用 LIKE。搜索不做相关度排序：`updated` 固定按 `updated_at DESC, id DESC`，`recent` 仅为本机 usage 回访而先按是否使用、`last_used_at DESC`、`updated_at DESC`、`id DESC`；两个模式各自编码 cursor，避免跨排序 cursor 重复或漏项。`%`、`_`、引号和反斜线均按字面值处理，CJK 受测试覆盖。
 
 `sync_versions` 每次成功同步写一条记录，随后只保留按 `synced_at DESC, id DESC` 排序的最近 20 条；v3 起记录上传、下载、删除、冲突、protocol version 和 manifest generation。当前 production v2 成功记录使用 protocol 2 和实际发布 generation。
 
-数据库通过 `PRAGMA user_version` 维护 schema 版本，当前为 v4。`initialize_connection()` 严格按 v0→v1→v2→v3→v4 顺序迁移：v0→v1 创建业务表并保留“真正新库才 seed”的规则；v1→v2 严格扫描并建立 FTS；v2→v3 创建稳定 device identity、heads/outbox/remote/conflict side tables，扩展 history，并确定性回填 live heads；v3→v4 创建 `revision_objects` 并从 pending outbox、当前 live heads 和 tombstones 回填 durable immutable revision objects。任何既有磁盘 v0/v1/v2/v3 文件在第一步写入前都通过 SQLite online backup 创建和验证唯一 `pre-v4` 同级备份；链中任一步失败会 rollback、保留失败数据库副本并恢复/校验原始版本。新建库和重复打开 v4 不创建升级备份，未来 `user_version` 会在不写入的情况下拒绝。
+数据库通过 `PRAGMA user_version` 维护 schema 版本，当前为 v5。`initialize_connection()` 严格按 v0→v1→v2→v3→v4→v5 顺序迁移：v0→v1 创建业务表并保留“真正新库才 seed”的规则；v1→v2 严格扫描并建立 FTS；v2→v3 创建稳定 device identity、heads/outbox/remote/conflict side tables，扩展 history，并确定性回填 live heads；v3→v4 创建 `revision_objects` 并从 pending outbox、当前 live heads 和 tombstones 回填 durable immutable revision objects；v4→v5 创建 local-only `snippet_usage`、recent 索引和删除清理 trigger。任何既有磁盘 v0/v1/v2/v3/v4 文件在第一步写入前都通过 SQLite online backup 创建和验证唯一 `pre-v5` 同级备份；链中任一步失败会 rollback、保留失败数据库副本并恢复/校验原始版本。新建库和重复打开 v5 不创建升级备份，未来 `user_version` 会在不写入的情况下拒绝。
 
 ### 7.2 设置、凭据与恢复模型
 

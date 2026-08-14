@@ -20,6 +20,7 @@ interface SnippetEditorProps {
   onChange: (f: Partial<SnippetForm>) => void;
   onSave: () => void;
   onCancel: () => void;
+  onCopied?: () => void;
   onClipboardError?: (error: unknown) => void;
   theme: "dark" | "light";
   accentPreset: AccentPreset;
@@ -755,7 +756,7 @@ function TagCombobox({
 export const SnippetTagCombobox = TagCombobox;
 
 export function SnippetEditor({
-  snippet, isNew, form, onChange, onSave, onCancel, onClipboardError,
+  snippet, isNew, form, onChange, onSave, onCancel, onCopied, onClipboardError,
   theme, accentPreset, lineWrap, saving, isDirty, tagOptions,
 }: SnippetEditorProps) {
   const { t } = useTranslation();
@@ -810,12 +811,13 @@ export function SnippetEditor({
     if (!form.content) return;
     try {
       await writeText(form.content);
+      onCopied?.();
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (e) {
       onClipboardError?.(e);
     }
-  }, [form.content, onClipboardError]);
+  }, [form.content, onClipboardError, onCopied]);
 
   const formatDate = (iso: string) => {
     try {

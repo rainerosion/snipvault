@@ -12,7 +12,7 @@ use std::sync::Mutex;
 
 static DB: OnceCell<Mutex<Connection>> = OnceCell::new();
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 const EXPORT_FORMAT_ID: &str = "snipvault.snippets";
 const EXPORT_SCHEMA_VERSION: u32 = 1;
 const OUTBOX_KIND_UPSERT: &str = "upsert";
@@ -39,6 +39,7 @@ const MAX_DESCRIPTION_CHARS: usize = 100_000;
 const MAX_LANGUAGE_CHARS: usize = 64;
 const MAX_TAGS: usize = 100;
 const MAX_TAG_CHARS: usize = 256;
+const MAX_BULK_MUTATION_ITEMS: usize = 200;
 
 pub fn init_db() -> SqliteResult<()> {
     let _ = DB.get_or_try_init(|| {
@@ -199,6 +200,10 @@ fn initialize_connection(conn: &mut Connection) -> SqliteResult<()> {
     }
     if version == 3 {
         migrate_to_v4(conn)?;
+        version = 4;
+    }
+    if version == 4 {
+        migrate_to_v5(conn)?;
     }
 
     Ok(())
@@ -638,6 +643,24 @@ fn migrate_to_v4(conn: &mut Connection) -> SqliteResult<()> {
         )?;
     }
 
+    tx.pragma_update(None, "user_version", 4)?;
+    tx.commit()
+}
+
+fn migrate_to_v5(conn: &mut Connection) -> SqliteResult<()> {
+    let tx = conn.transaction()?;
+    tx.execute_batch(
+        "CREATE TABLE snippet_usage (
+             snippet_id TEXT PRIMARY KEY,
+             last_used_at TEXT NOT NULL,
+             use_count INTEGER NOT NULL DEFAULT 0 CHECK(use_count >= 0)
+         );
+         CREATE INDEX snippet_usage_recent_idx
+             ON snippet_usage(last_used_at DESC, snippet_id DESC);
+         CREATE TRIGGER snippets_usage_ad AFTER DELETE ON snippets BEGIN
+             DELETE FROM snippet_usage WHERE snippet_id=old.id;
+         END;",
+    )?;
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()
 }
@@ -1041,6 +1064,38 @@ pub fn get_snippet(id: &str) -> SqliteResult<Snippet> {
     with_db(|conn| get_snippet_on_connection(conn, id))
 }
 
+pub fn record_snippet_usage(id: &str) -> SqliteResult<()> {
+    with_db_mut(|conn| {
+        let tx = conn.transaction()?;
+        record_snippet_usage_on_connection(&tx, id)?;
+        tx.commit()
+    })
+}
+
+fn record_snippet_usage_on_connection(conn: &Connection, id: &str) -> SqliteResult<()> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM snippets s
+             JOIN snippet_heads h ON h.snippet_id=s.id AND h.deleted=0
+             WHERE s.id=?1
+         )",
+        [id],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+    conn.execute(
+        "INSERT INTO snippet_usage(snippet_id, last_used_at, use_count)
+         VALUES (?1, ?2, 1)
+         ON CONFLICT(snippet_id) DO UPDATE SET
+           last_used_at=excluded.last_used_at,
+           use_count=snippet_usage.use_count + 1",
+        rusqlite::params![id, chrono::Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
 fn get_snippet_on_connection(conn: &Connection, id: &str) -> SqliteResult<Snippet> {
     conn.query_row(
         "SELECT s.id, s.title, s.content, s.language, s.description, s.tags, s.is_favorite, s.created_at, s.updated_at, h.revision_id
@@ -1260,6 +1315,18 @@ pub fn create_snippet(snippet: &Snippet) -> Result<Snippet, MutationError> {
     .map_err(MutationError::Sqlite)
 }
 
+pub fn create_snippet_and_record_usage(snippet: &Snippet) -> Result<Snippet, MutationError> {
+    with_db_mut(|conn| {
+        let tx = conn.transaction()?;
+        let result = create_snippet_on_connection(&tx, snippet, REVISION_ORIGIN_LOCAL)
+            .map_err(mutation_into_sqlite)?;
+        record_snippet_usage_on_connection(&tx, &result.id)?;
+        tx.commit()?;
+        Ok(result)
+    })
+    .map_err(MutationError::Sqlite)
+}
+
 fn mutation_into_sqlite(error: MutationError) -> rusqlite::Error {
     match error {
         MutationError::Sqlite(error) => error,
@@ -1428,6 +1495,14 @@ impl TryFrom<&Row<'_>> for SnippetSummary {
     }
 }
 
+#[derive(Debug, Clone, Default, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SnippetSort {
+    #[default]
+    Updated,
+    Recent,
+}
+
 #[derive(Debug, Clone, Default, serde::Deserialize, PartialEq)]
 pub struct SnippetQuery {
     #[serde(default)]
@@ -1435,6 +1510,8 @@ pub struct SnippetQuery {
     pub language: Option<String>,
     pub favorite: Option<bool>,
     pub exact_tag: Option<String>,
+    #[serde(default)]
+    pub sort: SnippetSort,
     pub limit: Option<usize>,
     pub cursor: Option<String>,
 }
@@ -1447,9 +1524,17 @@ pub struct SnippetQueryResult {
 }
 
 #[derive(Debug)]
-struct DecodedCursor {
-    updated_at: String,
-    id: String,
+enum DecodedCursor {
+    Updated {
+        updated_at: String,
+        id: String,
+    },
+    Recent {
+        usage_bucket: i64,
+        usage_at: String,
+        updated_at: String,
+        id: String,
+    },
 }
 
 fn bounded_preview(content: &str) -> String {
@@ -1463,17 +1548,7 @@ fn bounded_preview(content: &str) -> String {
     content[..end].to_string()
 }
 
-fn encode_cursor(summary: &SnippetSummary) -> String {
-    format!("{}{}{}", summary.updated_at, CURSOR_SEPARATOR, summary.id)
-}
-
-fn decode_cursor(cursor: &str) -> SqliteResult<DecodedCursor> {
-    let (updated_at, id) = cursor.split_once(CURSOR_SEPARATOR).ok_or_else(|| {
-        rusqlite::Error::InvalidParameterName("invalid snippet query cursor".into())
-    })?;
-    chrono::DateTime::parse_from_rfc3339(updated_at).map_err(|_| {
-        rusqlite::Error::InvalidParameterName("invalid snippet query cursor".into())
-    })?;
+fn validate_cursor_id(id: &str) -> SqliteResult<()> {
     if id.is_empty()
         || id.len() > MAX_ID_BYTES
         || id.chars().any(char::is_control)
@@ -1483,10 +1558,70 @@ fn decode_cursor(cursor: &str) -> SqliteResult<DecodedCursor> {
             "invalid snippet query cursor".into(),
         ));
     }
-    Ok(DecodedCursor {
-        updated_at: updated_at.to_string(),
-        id: id.to_string(),
-    })
+    Ok(())
+}
+
+fn validate_cursor_time(value: &str) -> SqliteResult<()> {
+    chrono::DateTime::parse_from_rfc3339(value).map_err(|_| {
+        rusqlite::Error::InvalidParameterName("invalid snippet query cursor".into())
+    })?;
+    Ok(())
+}
+
+fn encode_updated_cursor(summary: &SnippetSummary) -> String {
+    format!(
+        "updated{CURSOR_SEPARATOR}{}{CURSOR_SEPARATOR}{}",
+        summary.updated_at, summary.id
+    )
+}
+
+fn encode_recent_cursor(summary: &SnippetSummary, usage_at: Option<&str>) -> String {
+    let usage_bucket = if usage_at.is_some() { "0" } else { "1" };
+    format!(
+        "recent{CURSOR_SEPARATOR}{usage_bucket}{CURSOR_SEPARATOR}{}{CURSOR_SEPARATOR}{}{CURSOR_SEPARATOR}{}",
+        usage_at.unwrap_or_default(),
+        summary.updated_at,
+        summary.id
+    )
+}
+
+fn decode_cursor(cursor: &str, sort: &SnippetSort) -> SqliteResult<DecodedCursor> {
+    let parts: Vec<&str> = cursor.split(CURSOR_SEPARATOR).collect();
+    match (sort, parts.as_slice()) {
+        (SnippetSort::Updated, ["updated", updated_at, id]) => {
+            validate_cursor_time(updated_at)?;
+            validate_cursor_id(id)?;
+            Ok(DecodedCursor::Updated {
+                updated_at: (*updated_at).to_string(),
+                id: (*id).to_string(),
+            })
+        }
+        (SnippetSort::Recent, ["recent", usage_bucket, usage_at, updated_at, id]) => {
+            let usage_bucket = match *usage_bucket {
+                "0" => 0,
+                "1" if usage_at.is_empty() => 1,
+                _ => {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "invalid snippet query cursor".into(),
+                    ));
+                }
+            };
+            if usage_bucket == 0 {
+                validate_cursor_time(usage_at)?;
+            }
+            validate_cursor_time(updated_at)?;
+            validate_cursor_id(id)?;
+            Ok(DecodedCursor::Recent {
+                usage_bucket,
+                usage_at: (*usage_at).to_string(),
+                updated_at: (*updated_at).to_string(),
+                id: (*id).to_string(),
+            })
+        }
+        _ => Err(rusqlite::Error::InvalidParameterName(
+            "invalid snippet query cursor".into(),
+        )),
+    }
 }
 
 fn escape_like_literal(query: &str) -> String {
@@ -1525,10 +1660,17 @@ fn fts_tokenizer(conn: &Connection) -> SqliteResult<String> {
     )
 }
 
-fn summary_select() -> &'static str {
-    "SELECT s.id, s.title, s.language, s.description, s.tags, s.is_favorite, s.created_at, s.updated_at,
-            h.revision_id, substr(s.content, 1, 769), length(CAST(s.content AS BLOB))
-     FROM snippets s JOIN snippet_heads h ON h.snippet_id=s.id AND h.deleted=0"
+fn summary_select(include_usage: bool) -> &'static str {
+    if include_usage {
+        "SELECT s.id, s.title, s.language, s.description, s.tags, s.is_favorite, s.created_at, s.updated_at,
+                h.revision_id, substr(s.content, 1, 769), length(CAST(s.content AS BLOB)), u.last_used_at
+         FROM snippets s JOIN snippet_heads h ON h.snippet_id=s.id AND h.deleted=0
+         LEFT JOIN snippet_usage u ON u.snippet_id=s.id"
+    } else {
+        "SELECT s.id, s.title, s.language, s.description, s.tags, s.is_favorite, s.created_at, s.updated_at,
+                h.revision_id, substr(s.content, 1, 769), length(CAST(s.content AS BLOB))
+         FROM snippets s JOIN snippet_heads h ON h.snippet_id=s.id AND h.deleted=0"
+    }
 }
 
 pub fn query_snippets(request: &SnippetQuery) -> SqliteResult<SnippetQueryResult> {
@@ -1563,7 +1705,11 @@ fn query_snippets_on_connection(
         .limit
         .unwrap_or(DEFAULT_PAGE_SIZE)
         .clamp(1, MAX_PAGE_SIZE);
-    let cursor = request.cursor.as_deref().map(decode_cursor).transpose()?;
+    let cursor = request
+        .cursor
+        .as_deref()
+        .map(|value| decode_cursor(value, &request.sort))
+        .transpose()?;
     let tokenizer = fts_tokenizer(conn)?;
     let use_fts =
         !normalized.is_empty() && normalized.chars().count() >= 3 && tokenizer == "trigram";
@@ -1575,8 +1721,6 @@ fn query_snippets_on_connection(
         escape_like_literal(normalized)
     };
     let favorite = request.favorite.map(i64::from);
-    let cursor_updated = cursor.as_ref().map(|value| value.updated_at.as_str());
-    let cursor_id = cursor.as_ref().map(|value| value.id.as_str());
 
     let search_predicate = if normalized.is_empty() {
         "1=1"
@@ -1598,32 +1742,114 @@ fn query_snippets_on_connection(
              WHERE tag.type='text' AND tag.value=?4
          ))"
     );
-    let page_sql = format!(
-        "{} WHERE {}
-         AND (?5 IS NULL OR s.updated_at < ?5 OR (s.updated_at = ?5 AND s.id < ?6))
-         ORDER BY s.updated_at DESC, s.id DESC LIMIT ?7",
-        summary_select(),
-        filters
-    );
-    let mut statement = conn.prepare(&page_sql)?;
-    let rows = statement.query_map(
-        rusqlite::params![
-            search_value,
-            request.language,
-            favorite,
-            request.exact_tag,
-            cursor_updated,
-            cursor_id,
-            (limit + 1) as i64
-        ],
-        |row| SnippetSummary::try_from(row),
-    )?;
-    let mut items: Vec<SnippetSummary> = rows.collect::<SqliteResult<_>>()?;
-    let has_more = items.len() > limit;
-    if has_more {
-        items.truncate(limit);
-    }
-    let next_cursor = has_more.then(|| encode_cursor(items.last().expect("non-empty page")));
+
+    let (items, next_cursor) = match request.sort {
+        SnippetSort::Updated => {
+            let (cursor_updated, cursor_id) = match cursor {
+                None => (None, None),
+                Some(DecodedCursor::Updated { updated_at, id }) => (Some(updated_at), Some(id)),
+                Some(DecodedCursor::Recent { .. }) => {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "invalid snippet query cursor".into(),
+                    ));
+                }
+            };
+            let page_sql = format!(
+                "{} WHERE {filters}
+                 AND (?5 IS NULL OR s.updated_at < ?5 OR (s.updated_at = ?5 AND s.id < ?6))
+                 ORDER BY s.updated_at DESC, s.id DESC LIMIT ?7",
+                summary_select(false),
+            );
+            let mut statement = conn.prepare(&page_sql)?;
+            let rows = statement.query_map(
+                rusqlite::params![
+                    search_value,
+                    request.language,
+                    favorite,
+                    request.exact_tag,
+                    cursor_updated,
+                    cursor_id,
+                    (limit + 1) as i64
+                ],
+                |row| SnippetSummary::try_from(row),
+            )?;
+            let mut items: Vec<SnippetSummary> = rows.collect::<SqliteResult<_>>()?;
+            let has_more = items.len() > limit;
+            if has_more {
+                items.truncate(limit);
+            }
+            let next_cursor =
+                has_more.then(|| encode_updated_cursor(items.last().expect("non-empty page")));
+            (items, next_cursor)
+        }
+        SnippetSort::Recent => {
+            let (cursor_bucket, cursor_usage_at, cursor_updated, cursor_id) = match cursor {
+                None => (None, None, None, None),
+                Some(DecodedCursor::Recent {
+                    usage_bucket,
+                    usage_at,
+                    updated_at,
+                    id,
+                }) => (
+                    Some(usage_bucket),
+                    Some(usage_at),
+                    Some(updated_at),
+                    Some(id),
+                ),
+                Some(DecodedCursor::Updated { .. }) => {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "invalid snippet query cursor".into(),
+                    ));
+                }
+            };
+            let page_sql = format!(
+                "{} WHERE {filters}
+                 AND (?5 IS NULL OR
+                    (CASE WHEN u.last_used_at IS NULL THEN 1 ELSE 0 END) > ?5 OR
+                    ((CASE WHEN u.last_used_at IS NULL THEN 1 ELSE 0 END) = ?5 AND (
+                       (?5 = 0 AND (u.last_used_at < ?6 OR (u.last_used_at = ?6 AND (s.updated_at < ?7 OR (s.updated_at = ?7 AND s.id < ?8))))) OR
+                       (?5 = 1 AND (s.updated_at < ?7 OR (s.updated_at = ?7 AND s.id < ?8)))
+                    ))
+                 )
+                 ORDER BY (u.last_used_at IS NULL) ASC, u.last_used_at DESC, s.updated_at DESC, s.id DESC LIMIT ?9",
+                summary_select(true),
+            );
+            let mut statement = conn.prepare(&page_sql)?;
+            let rows = statement.query_map(
+                rusqlite::params![
+                    search_value,
+                    request.language,
+                    favorite,
+                    request.exact_tag,
+                    cursor_bucket,
+                    cursor_usage_at,
+                    cursor_updated,
+                    cursor_id,
+                    (limit + 1) as i64
+                ],
+                |row| {
+                    Ok((
+                        SnippetSummary::try_from(row)?,
+                        row.get::<_, Option<String>>(11)?,
+                    ))
+                },
+            )?;
+            let mut rows: Vec<(SnippetSummary, Option<String>)> =
+                rows.collect::<SqliteResult<_>>()?;
+            let has_more = rows.len() > limit;
+            if has_more {
+                rows.truncate(limit);
+            }
+            let next_cursor = has_more.then(|| {
+                let (summary, usage_at) = rows.last().expect("non-empty page");
+                encode_recent_cursor(summary, usage_at.as_deref())
+            });
+            (
+                rows.into_iter().map(|(summary, _)| summary).collect(),
+                next_cursor,
+            )
+        }
+    };
 
     let count_sql = format!(
         "SELECT COUNT(*) FROM snippets s
@@ -1670,6 +1896,7 @@ pub fn search_snippets(
         language: language_filter.map(str::to_string),
         favorite: None,
         exact_tag: tag_filter.map(str::to_string),
+        sort: SnippetSort::Updated,
         limit: Some(MAX_PAGE_SIZE),
         cursor: None,
     })?;
@@ -1678,6 +1905,156 @@ pub fn search_snippets(
         .iter()
         .map(|summary| get_snippet(&summary.id))
         .collect()
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct BulkMutationResult {
+    pub requested_count: usize,
+    pub changed_count: usize,
+    pub unchanged_count: usize,
+}
+
+fn normalize_bulk_ids(ids: &[String]) -> Result<Vec<String>, MutationError> {
+    if ids.is_empty() || ids.len() > MAX_BULK_MUTATION_ITEMS {
+        return Err(MutationError::Sqlite(
+            rusqlite::Error::InvalidParameterName("invalid bulk snippet mutation request".into()),
+        ));
+    }
+    let mut normalized = ids.to_vec();
+    normalized.sort();
+    normalized.dedup();
+    if normalized.len() > MAX_BULK_MUTATION_ITEMS
+        || normalized
+            .iter()
+            .any(|id| id.is_empty() || id.len() > MAX_ID_BYTES || id.chars().any(char::is_control))
+    {
+        return Err(MutationError::Sqlite(
+            rusqlite::Error::InvalidParameterName("invalid bulk snippet mutation request".into()),
+        ));
+    }
+    Ok(normalized)
+}
+
+fn set_snippet_favorite_on_connection(
+    conn: &Connection,
+    mut snippet: Snippet,
+    is_favorite: bool,
+) -> Result<Option<Snippet>, MutationError> {
+    if snippet.is_favorite == is_favorite {
+        return Ok(None);
+    }
+    let parent_revision_id = snippet.revision_id.clone();
+    snippet.is_favorite = is_favorite;
+    snippet.updated_at = chrono::Utc::now().to_rfc3339();
+    snippet.revision_id = uuid::Uuid::new_v4().to_string();
+    let payload = canonical_revision_payload(&snippet, false)?;
+    let hash = sha256_hex(payload.as_bytes());
+    let device_id = local_device_id(conn)?;
+    write_snippet_row(conn, &snippet)?;
+    insert_revision(
+        conn,
+        &snippet.id,
+        Some(&parent_revision_id),
+        &snippet.revision_id,
+        &device_id,
+        &hash,
+        &snippet.updated_at,
+        false,
+        OUTBOX_KIND_UPSERT,
+        REVISION_ORIGIN_LOCAL,
+        &payload,
+        None,
+        true,
+    )?;
+    Ok(Some(snippet))
+}
+
+pub fn set_snippets_favorite(
+    ids: &[String],
+    is_favorite: bool,
+) -> Result<BulkMutationResult, MutationError> {
+    let ids = normalize_bulk_ids(ids)?;
+    let result = with_db_mut(|conn| {
+        let tx = conn.transaction()?;
+        let snippets = ids
+            .iter()
+            .map(|id| get_snippet_on_connection(&tx, id))
+            .collect::<SqliteResult<Vec<_>>>()?;
+        let mut changed_count = 0;
+        for snippet in snippets {
+            if set_snippet_favorite_on_connection(&tx, snippet, is_favorite)
+                .map_err(mutation_into_sqlite)?
+                .is_some()
+            {
+                changed_count += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(BulkMutationResult {
+            requested_count: ids.len(),
+            changed_count,
+            unchanged_count: ids.len() - changed_count,
+        })
+    });
+    result.map_err(mutation_from_sqlite)
+}
+
+fn delete_snippet_on_connection(
+    conn: &Connection,
+    id: &str,
+) -> Result<RevisionHead, MutationError> {
+    let existing = get_snippet_on_connection(conn, id)?;
+    let revision_id = uuid::Uuid::new_v4().to_string();
+    let deleted_at = chrono::Utc::now().to_rfc3339();
+    let payload = canonical_tombstone_payload_sqlite(id, &deleted_at)?;
+    let hash = sha256_hex(payload.as_bytes());
+    let device_id = local_device_id(conn)?;
+    conn.execute("DELETE FROM snippets WHERE id=?1", [id])?;
+    insert_revision(
+        conn,
+        id,
+        Some(&existing.revision_id),
+        &revision_id,
+        &device_id,
+        &hash,
+        &deleted_at,
+        true,
+        OUTBOX_KIND_DELETE,
+        REVISION_ORIGIN_LOCAL,
+        &payload,
+        None,
+        true,
+    )?;
+    Ok(RevisionHead {
+        snippet_id: id.to_string(),
+        revision_id,
+        parent_revision_id: Some(existing.revision_id),
+        device_id,
+        content_hash: hash,
+        revision_time: deleted_at,
+        deleted: true,
+    })
+}
+
+pub fn delete_snippets(ids: &[String]) -> Result<BulkMutationResult, MutationError> {
+    let ids = normalize_bulk_ids(ids)?;
+    let result = with_db_mut(|conn| {
+        let tx = conn.transaction()?;
+        // Validate the entire batch before mutating any live snippet.
+        for id in &ids {
+            get_snippet_on_connection(&tx, id)?;
+        }
+        for id in &ids {
+            delete_snippet_on_connection(&tx, id).map_err(mutation_into_sqlite)?;
+        }
+        tx.commit()?;
+        Ok(BulkMutationResult {
+            requested_count: ids.len(),
+            changed_count: ids.len(),
+            unchanged_count: 0,
+        })
+    });
+    result.map_err(mutation_from_sqlite)
 }
 
 pub fn toggle_favorite(id: &str) -> Result<Snippet, MutationError> {
@@ -3273,7 +3650,7 @@ mod tests {
             .unwrap()
             .file_name()
             .to_string_lossy()
-            .contains("new.db.pre-v4")));
+            .contains("new.db.pre-v5")));
 
         let current_path = directory.join("current.db");
         {
@@ -3285,7 +3662,7 @@ mod tests {
             .unwrap()
             .file_name()
             .to_string_lossy()
-            .contains("current.db.pre-v4")));
+            .contains("current.db.pre-v5")));
 
         let high_path = directory.join("future.db");
         {
@@ -3298,7 +3675,7 @@ mod tests {
             .unwrap()
             .file_name()
             .to_string_lossy()
-            .contains("future.db.pre-v4")));
+            .contains("future.db.pre-v5")));
 
         let corrupt_v1_path = directory.join("corrupt-v1.db");
         {
@@ -3324,7 +3701,7 @@ mod tests {
             .unwrap()
             .file_name()
             .to_string_lossy()
-            .contains("corrupt-v1.db.pre-v4")));
+            .contains("corrupt-v1.db.pre-v5")));
         drop(restored_v1);
 
         let corrupt_v2_path = directory.join("corrupt-v2.db");
@@ -3351,7 +3728,7 @@ mod tests {
             .unwrap()
             .file_name()
             .to_string_lossy()
-            .contains("corrupt-v2.db.pre-v4")));
+            .contains("corrupt-v2.db.pre-v5")));
 
         drop(restored_v2);
         fs::remove_dir_all(directory).unwrap();
@@ -3383,6 +3760,8 @@ mod tests {
         migrate_to_v3(&mut conn).unwrap();
         assert_eq!(schema_version(&conn).unwrap(), 3);
         migrate_to_v4(&mut conn).unwrap();
+        assert_eq!(schema_version(&conn).unwrap(), 4);
+        migrate_to_v5(&mut conn).unwrap();
         assert_eq!(schema_version(&conn).unwrap(), SCHEMA_VERSION);
         let first_device = local_device_id(&conn).unwrap();
         assert!(uuid::Uuid::parse_str(&first_device).is_ok());
@@ -3480,6 +3859,8 @@ mod tests {
         .unwrap();
 
         migrate_to_v4(&mut conn).unwrap();
+        assert_eq!(schema_version(&conn).unwrap(), 4);
+        migrate_to_v5(&mut conn).unwrap();
         assert_eq!(schema_version(&conn).unwrap(), SCHEMA_VERSION);
         assert_eq!(local_device_id(&conn).unwrap(), device_id);
         for (revision_id, expected_payload, deleted) in [

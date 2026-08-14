@@ -30,6 +30,7 @@ fn build_tray_menu(
     auto_start: bool,
 ) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     let show_item = MenuItemBuilder::with_id("show", "打开 灵藏 SnipVault").build(app)?;
+    let capture_item = MenuItemBuilder::with_id("quick-capture", "从剪贴板快速捕获").build(app)?;
     let sync_item = MenuItemBuilder::with_id("sync", "立即同步").build(app)?;
     let settings_item = MenuItemBuilder::with_id("settings", "设置").build(app)?;
     let autostart_item = CheckMenuItemBuilder::with_id("autostart", "开机自启")
@@ -40,6 +41,7 @@ fn build_tray_menu(
     MenuBuilder::new(app)
         .item(&show_item)
         .separator()
+        .item(&capture_item)
         .item(&sync_item)
         .item(&settings_item)
         .separator()
@@ -89,6 +91,9 @@ fn build_tray(app: &AppHandle) -> tauri::Result<TrayIcon> {
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => reveal_main_window(app),
+            "quick-capture" => {
+                crate::capture::run_quick_capture(app.clone(), crate::capture::QuickCaptureSource::Tray);
+            }
             "sync" => {
                 reveal_main_window(app);
                 let app_handle = app.clone();

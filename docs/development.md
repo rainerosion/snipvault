@@ -48,6 +48,14 @@ npm run tauri build
 
 不要把“先运行 `npm run build` 再运行 `tauri dev`”当作避免 Rust 重建的优化。`tauri dev` 的 [tauri.conf.json](../src-tauri/tauri.conf.json) 明确配置了 `beforeDevCommand: npm run dev`，并加载 `http://localhost:1420`，不会复用之前生成的 `dist/` 代替 Vite dev server。
 
+### 2.1 Vite 开发服务器与懒加载编辑器
+
+`npm run tauri:dev` 应是当前检出目录的唯一 Vite owner；不要在同一目录另起 `npm run dev`，因为 1420 使用严格端口，第二个进程不会自动改用其他端口。Vite dev 模式中，首次选择片段或新建草稿才会请求 lazy `SnippetEditor` 模块，因此已停止的 1420 server 会在此时表现为动态 import 失败；它不证明 CodeMirror/editor module 终止了 Vite。
+
+`SnippetEditorLoadBoundary` 会把这类 rejected import/render failure 保持在右侧 pane，允许用户在恢复 server 后点击 Retry。Retry 不会重启 Vite 或自动轮询，开发环境只会请求一个新的带尝试 query 的绝对 `/src` module URL，避免复用已 rejected 的浏览器 import；生产构建仍使用静态 lazy import，不能依赖 localhost Vite server。
+
+要安全诊断 Vite 本身的退出，请使用没有真实数据库、凭据或 WebDAV 配置的隔离环境：先仅以前台终端启动 `npm run dev` 并保留完整 stdout/stderr 与退出码，再在浏览器开发者控制台执行 `await import("/src/components/SnippetEditor.tsx")`。若仍在运行的 Vite 返回 HTTP transform 报错或进程退出，以终端的最后诊断定位问题；对 native 路径只运行 `npm run tauri:dev`，不要同时启动第二个 Vite。出现故障后可用 `netstat -ano | findstr :1420` 确认监听状态。不得为掩盖此问题恢复 idle editor prefetch、弱化 strict port 或在没有终端证据时调整生产 chunk 配置。
+
 ## 3. 当前质量保障状态
 
 仓库已提供以下独立前端与仓库完整性命令：
@@ -64,9 +72,9 @@ npm run tauri build
 | `npm run icons` | 用 Tauri icon generator 从 [assets/app-icon.png](../assets/app-icon.png) 生成 [src-tauri/icons/](../src-tauri/icons/) |
 | `npm run icons:check` | 校验 canonical icon source、生成 PNG/ICO/ICNS magic 与尺寸、Tauri 配置引用，并拒绝旧重复图标生成器/输出 |
 
-前端测试使用 Vitest、jsdom、React Testing Library、`user-event` 和 `jest-axe`。共享 [setup.ts](../src/test/setup.ts) 提供 Testing Library 清理、jest-dom/axe 断言，以及 Tauri core invoke、event、clipboard 和 window API mock。测试现在覆盖窗口控制、列表/工具栏语义与名称、嵌套模态焦点、Settings 关闭 guard、标签 combobox、文本菜单范围/导航、HTML `lang` 同步、语言扩展穷尽分类，以及既有片段/设置/同步/安全工作流；它们仍不是应用级 E2E。
+前端测试使用 Vitest、jsdom、React Testing Library、`user-event` 和 `jest-axe`。共享 [setup.ts](../src/test/setup.ts) 提供 Testing Library 清理、jest-dom/axe 断言，以及 Tauri core invoke、event、clipboard 和 window API mock。测试现在覆盖窗口控制、列表/工具栏语义与名称、嵌套模态焦点、Settings 关闭 guard、标签 combobox、文本菜单范围/导航、HTML `lang` 同步、语言扩展穷尽分类，以及既有片段/设置/同步/安全工作流；它们仍不是应用级 E2E。命令面板、原生全局快捷键、托盘捕获、真实剪贴板可用性、recent cursor 和批量 mutation 的新增生产路径没有新测试代码（遵循本任务不新增测试代码的约束），必须通过对应的现有 gate 和隔离的真实 Tauri smoke 补充验证。
 
-Rust 测试覆盖数据库数据格式、v3/v4 migration/FTS/query、ignored benchmark、凭据/设置恢复、command transaction、scheduler/event/tray pure logic，以及 WebDAV v1/v2 protocol、transport、engine 和 store seams。当前 `tiny_http` suite 只绑定 `127.0.0.1:0`，使用专用 `/dedicated-test-root/snipvault/` 路径和 fake/in-memory store；除保留的 v1 transport/engine 行为外，也覆盖 v2 精确 marker/object/manifest 路径、条件请求头、parsed metadata、不可变对象碰撞恢复，以及 fresh v2 engine bootstrap/exact acknowledgement。其余 legacy cutover、ambiguous hard-stop、CAS exhaustion、crash/retry 和并发矩阵仍主要由 synthetic/pure unit tests 覆盖。它不访问真实用户数据库、平台凭据库或真实 WebDAV 服务。
+Rust 测试覆盖数据库数据格式、v3/v4/v5 migration/FTS/query、ignored benchmark、凭据/设置恢复、command transaction、scheduler/event/tray pure logic，以及 WebDAV v1/v2 protocol、transport、engine 和 store seams。当前 `tiny_http` suite 只绑定 `127.0.0.1:0`，使用专用 `/dedicated-test-root/snipvault/` 路径和 fake/in-memory store；除保留的 v1 transport/engine 行为外，也覆盖 v2 精确 marker/object/manifest 路径、条件请求头、parsed metadata、不可变对象碰撞恢复，以及 fresh v2 engine bootstrap/exact acknowledgement。其余 legacy cutover、ambiguous hard-stop、CAS exhaustion、crash/retry 和并发矩阵仍主要由 synthetic/pure unit tests 覆盖。它不访问真实用户数据库、平台凭据库或真实 WebDAV 服务。
 
 普通 [ci.yml](../.github/workflows/ci.yml) 在 push 和 pull request 上运行 Linux full gate：`npm ci`、format/lint/typecheck/frontend test/build、文档链接、版本一致性、图标完整性，以及 Rust fmt/check/clippy/test。workflow 不打包、不签名、不上传、不发布。发布产物仍由独立 [release.yml](../.github/workflows/release.yml) 处理。
 
@@ -92,10 +100,11 @@ cargo test --manifest-path src-tauri/Cargo.toml
 src/
 ├── main.tsx                 # 共享启动设置、SettingsProvider、语言和前端 ready
 ├── boot.ts / boot.css       # Vite 管理的主题 anti-flash 和 splash 样式
-├── App.tsx                  # 根业务、片段 reconciliation、同步完成协调、事件和快捷键
+├── App.tsx                  # 根业务、片段 reconciliation、同步/快速捕获完成协调、命令注册、批量选择和快捷键
 ├── index.css                # 全局主题变量和布局样式
-├── types/index.ts           # 前端 Snippet / SnippetForm
+├── types/index.ts           # 前端 Snippet / SnippetForm / query、usage、bulk 协议
 ├── components/
+│   ├── CommandPalette.tsx    # 共享 ModalSurface 的命令面板
 │   ├── ModalSurface.tsx      # 共享嵌套模态栈、focus trap 和焦点恢复
 │   ├── languageExtensions.ts # 编辑器专用 parser/stream/plaintext 分类与 factory
 │   └── ...                   # UI、编辑器、设置和 Dialog
@@ -107,6 +116,7 @@ src/
 
 src-tauri/
 ├── src/main.rs              # Tauri 启动、插件、窗口生命周期和 worker wiring
+├── src/capture.rs           # 原生快速捕获、全局快捷键和脱敏完成事件
 ├── src/tray.rs              # 托盘所有权、菜单、事件与状态刷新
 ├── src/sync.rs              # typed sync event 和自动同步 scheduler
 ├── src/commands.rs          # IPC command 与内部错误边界映射
@@ -136,8 +146,8 @@ src-tauri/
 ### 5.1 在现有分层中放置代码
 
 - **可复用展示和局部交互**：优先放到 `src/components/`。
-- **根业务流程、片段选择、跨组件状态**：当前集中在 [App.tsx](../src/App.tsx)；新增较大能力时先评估是否需要提取 Hook/Context，避免继续扩大单文件职责。
-- **Tauri IPC 与片段状态**：放在 [useSnippets.ts](../src/hooks/useSnippets.ts)。
+- **根业务流程、片段选择、跨组件状态**：当前集中在 [App.tsx](../src/App.tsx)；命令 registry、command enabled 状态、当前已加载项的 `Set<string>` 批量选择、dirty-editor guard 和捕获完成后的权威 reload 都必须继续通过该层协调，避免在命令面板/列表中复制业务逻辑。
+- **Tauri IPC 与片段状态**：放在 [useSnippets.ts](../src/hooks/useSnippets.ts)；`updated` 与 `recent` 排序字段都必须进入 request key，`recent` cursor 不得与 `updated` cursor 混用。usage 写入可 best-effort，但批量 mutation 必须直接等待结果。
 - **设置、同步状态与设置 IPC**：扩展 [useSettings.ts](../src/hooks/useSettings.ts) 中的 root `SettingsProvider` 和 injectable `SettingsApi`；消费者必须使用 provider，不得重新引入独立 `useSettings()` state 实例或绕过 provider 的 `get_settings` fallback。
 - **共享协议类型**：更新 [types/index.ts](../src/types/index.ts)，并同步核对 Rust 参数和序列化名称。
 - **外观与界面配色**：深浅偏好与 `sky | violet | emerald | amber | rose | white` 精选界面配色是独立的 persisted Settings 字段；类型、normalizer、启动镜像键和 `data-theme` / `data-accent` 写入集中在 [theme.ts](../src/theme.ts)。`ThemeProvider` 必须只消费根级 `SettingsProvider` 的权威 SettingsView；Settings 面板不得直接写 DOM attribute/localStorage 或成为第二个外观状态来源。六个精选值均须在 `index.css` 提供显式 dark × light 的 12 组完整 semantic token matrix（其中 `white` 的界面名称为“简约白”，并复现初始版本的中性深浅界面）。组件不得加入 palette-dependent raw 色值。不得把 preset 扩展为 raw CSS/hex 输入，也不得改变 syntax token、语言标签或状态语义。
@@ -186,6 +196,8 @@ src-tauri/
 - 修改编辑器主题、光标、选区、滚动或换行：更新 `buildMainExtensions()` 中的 `EditorView.theme()` / `HighlightStyle`。编辑器 surface/gutter/active gutter、光标、选区、匹配括号和 MiniMap viewport 必须只使用 `--editor-*` / `--minimap-*` 语义 token，不能重新硬编码 preset 色。Canvas 的背景色应从 `.minimap-pane` 的计算 token 读取，并在有效深浅模式或精选配色变化时重绘；syntax highlighter 仍必须先注册项目复合 `HighlightStyle`，再注册 UIW GitHub 主题，使它与 Codeglance 共用的 class 颜色在真实编辑区中具有最终级联优先级；不得额外添加会覆盖该顺序的 syntax highlighter。
 - 修改 Codeglance：复用 `MiniMap` 与 [syntaxHighlight.ts](../src/components/syntaxHighlight.ts) 的共享语言/语法高亮范围适配器；不要再建立独立正则 tokenizer 或硬编码 token 调色板。
 - 修改滚动：以 `EditorView.scrollDOM` 为主滚动源，不额外截获 wheel 事件。
+- 编辑器只在 `SnippetEditor` 首次渲染时通过 [LazySnippetEditor.tsx](../src/components/LazySnippetEditor.tsx) 的 lazy boundary 加载；不得在 `App.tsx` 静态导入 CodeMirror runtime 或无用户编辑意图时 idle-prefetch。`SnippetEditorLoadBoundary` 只能隔离懒模块被拒绝或 editor render 的 pane 级失败：Retry 必须由用户显式触发、由 `LazySnippetEditor` 在组件边界创建新的 lazy identity 并继续使用 App 持有的 selection/form；不得自动轮询、重启 Vite、重取详情或清空草稿。开发 retry 可使用独立 Vite `/src` query URL 避免浏览器缓存 rejected import，生产初始和 retry 路径必须继续有静态可分析的 editor import。文本菜单只有在明确命中 `.cm-editor` 时才可在其异步 action 内按需解析 `EditorView`，解析失败必须安全关闭，不得转而对其他元素执行操作。
+- [vite.config.ts](../vite.config.ts) 必须将 CodeMirror runtime、services、UI 与 parser/stream language family 分配到有界语义 chunk；新增语言包及其 Lezer grammar 必须进入对应 family，不能恢复 `@codemirror`/`@lezer`/`codemirror` 的宽泛 catch-all，也不能提高 `chunkSizeWarningLimit` 隐藏超限。chunk 拆分只能改变传输与缓存边界，`getLanguageExtensions()`、Codeglance 解析和同步 minimap 高亮仍必须在 editor 内保持当前同步共享契约；若要做按语言异步加载，需要独立设计 reconfigure、stale-result 和 fallback 流程。
 
 ### 6.2 DOM 和样式事实
 
@@ -213,12 +225,14 @@ src-tauri/
 
 ### 6.4 可访问交互约束
 
-Settings 和 Promise Dialog 必须复用 [ModalSurface.tsx](../src/components/ModalSurface.tsx)，不得增加第二套 document/window Tab/Escape trap。模态必须提供稳定 label/description ID、确定性初始焦点，并保留 topmost ownership、背景 inert/ARIA 和焦点恢复。关闭 Settings 的所有入口仍须通过异步 Save/Discard/Cancel guard。
+Settings 和 Promise Dialog 必须复用 [ModalSurface.tsx](../src/components/ModalSurface.tsx)，不得增加第二套 document/window Tab/Escape trap。命令面板也必须复用它：使用稳定的 dialog label/description、初始搜索框焦点、listbox/option、`aria-activedescendant`、Arrow/Home/End/Enter 和关闭后的触发器焦点恢复；命令执行前先关闭面板。模态必须保留 topmost ownership、背景 inert/ARIA 和焦点恢复。关闭 Settings 的所有入口仍须通过异步 Save/Discard/Cancel guard。
 
-列表项不得通过可点击 `div` 模拟按钮，也不得把收藏/删除嵌套在选择按钮内。标签建议沿用 combobox/listbox/option 和 active-descendant 键盘模型；自定义 context menu 只可接管明确支持的可编辑文本目标，其他区域必须保留原生菜单。图标按钮同步中英文名称，二态按钮使用 `aria-pressed`，异步状态按场景使用 `aria-busy`/live region。
+列表项不得通过可点击 `div` 模拟按钮，也不得把收藏/删除嵌套在选择按钮内。批量复选框需要包含片段标题的可访问名称、可见 selected count 和最多 200 个当前已加载项的边界；勾选不应打开详情或干扰脏草稿导航。标签建议沿用 combobox/listbox/option 和 active-descendant 键盘模型；自定义 context menu 只可接管明确支持的可编辑文本目标，其他区域必须保留原生菜单。图标按钮同步中英文名称，二态按钮使用 `aria-pressed`，异步状态按场景使用 `aria-busy`/live region。
 
 布局或动画修改还必须保持共享 `:focus-visible` 和 `prefers-reduced-motion` 行为。不要把 `overflow: hidden` 放到导致 `EditorView.scrollDOM` 无法解析高度的祖先；minimap 保持辅助技术隐藏且不能成为编辑器键盘访问的替代路径。
 
+
+## 7. Tauri IPC、原生捕获与事件
 
 ### 7.1 新增命令
 
@@ -229,10 +243,22 @@ Settings 和 Promise Dialog 必须复用 [ModalSurface.tsx](../src/components/Mo
 3. 在 [main.rs](../src-tauri/src/main.rs) 的 `tauri::generate_handler!` 注册。
 4. 在前端 Hook 中调用 `invoke()`。
 5. 同步 TypeScript 请求/响应类型和 Rust serde 命名。
-6. 若使用新 Tauri 插件或系统 API，更新 [default capability](../src-tauri/capabilities/default.json) 和必要的 [tauri.conf.json](../src-tauri/tauri.conf.json) scope。
+6. 若使用新 Tauri 插件或系统 API，审查 [default capability](../src-tauri/capabilities/default.json) 和必要的 [tauri.conf.json](../src-tauri/tauri.conf.json) scope；只增加 WebView 实际调用所需的最小 capability。
 7. 更新 [架构设计的 IPC 契约](architecture.md#6-ipc-契约) 和相关功能文档。
 
-### 7.2 参数和错误
+批量 mutation 的 command 参数必须先受限、排序、去重并验证全部 live ID，再在一个 SQLite transaction 内处理；客户端不可用 `Promise.all` 拼接多个单项调用来伪造“批量”。收藏必须是幂等的显式设值，未改变项不生成 revision/object/outbox；删除为每一有效片段生成独立 tombstone。业务写入成功后，前端只做一次权威 reload；reload 失败应和 mutation 失败分开反馈。
+
+### 7.2 原生快速捕获和事件生命周期
+
+[capture.rs](../src-tauri/src/capture.rs) 统一原生全局 `Ctrl/Cmd+Shift+V` 与托盘“从剪贴板快速捕获”入口。仅在这两个明确用户动作触发时，后台线程才读取纯文本剪贴板；空白、读取失败或写入失败都以脱敏失败结果结束。它创建普通的 `plaintext` 片段，并在同一 transaction 内写入正常 live/FTS/head/revision-object/outbox 链路及仅本地的 usage；不得为托盘或快捷键实现第二条绕过 revision/outbox 的保存路径。
+
+全局快捷键在 Rust 原生侧注册：注册冲突或平台失败仅记录安全的通用诊断，不能阻止启动，托盘入口仍需可用。插件的 native registration **不**意味着 WebView 获得 global-shortcut capability；除非前端实际要调用该插件，不得在 default capability 加入 `global-shortcut:*`。剪贴板正文、推导标题、底层错误、凭据和本地路径不得写日志、返回 IPC 或进入事件。现有 clipboard-manager capability 也不能扩展为任意 shell/file/network scope。
+
+完成事件 `quick-capture-complete` 和 fallback command 只携带 `source`、`success` 与可选 `snippet_id`。原生层以单槽 latest-completion 缓存弥补前端 listener 尚未注册的窗口；前端收到实时事件时也读取一次 fallback 以消费该槽，并按成功 `snippet_id` 去重。捕获只允许一个 in-flight 操作，重复快速触发安全忽略；不要用 clipboard 内容来判断重复。成功后由 [App.tsx](../src/App.tsx) 进行权威列表刷新并保留 dirty draft，失败只显示短暂非模态反馈。
+
+命令面板是纯前端 `Ctrl/Cmd+K` 工作流，不注册第二个全局快捷键。命令定义由 `App.tsx` 提供并复用已有 handler；Settings 或 Promise Dialog 打开时不响应，执行命令前先关闭面板，使后续 dirty guard/confirm Dialog 保持唯一 topmost owner。“聚焦代码片段搜索”不得在 command handler 中直接调用输入框 `focus()`：此时 palette 仍挂载，工具栏位于 inert 背景内，且 `ModalSurface` 的卸载会恢复触发元素焦点。应由 `App` 记录关闭后的焦点意图，并在 `commandPaletteOpen` 变为 false 的 effect 中、ModalSurface cleanup 之后聚焦工具栏输入框。
+
+### 7.3 参数和错误
 
 现有活跃 fallible command 在 [commands.rs](../src-tauri/src/commands.rs) 边界返回 [error.rs](../src-tauri/src/error.rs) 的 `CommandError`。稳定 code 集合为：
 
@@ -257,11 +283,11 @@ Settings 和 Promise Dialog 必须复用 [ModalSurface.tsx](../src/components/Mo
 新增或修改命令时必须：
 
 - 在 command adapter 将内部 `rusqlite::Error` / `String` / plugin error 映射到稳定 code、安全 fallback、`retryable` 和可选安全 `details`。
-- 只在 Rust 原生侧记录内部原因；不要把 credential、完整敏感 URL、远端响应体、本地路径、SQL 诊断或任意 source error 复制到公开字段。
+- 只在 Rust 原生侧记录内部原因；不要把 credential、完整敏感 URL、远端响应体、剪贴板正文、推导标题、本地路径、SQL 诊断或任意 source error 复制到公开字段。
 - 前端使用 [commandErrors.ts](../src/utils/commandErrors.ts) 的 `normalizeCommandError()` / `localizeCommandError()`，并同步更新 [zh.json](../src/i18n/locales/zh.json) 与 [en.json](../src/i18n/locales/en.json)。不要 `String(error)` 后直接显示。
 - 未知 object、普通字符串、`Error` 和 malformed JSON rejection 必须安全回退 `unknown`。
 - 检查 SQL 受影响行数，将不存在 ID 映射为 `not_found`，避免静默成功。
-- 为新 code 或映射补充 Rust serialization/redaction 测试和前端 normalization/localization 测试。
+- 后续新增稳定 code 或 error mapping 时，需要按正常质量要求补充序列化、redaction、normalization 与 localization 验证；本阶段按用户约束不新增测试代码。
 
 Tauri 2 window event 使用 `getCurrentWindow().listen(...)`；异步注册必须保存并在组件卸载时调用返回的 unlisten。不要通过 `as any` 调用不存在的 `Window.on(...)`，也不要用 `window.eval()` 或 WebView 全局函数代替受支持的 typed event。托盘逻辑归 [tray.rs](../src-tauri/src/tray.rs)，同步事件/scheduler 归 [sync.rs](../src-tauri/src/sync.rs)，`main.rs` 只负责 wiring 和生命周期。
 
@@ -275,7 +301,9 @@ Tauri 2 window event 使用 `getCurrentWindow().listen(...)`；异步注册必�
 
 ### 8.2 Schema 变更
 
-数据库使用 `PRAGMA user_version`，当前 schema v4，`initialize_connection()` 只按 `v0→v1→v2→v3→v4` 顺序执行迁移：v1 建立业务表，v2 严格扫描既有行并建立/回填 FTS5 与 triggers，v3 保持 `snippets`/FTS 设计不变并增加稳定设备身份、revision head/tombstone、不可变 durable outbox、remote state、conflict index 和扩展 sync history，v4 增加 durable `revision_objects` 并从 outbox、当前 live heads 和 tombstones 回填 ancestry。既有磁盘 v0/v1/v2/v3 在任何升级步骤前只创建并验证一个来源版本的 `pre-v4` online backup；任一步失败都会保留失败副本、恢复并重新验证原来源版本。真正新库、v4 重开和未来版本拒绝不创建升级备份。
+数据库使用 `PRAGMA user_version`，当前 schema v5，`initialize_connection()` 只按 `v0→v1→v2→v3→v4→v5` 顺序执行迁移：v1 建立业务表，v2 严格扫描既有行并建立/回填 FTS5 与 triggers，v3 保持 `snippets`/FTS 设计不变并增加稳定设备身份、revision head/tombstone、不可变 durable outbox、remote state、conflict index 和扩展 sync history，v4 增加 durable `revision_objects` 并从 outbox、当前 live heads 和 tombstones 回填 ancestry，v5 增加本机 `snippet_usage`、recent index 和 live-snippet 删除清理 trigger。既有磁盘 v0/v1/v2/v3/v4 在任何升级步骤前只创建并验证一个来源版本的 `pre-v5` online backup；任一步失败都会保留失败副本、恢复并重新验证原来源版本。真正新库、v5 重开和未来版本拒绝不创建升级备份。
+
+`snippet_usage` 只用于本机“最近使用”：打开详情、复制已保存正文和快速捕获可 best-effort 写入 `last_used_at`/计数，但不改变 snippet `updated_at`，也绝不能进入 revision payload/object、outbox、WebDAV、JSON 导出或导入。既有升级片段不伪造使用历史。删除 trigger 只清理本地 usage，不改变 tombstone/revision 语义。
 
 v2→v3 会为每条 live snippet 以固定 canonical JSON 字段顺序计算 SHA-256，并由 `id + content hash + updated_at` 生成确定性 `legacy-<sha256>` head；这些历史 head 不加入 outbox，避免升级时把整个现有库误当成待发布本地编辑。数据库 singleton device ID 只在 v3 migration 中生成一次，重复初始化必须保持稳定。
 
@@ -309,9 +337,11 @@ Production WebDAV v2 必须复用以下数据库边界：
 
 ### 8.5 查询、FTS 与摘要/详情协议
 
-主列表只能使用 `SnippetSummary` 分页协议，不得重新通过列表 IPC 返回完整 `content`。排序/cursor 固定基于 `(updated_at DESC, id DESC)`，page size 后端封顶 200；前端当前每页 100，筛选变化重置 cursor，并以 generation/query/cursor guard 丢弃 stale response。完整正文仅由 `get_snippet(id)` 懒加载，权威刷新必须继续保留 dirty editor。
+主列表只能使用 `SnippetSummary` 分页协议，不得重新通过列表 IPC 返回完整 `content`。`updated`（默认）使用 `(updated_at DESC, id DESC)`；`recent` 先按 usage 是否存在、再按 `last_used_at DESC`，最后用 `(updated_at DESC, id DESC)` 稳定打破并列。两种排序的 cursor 都编码排序模式和对应排序键，不能互用。后端 page size 封顶 200；前端当前每页 100，搜索、筛选或排序变化会清空 cursor 和当前批量选择，并以 generation/query/cursor guard 丢弃 stale response。完整正文仅由 `get_snippet(id)` 懒加载，权威刷新必须继续保留 dirty editor。
 
-FTS5 是 external-content table，任何 CRUD、收藏、导入或 WebDAV merge 变更都必须保持 triggers/transaction 同步。用户输入不得直接作为 raw MATCH；至少覆盖 `%`、`_`、引号、反斜线、短查询、CJK、trigram 和 `unicode61` fallback。当前结果按版本时间排序，不要描述为相关度排序。
+`recent` 是纯本地访问顺序，不是相关度、跨设备最近修改或同步状态；未使用项稳定置底。usage 写入成功后，若当前采用 `recent`，前端可以刷新列表以反映新顺序，但 usage 失败不得阻断打开或复制。
+
+FTS5 是 external-content table，任何 CRUD、收藏、导入或 WebDAV merge 变更都必须保持 triggers/transaction 同步。用户输入不得直接作为 raw MATCH；至少覆盖 `%`、`_`、引号、反斜线、短查询、CJK、trigram 和 `unicode61` fallback。当前结果不按相关度排序，不要把任意一种排序描述为相关度排序。
 
 确定性的 1k/10k ignored benchmark 记录 row count、返回 count、序列化 payload bytes 和 latency：
 
@@ -428,6 +458,8 @@ WebDAV automated tests 必须只绑定 loopback、使用专用远端路径、fak
 
 当前 `withGlobalTauri` 为 false；CSP 只允许本地 script、精确 IPC scheme 和当前资源 scheme，没有 `unsafe-eval`。`style-src 'unsafe-inline'` 是 CodeMirror/React 运行时样式的已知必要例外，新增代码不能借此增加 inline executable script。启动 anti-flash/splash 代码必须继续通过本地 [boot.ts](../src/boot.ts) / [boot.css](../src/boot.css) 由 Vite 管理；修改后用 [SecurityConfig.test.ts](../src/test/SecurityConfig.test.ts)、生产 build 和真实 Tauri console/splash smoke 校验。
 
+全局快速捕获只由 Rust 通过 global-shortcut plugin 注册和处理，因此当前 [default capability](../src-tauri/capabilities/default.json) 只保留读取/写入文本的 clipboard-manager 项；不要把生成的 global-shortcut permission schema 当成前端权限而添加 `global-shortcut:default`、register 或 unregister capability。任何未来把快捷键控制暴露给 WebView 的需求都必须重新评估窗口、CSP、privacy、最小 scope 和文档。
+
 仓库 URL 与数据/导出目录当前分别由 `open_project_repository` 和 `open_trusted_directory` 控制。扩展受控打开时应新增小型 enum/固定常量并补静态/Rust 测试，而不是重新加入 `shell:allow-open`、广泛 regex 或返回路径给前端。
 
 ## 13. 发布开发
@@ -517,7 +549,10 @@ cargo test --manifest-path src-tauri/Cargo.toml
 使用 `npm run tauri:dev` 验证受影响流程，例如：
 
 - 新建、编辑、保存、切换和删除。
-- 搜索、过滤、标签、收藏。
+- 搜索、语言/收藏筛选、标签、独立的“最近更新 / 最近使用”排序及 Load More；确认默认“最近更新”使用稳定更新时间顺序，`recent` 在打开/复制成功后会重新排序，而未使用项不会被误作相关度结果。
+- 命令面板的 `Ctrl/Cmd+K`、初始焦点、过滤、Arrow/Home/End/Enter/Escape、disabled 项、Settings/Promise Dialog 模态优先级与关闭后的焦点恢复。
+- 批量选择的 200 项可见边界、select-loaded/clear、收藏/取消收藏/删除、筛选或排序切换清空选择，以及当前 dirty 片段包含在批量操作时的 Save/Discard/Cancel guard。
+- 在隔离的临时数据目录、无真实 WebDAV/凭据且只使用非敏感剪贴板文本的环境中，验证全局快捷键注册成功或冲突 fallback、托盘快速捕获、隐藏/最小化窗口时的反馈、recent usage 更新，以及事件/日志不含剪贴板文本或标题。
 - 主题、语言、设置保存和重启恢复。
 - 导入/导出和打开目录。
 - 托盘、关闭、第二实例和自启动。

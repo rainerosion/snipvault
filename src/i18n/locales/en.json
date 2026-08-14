@@ -12,7 +12,45 @@
   },
   "filter": {
     "all": "All languages",
-    "favorites": "Favorites only"
+    "language": "Filter by language",
+    "favorites": "Favorites only",
+    "sortUpdated": "Recently updated",
+    "sortRecent": "Recently used",
+    "sortToggle": "Sort order: {{current}}. Activate to switch to {{next}}.",
+    "sortTooltipCurrent": "Sorted by {{current}}",
+    "sortTooltipHint": "Click to switch"
+  },
+  "quickCapture": {
+    "success": "Clipboard captured as a new snippet.",
+    "failed": "Clipboard capture could not be completed."
+  },
+  "bulk": {
+    "actions": "Bulk actions",
+    "selected": "{{count}} selected",
+    "selectLoaded": "Select loaded",
+    "clear": "Clear",
+    "favorite": "Favorite",
+    "unfavorite": "Remove favorite",
+    "delete": "Delete",
+    "selectSnippet": "Select {{title}}"
+  },
+  "commandPalette": {
+    "title": "Command palette",
+    "description": "Search available application commands, then use the arrow keys and Enter to run one.",
+    "placeholder": "Search commands...",
+    "empty": "No commands match your search.",
+    "open": "Open command palette (Ctrl/Cmd+K)",
+    "commands": {
+      "new": "Create new snippet",
+      "save": "Save current snippet",
+      "export": "Export snippets",
+      "sync": "Synchronize now",
+      "settings": "Open settings",
+      "focusSearch": "Focus snippet search",
+      "toggleTheme": "Toggle effective theme",
+      "favorite": "Favorite current snippet",
+      "unfavorite": "Remove current snippet from favorites"
+    }
   },
   "snippet": {
     "selectHint": "Select a snippet to start editing",
@@ -38,6 +76,9 @@
     "titleRequired": "Please enter a title",
     "untitled": "Untitled",
     "loadingDetail": "Loading snippet...",
+    "loadUnavailable": "The code editor is unavailable right now.",
+    "loadUnavailableDevHint": "Restart the Vite development server, then retry loading the editor.",
+    "retryLoad": "Retry editor",
     "select": "Select snippet {{title}}",
     "favoriteTitle": "Favorite {{title}}",
     "unfavoriteTitle": "Remove {{title}} from favorites",
@@ -147,6 +188,7 @@
     "title": "Confirm",
     "unsavedChanges": "You have unsaved changes. Save?",
     "confirmDelete": "Are you sure you want to delete this snippet?",
+    "confirmBulkDelete": "Delete {{count}} selected snippets? This cannot be undone.",
     "save": "Save",
     "discard": "Discard",
     "cancel": "Cancel",
@@ -250,6 +292,7 @@
     "settingsLoadFailed": "Settings could not be loaded.",
     "deleteFailed": "Delete failed: {{error}}",
     "favoriteFailed": "Favorite update failed: {{error}}",
+    "bulkMutationFailed": "The bulk change could not be completed: {{error}}",
     "clipboardFailed": "Clipboard operation failed: {{error}}",
     "reloadAfterMutationFailed": "The change was saved, but the latest snippets could not be reloaded: {{error}}",
     "reloadAfterSyncFailed": "Sync completed, but the latest local state could not be reloaded: {{error}}",

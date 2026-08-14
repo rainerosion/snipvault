@@ -1,6 +1,6 @@
 # SnipVault 功能设计
 
-> 本文按用户能力描述 v2.2.0 截至 2026-08-11 已经实现的功能、交互状态和调用链。异常行为和能力缺口统一链接到 [已知限制](known-limitations.md)，不在本文中包装为预期设计。
+> 本文按用户能力描述当前 v2.3.0 发布实现，截至 2026-08-14。异常行为和能力缺口统一链接到 [已知限制](known-limitations.md)，不在本文中包装为预期设计。
 
 ## 1. 产品信息架构
 
@@ -17,11 +17,13 @@ flowchart TB
         EDITOR[右栏：片段编辑器]
     end
     SETTINGS[设置模态层] -. 覆盖 .-> MAIN
+    PALETTE[命令面板模态层] -. 覆盖 .-> MAIN
     DIALOG[全局对话框] -. 覆盖 .-> MAIN
+    CAPTURE[原生快捷键 / 托盘快速捕获] --> MAIN
     CONTEXT[文本右键菜单] -. 浮层 .-> MAIN
 ```
 
-- 左栏固定显示当前过滤结果；结果使用语义 list/listitem，每个片段有独立选择按钮，收藏和删除是同级按钮，不产生嵌套交互元素。
+- 左栏固定显示当前过滤结果；结果使用语义 list/listitem，每个片段有独立打开详情按钮、复选框以及同级收藏和删除按钮，不产生嵌套交互元素。复选框不打开详情；批量操作只针对当前已加载的至多 200 项。
 - 右栏在无选择时显示空状态；选择片段或新建草稿时懒加载编辑器。
 - 设置在同一个 WebView 中以 overlay 方式显示，不创建第二个系统窗口。
 - Settings 与全局 Dialog 共享模态栈，提供 dialog/alertdialog 语义、确定性初始焦点、焦点约束、背景隔离和关闭后焦点恢复；嵌套时只有最上层响应 Tab/Escape。
@@ -32,7 +34,8 @@ flowchart TB
 
 | 功能 | 用户入口 | 当前行为 | 主要实现 |
 |---|---|---|---|
-| 浏览片段 | 左侧列表 | 按 `(updated_at DESC, id DESC)` 分页展示有界摘要、总数和 Load More，不把全部正文加载到 WebView | [SnippetList.tsx](../src/components/SnippetList.tsx)、[db.rs](../src-tauri/src/db.rs) |
+| 浏览片段 | 左侧列表 | 工具栏将语言下拉、收藏星标和排序图标保持为紧凑独立控件；默认“最近更新”按 `(updated_at DESC, id DESC)`，排序图标可切换到“最近使用”，将有本机 usage 的项按 `(last_used_at DESC, updated_at DESC, id DESC)` 置顶，未使用项稳定置底。鼠标悬停或键盘聚焦排序图标时，会在布局外的本地化视觉 tooltip 中显示当前排序和切换提示；该视觉层 `aria-hidden`，按钮本身的完整可访问名称仍说明当前排序及下一次激活的目标；不把全部正文加载到 WebView | [SnippetList.tsx](../src/components/SnippetList.tsx)、[db.rs](../src-tauri/src/db.rs) |
+| 批量整理 | 左侧列表操作条 | 仅选择当前已加载的最多 200 项；可设为收藏、取消收藏或确认后删除，后端全有或全无，成功后仅权威 reload 一次 | [App.tsx](../src/App.tsx)、[SnippetList.tsx](../src/components/SnippetList.tsx)、[db.rs](../src-tauri/src/db.rs) |
 | 搜索 | 顶部搜索框 | 150ms 防抖的后端子串兼容搜索，组合语言/收藏筛选并重置分页 | [App.tsx](../src/App.tsx)、[useSnippets.ts](../src/hooks/useSnippets.ts)、[db.rs](../src-tauri/src/db.rs) |
 | 语言筛选 | 工具栏下拉框 | 精确匹配 `snippet.language` | [Toolbar.tsx](../src/components/Toolbar.tsx)、[App.tsx](../src/App.tsx) |
 | 收藏筛选 | 工具栏星标 | 在“全部”和“只看收藏”之间切换 | [Toolbar.tsx](../src/components/Toolbar.tsx) |
@@ -44,14 +47,16 @@ flowchart TB
 | 标签 | 编辑器标签行 | Enter/逗号添加、Backspace 删除末项、已有标签建议 | [SnippetEditor.tsx](../src/components/SnippetEditor.tsx) |
 | 代码编辑 | 右侧 CodeMirror | 语法解析、行号、括号、折叠、补全、选择匹配和换行 | [SnippetEditor.tsx](../src/components/SnippetEditor.tsx) |
 | Codeglance | 编辑器右侧 | Canvas 预览、点击跳转、拖拽 viewport、调节宽度 | [SnippetEditor.tsx](../src/components/SnippetEditor.tsx) |
-| 复制 | 编辑器复制按钮 | 将完整代码写入系统剪贴板，显示 2 秒成功状态 | [SnippetEditor.tsx](../src/components/SnippetEditor.tsx) |
+| 复制 | 编辑器复制按钮 | 将完整代码写入系统剪贴板，显示 2 秒成功状态，并 best-effort 更新本机 usage | [SnippetEditor.tsx](../src/components/SnippetEditor.tsx)、[App.tsx](../src/App.tsx) |
+| 快速捕获 | `Ctrl/Meta+Shift+V`、托盘 | 显式读取非空剪贴板文本，立即创建可继续编辑的 plaintext snippet；快捷键注册失败不阻止托盘入口 | [capture.rs](../src-tauri/src/capture.rs)、[tray.rs](../src-tauri/src/tray.rs) |
+| 命令面板 | `Ctrl/Meta+K`、工具栏 | 搜索已有新建、保存、导出、同步、设置、聚焦搜索、主题与当前片段收藏动作；复用业务 handler，不执行脚本 | [CommandPalette.tsx](../src/components/CommandPalette.tsx)、[App.tsx](../src/App.tsx) |
 | 文本右键菜单 | input、textarea、CodeMirror | 剪切、复制、粘贴、全选；编辑器额外切换换行 | [App.tsx](../src/App.tsx) |
 | JSON 导入 | 工具栏上传按钮 | 读取 `.json`，按 ID 和时间戳合并，再刷新列表 | [Toolbar.tsx](../src/components/Toolbar.tsx)、[db.rs](../src-tauri/src/db.rs) |
 | JSON 导出 | 工具栏下载按钮、`Ctrl/Meta+E` | 后端写文件，成功后可通过受控命令打开后端派生的导出目录 | [commands.rs](../src-tauri/src/commands.rs)、[paths.rs](../src-tauri/src/paths.rs) |
 | 设置 | 工具栏或托盘 | 使用共享权威脱敏设置、可编辑非敏感 draft、显式凭据操作、恢复状态、外部更新提示和未保存关闭保护 | [Settings.tsx](../src/components/Settings.tsx)、[useSettings.ts](../src/hooks/useSettings.ts) |
 | 手动同步 | 工具栏、设置、托盘 | 三个入口执行同一个 WebDAV 合并，并通过统一完成协调刷新片段、设置和历史 | [App.tsx](../src/App.tsx)、[sync.rs](../src-tauri/src/sync.rs) |
 | 同步历史 | 设置页展开项 | 显示后端最近 20 条同步记录 | [Settings.tsx](../src/components/Settings.tsx)、[db.rs](../src-tauri/src/db.rs) |
-| 托盘 | 系统托盘 | 显示窗口、同步、设置、自启、退出 | [tray.rs](../src-tauri/src/tray.rs) |
+| 托盘 | 系统托盘 | 显示窗口、从剪贴板快速捕获、同步、设置、自启、退出 | [tray.rs](../src-tauri/src/tray.rs) |
 | 单实例 | 再次启动程序 | 唤醒并聚焦已有窗口 | [main.rs](../src-tauri/src/main.rs) |
 | 国际化 | 设置语言 | 中文/英文运行时切换并保存 | [LanguageContext.tsx](../src/context/LanguageContext.tsx)、[i18n](../src/i18n/index.ts) |
 | 主题 | 工具栏或设置 | 工具栏临时切换有效深浅模式；设置保存 `system` / `dark` / `light` 与六种完整精选界面配色，保存成功后通过权威 provider 生效 | [main.tsx](../src/main.tsx)、[theme.ts](../src/theme.ts)、[Settings.tsx](../src/components/Settings.tsx) |
@@ -60,19 +65,28 @@ flowchart TB
 
 ### 3.1 数据加载与排序
 
-应用挂载后，[useSnippets.ts](../src/hooks/useSnippets.ts) 调用 `query_snippets` 请求最多 100 条摘要。后端 [db.rs](../src-tauri/src/db.rs) 组合搜索/筛选条件，并按：
+应用挂载后，[useSnippets.ts](../src/hooks/useSnippets.ts) 调用 `query_snippets` 请求最多 100 条摘要。工具栏以独立的语言下拉和收藏星标组合当前搜索、语言、收藏或标签条件；紧邻收藏的排序图标默认选择“最近更新”，以 `sort = updated` 请求。图标本身会随 `updated` / `recent` 改变；悬停或键盘聚焦时，组件会通过 body portal 显示不受工具栏裁切的简短视觉 tooltip（当前排序和切换提示）。该层为 `aria-hidden`，而按钮的完整本地化可访问名称仍说明当前排序和下一次激活会选择的排序。后端 [db.rs](../src-tauri/src/db.rs) 按：
 
 ```sql
 ORDER BY updated_at DESC, id DESC
 ```
 
-返回 `items / next_cursor / total`。每个 `SnippetSummary` 仅含 metadata 和最多 768 UTF-8 bytes 的 `content_preview`，不含完整正文。后端 page cap 为 200；主 UI 使用 100 条页并在存在 cursor 时显示 Load More。筛选改变从第一页重新开始，迟到的旧首屏或追加响应不能覆盖当前查询。
+返回 `items / next_cursor / total`。选择“最近使用”时，使用仅本机的 `snippet_usage`，按：
+
+```sql
+ORDER BY (last_used_at IS NULL) ASC, last_used_at DESC, updated_at DESC, id DESC
+```
+
+有 usage 的项优先，未使用项位于稳定的后半段。后端只有 `updated` 与 `recent` 两种排序模式，并采用包含模式与排序字段的独立 cursor；不能把任一模式的 cursor 用于另一模式，因此分页不会因排序切换重复或遗漏。`snippet_usage` 不更改 `updated_at`、不进入 revision/outbox/WebDAV/JSON，迁移后的既有片段也不凭空获得使用历史。所有列表排序都不是搜索相关性排名。
+
+每个 `SnippetSummary` 仅含 metadata 和最多 768 UTF-8 bytes 的 `content_preview`，不含完整正文。后端 page cap 为 200；主 UI 使用 100 条页并在存在 cursor 时显示 Load More。搜索、语言、收藏或排序改变从第一页重新开始，同时清除当前已加载项的批量选择；迟到的旧首屏或追加响应不能覆盖当前查询。
 
 左栏和工具栏品牌区共用固定宽度变量；列表卡片内边距、标题操作区和代码预览按该宽度排布。代码预览占满卡片可用宽度，使用等宽字体、最多约三行内容和隐藏溢出，不横向滚动。
 
 列表卡片显示：
 
 - 语言颜色点。
+- 勾选当前已加载项的可访问复选框；达到 200 项上限时未选项目禁用。
 - 标题。
 - 非空描述。
 - 语言标签。
@@ -97,7 +111,7 @@ ORDER BY updated_at DESC, id DESC
 
 ### 3.3 选择行为
 
-点击卡片会调用 `App.handleSelect()`：
+点击卡片打开详情会调用 `App.handleSelect()`；勾选复选框只改变批量选择，不读取详情也不触发当前脏草稿的导航确认：
 
 ```mermaid
 flowchart TD
@@ -136,20 +150,21 @@ flowchart TD
 - 搜索字段：标题、代码正文、描述、标签值。
 - 语言：精确匹配。
 - 收藏：`null` 表示不过滤，`true` 表示只看收藏。
-- 搜索、语言、收藏和可选精确标签条件使用 AND 组合。
+- 排序：工具栏在收藏星标后提供独立的两态图标，可在 `updated`（默认）与 `recent` 之间切换；悬停或键盘聚焦显示当前排序和切换提示的 `aria-hidden` 视觉 tooltip，按钮完整的本地化可访问名称仍说明当前与下一次激活的排序，`recent` 只是本机回访顺序，不是相关度。
+- 搜索、语言、收藏、排序和可选精确标签条件使用 AND 组合。
 - `%`、`_`、双引号和反斜线按字面值，不作为用户可控 MATCH/LIKE 语法。
 - 规范化查询至少 3 字符且 SQLite 支持 trigram 时使用字面量化 FTS5；短查询和 tokenizer fallback 使用转义 LIKE，继续提供子串语义和 CJK 支持。
-- 结果按更新时间和 ID 稳定排序，不提供或声称相关度排名。
+- 结果按所选稳定更新时间或本机最近使用顺序分页，不提供或声称相关度排名。
 
 工具栏左侧品牌区显示装饰性叠片图标、应用名称、本地代码片段库副标题和数量徽标；数量徽标显示后端返回的当前过滤总数，不是已加载页长。
 
 ### 4.2 请求与分页协调
 
-每次首屏查询递增 generation，并绑定规范化 query key。搜索或筛选变化会取消旧分页语义、清除追加错误并从 cursor `null` 开始；只有 generation、query key 和 cursor 仍一致的响应才能替换或追加列表。Load More 按 ID 去重，并通过独立 append request/in-flight guard 立即阻止同一 cursor 的重复并发请求。
+每次首屏查询递增 generation，并绑定规范化 query key（包含排序）。搜索、语言、收藏或排序变化会取消旧分页语义、清除追加错误和批量选择，并从 cursor `null` 开始；只有 generation、query key 和 cursor 仍一致的响应才能替换或追加列表。Load More 按 ID 去重，并通过独立 append request/in-flight guard 立即阻止同一 cursor 的重复并发请求。
 
 ### 4.3 过滤后的选择
 
-筛选条件改变时，当前 `selected` 不会自动清除。即使片段不再出现在左侧结果中，右侧编辑器仍可继续显示和编辑它。
+筛选、搜索或排序改变会清除批量选择；Load More 保留已经选择的已加载项。当前 `selected` 详情不会因筛选变化自动清除：即使片段不再出现在左侧结果中，右侧编辑器仍可继续显示和编辑它。
 
 ## 5. 新建、编辑和保存
 
@@ -244,9 +259,15 @@ App.handleSave
 3. 只有 IPC 成功后，如果删除的是当前片段才清空编辑状态；失败时保留 selection、form 和 dirty snapshot，并显示本地化错误。
 4. 成功后重新加载列表；若删除已完成但权威 reload 失败，明确提示“更改已保存但刷新失败”，不会把它表述为删除失败。
 
-SQLite v4 的 tombstone 由 production WebDAV v2 作为不可变 deletion revision 上传，并同时保存在本地 durable `revision_objects` 中。其他设备把该 tombstone 作为 head 时会删除对应 live row/FTS 并保留删除 ancestry；本地和远端 tombstone 当前无限期保留，不提供自动 GC 或恢复/清除 UI。
+SQLite v5 的 tombstone 由 production WebDAV v2 作为不可变 deletion revision 上传，并同时保存在本地 durable `revision_objects` 中。其他设备把该 tombstone 作为 head 时会删除对应 live row/FTS 并保留删除 ancestry；本地和远端 tombstone 当前无限期保留，不提供自动 GC 或恢复/清除 UI。
 
-### 6.2 收藏的两种语义
+### 6.2 批量整理
+
+操作条只选择当前已经加载在 WebView 中的摘要，最多 200 个，不隐式匹配或修改未加载的搜索结果。用户可以选择“设为收藏”“取消收藏”或“删除”：收藏操作是幂等 set，不是对混合状态的歧义 toggle；删除先显示选择数量确认。
+
+后端对每个批量请求排序/去重并校验边界，先读取并验证全部 ID 都是 live snippets，再在一个 SQLite transaction 中执行。实际改变的每条收藏和每条删除各自产生 immutable revision/object/outbox（删除为 tombstone）；已经满足目标收藏状态的片段不产生 revision。任一 ID 不存在、已删除、outbox 满或任意写入失败时，整个 transaction 回滚，绝不会部分成功。前端若当前 dirty 编辑片段被包含，先复用 Save/Discard/Cancel guard；取消或保存失败不执行 mutation。成功只做一次权威 reload，reload 失败明确报告“更改已保存、刷新失败”。
+
+### 6.3 收藏的两种单项语义
 
 | 入口 | 行为 |
 |---|---|
@@ -286,9 +307,17 @@ SQLite v4 的 tombstone 由 production WebDAV v2 作为不可变 deletion revisi
 
 ### 8.1 加载策略
 
-[App.tsx](../src/App.tsx) 使用 `React.lazy()` 延迟加载 `SnippetEditor`，并在空闲时通过 `requestIdleCallback`（或 800ms timer fallback）预加载模块。Vite 又把 CodeMirror/Lezer/UIW 依赖拆为独立 editor chunk。
+[LazySnippetEditor.tsx](../src/components/LazySnippetEditor.tsx) 使用 `React.lazy()` 延迟加载 `SnippetEditor`：只有选择片段或新建草稿才请求编辑器模块；无选择的浏览、搜索、同步和设置流程不会在空闲时预加载 CodeMirror。生产构建将 editor runtime、UI/services 和语言 parser family 分为有界独立 chunk，使首次进入编辑流程并行加载所需依赖，而不保留单个超大 editor chunk。
 
-### 8.2 基础能力
+### 8.2 编辑器加载失败与恢复
+
+`Suspense` 只负责等待 editor module 的下载；如果懒加载模块请求被拒绝，或编辑器首次 render 抛出异常，`SnippetEditorLoadBoundary` 会把故障限制在右侧编辑器 pane，而不会让整个 WebView 白屏。右侧显示本地化的 `role="alert"`、明确的“重试加载编辑器”按钮；侧栏、工具栏、设置、Dialog、当前选择和 App 持有的 `form` 草稿继续可用。
+
+Retry 只在用户明确点击后发生：App 递增加载尝试号，`LazySnippetEditor` 在组件边界为该尝试创建新的 lazy component identity；开发环境从绝对 Vite `/src` module URL 附加一次性 query 以避免重用已经 rejected 的浏览器 import promise；不会自动重试、轮询端口、重新请求详情、刷新页面或清空草稿。生产仍使用静态可分析的 lazy import 与既有 editor chunk。成功 retry 会用当前选中片段和受控 form 重建编辑器；标题、正文、描述、语言、标签、收藏及脏状态保留，但 CodeMirror cursor/selection/undo history、minimap 宽度和尚未提交的标签输入等编辑器局部临时状态会重置。
+
+在开发模式里，如果 Vite server 已停止，提示会要求先恢复 Vite 后再重试；该 UI 只防止应用白屏，不负责重启或解释 Vite 进程为何退出，详见[已知限制](known-limitations.md#62-vite-开发服务器中断仍需单独诊断)。
+
+### 8.3 基础能力
 
 当前 `basicSetup` 开启：
 
@@ -382,9 +411,15 @@ CodeMirror 的 `view.scrollDOM` 是主滚动源：
 
 ### 11.1 复制完整代码
 
-编辑器“复制”按钮调用 Tauri Clipboard 插件的 `writeText(form.content)`；成功后按钮显示“已复制”两秒，失败时由 App Dialog 显示本地化安全错误。
+编辑器“复制”按钮调用 Tauri Clipboard 插件的 `writeText(form.content)`；成功后按钮显示“已复制”两秒，同时以 best-effort `record_snippet_usage` 写入本机 usage；usage 失败不会阻断复制或提示错误。普通复制和文本右键菜单不是快速捕获，不会创建新片段。
 
-### 11.2 全局右键菜单
+### 11.2 快速捕获
+
+`Ctrl/Meta+Shift+V` 是 Rust 原生注册的全局快捷键，托盘“从剪贴板快速捕获”是其可见替代入口。二者仅在用户显式触发时调用原生 Clipboard Manager 读取文本：空白、非文本、读取失败或字段校验/写入失败时不创建任何片段，前端只显示脱敏失败反馈，Rust 日志、公开事件和错误都不包含剪贴板正文、派生标题、token 或绝对路径。全局快捷键因 OS 冲突、权限或平台限制注册失败只记录通用 warning，不阻止启动，托盘入口仍可使用。
+
+成功时后台线程从首个非空行生成受字段边界限制的标题，立即创建普通 plaintext snippet、对应 revision/object/outbox 和一条本机 usage；它会按用户已有 WebDAV 配置正常参与同步。完成事件只含 `source`、`success` 和可选 `snippet_id`，不会自动抢占或唤醒隐藏主窗口；若 WebView 已打开，前端刷新列表但不覆盖 dirty 草稿，并给出短暂状态反馈。listener 尚未就绪时，前端用 `take_quick_capture_completion` 消费最近一次结果。快速触发期间原生服务只处理一个捕获，避免重复创建。
+
+### 11.3 全局右键菜单
 
 `App` 在 window 上监听 `contextmenu`，只对以下可编辑文本目标显示自定义菜单：
 
@@ -400,7 +435,7 @@ CodeMirror 的 `view.scrollDOM` 是主滚动源：
 - 全选。
 - CodeMirror 场景下额外切换自动换行。
 
-普通 input/textarea 使用 selection range 和 `setRangeText()`；CodeMirror 使用 `EditorView.findFromDOM()` 和 transaction；其他 contenteditable 回退到 `document.execCommand()`。Clipboard read/write 失败显示本地化反馈；剪切只有在 `writeText` 成功后才删除选区，避免复制失败时丢失文本。
+普通 input/textarea 使用 selection range 和 `setRangeText()`；CodeMirror 仅在已打开的 `.cm-editor` 菜单动作中按需加载 `EditorView` 后使用 `findFromDOM()` 和 transaction，解析不到 view 时安全关闭菜单而不会回退操作其他元素；其他 contenteditable 回退到 `document.execCommand()`。Clipboard read/write 失败显示本地化反馈；剪切只有在 `writeText` 成功后才删除选区，避免复制失败时丢失文本。
 
 ## 12. JSON 导入和导出
 
@@ -569,16 +604,18 @@ ask(message, title?): Promise<"save" | "discard" | "cancel">
 - 字体使用仓库中明确声明的系统 UI 与系统 monospace fallback stack，不依赖未声明的本地字体文件。
 
 
-### 16.1 快捷键
+### 16.1 快捷键与命令面板
 
 | 快捷键 | 当前动作 |
 |---|---|
-| `Ctrl/Meta + N` | 新建片段；设置层打开时屏蔽 |
-| `Ctrl/Meta + S` | 保存当前片段；设置层打开时屏蔽 |
-| `Ctrl/Meta + E` | 导出全部片段；设置层打开时屏蔽 |
-| `Escape` | 关闭 Dialog 取消态或文本右键菜单 |
+| `Ctrl/Meta + N` | 新建片段；设置、Dialog 或命令面板打开时屏蔽 |
+| `Ctrl/Meta + S` | 保存当前片段；设置、Dialog 或命令面板打开时屏蔽 |
+| `Ctrl/Meta + E` | 导出全部片段；设置、Dialog 或命令面板打开时屏蔽 |
+| `Ctrl/Meta + K` | 在设置和 Promise Dialog 未打开时打开/关闭命令面板 |
+| `Ctrl/Meta + Shift + V` | 原生全局快速捕获；与 WebView 焦点、设置/命令面板状态无关 |
+| `Escape` | 仅由最上层 ModalSurface 关闭命令面板/Dialog/Settings，或关闭文本右键菜单 |
 
-快捷键监听在 window 上，使用 `event.key.toLowerCase()` 统一大小写。设置弹层打开时，片段的新建、保存和导出快捷键会被阻止，避免操作遮罩后的主界面；设置页当前没有自己的保存快捷键。
+WebView 快捷键监听在 window 上，使用 `event.key.toLowerCase()` 统一大小写，并跳过 IME composing/repeat。命令面板使用共享 `ModalSurface` 的 dialog 语义，输入框获得初始焦点，命令列表用 listbox/option、`aria-activedescendant` 和 ArrowUp/ArrowDown/Home/End/Enter；执行命令前先关闭面板，因此既有 dirty guard、同步确认和 Dialog 不会与面板竞争。选择“聚焦代码片段搜索”会记录一次关闭后的焦点意图：在 `ModalSurface` 恢复背景并完成默认焦点恢复后，`App` 才将焦点移到工具栏的代码片段搜索输入框，使用户可立即输入查询，而不会把焦点留在命令面板触发按钮上。设置或 Promise Dialog 打开时不会打开面板；顶层模态拥有 Escape/Tab 和背景 inert/focus 恢复。
 
 ## 17. 窗口控制、托盘和后台行为
 
@@ -600,6 +637,7 @@ ask(message, title?): Promise<"save" | "discard" | "cancel">
 | 菜单项 | 行为 |
 |---|---|
 | 打开灵藏 SnipVault | 显示、还原并聚焦主窗口 |
+| 从剪贴板快速捕获 | 不抢占窗口，在后台显式读取非空文本并创建 plaintext snippet；完成时以脱敏状态刷新已打开 UI |
 | 立即同步 | 显示窗口，在 Rust 线程中同步，emit 来源为 `tray` 的 typed `sync-complete` |
 | 设置 | 显示窗口，emit `open-settings`，由前端打开 overlay |
 | 开机自启 | 切换 OS 自启动、持久设置与托盘复选状态，emit `autostart-toggled` |
@@ -703,7 +741,7 @@ WebDAV 与 SQLite 不能构成单个跨系统事务，revision/object 遍历也�
 
 ## 20. 首次运行和本地数据
 
-数据库 v4 初始化时，只有迁移前不存在 `snippets` 表的真正新库会插入 7 条示例：Ruby、Rust、TypeScript、Python、SQL、CSS 和 YAML/Docker Compose。任何既有磁盘 v0/v1/v2/v3 库升级前都创建并验证唯一 `pre-v4` backup；逐步 v0→v1→v2→v3→v4 链中的严格 backfill 或迁移失败会恢复原始版本数据库。v2 live rows 会得到确定性 `legacy-<sha256>` head，不会被批量加入 pending outbox；v4 会从 pending outbox、当前 live heads 和 tombstones 回填 durable revision objects。
+数据库 v5 初始化时，只有迁移前不存在 `snippets` 表的真正新库会插入 7 条示例：Ruby、Rust、TypeScript、Python、SQL、CSS 和 YAML/Docker Compose。任何既有磁盘 v0/v1/v2/v3/v4 库升级前都创建并验证唯一 `pre-v5` backup；逐步 v0→v1→v2→v3→v4→v5 链中的严格 backfill 或迁移失败会恢复原始版本数据库。v2 live rows会得到确定性 `legacy-<sha256>` head，不会被批量加入 pending outbox；v4 会从 pending outbox、当前 live heads 和 tombstones 回填 durable revision objects，v5 仅创建空的 local-only usage 表，因此既有片段没有使用历史。
 
 用户删除所有片段后，既有空库保持为空；后续初始化不会重新插入示例。
 
