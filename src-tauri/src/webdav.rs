@@ -74,15 +74,24 @@ fn try_sync_guard() -> Result<MutexGuard<'static, ()>, SyncError> {
     SYNC_LOCK.try_lock().map_err(|_| SyncError::busy())
 }
 
-fn sync_merge_internal() -> Result<SyncResult, SyncError> {
+pub(crate) fn try_exclusive_operation_guard() -> Result<MutexGuard<'static, ()>, SyncFailure> {
+    try_sync_guard().map_err(SyncFailure::from)
+}
+
+fn sync_merge_internal(
+    skip_when_confirmation_required: bool,
+) -> Result<Option<SyncResult>, SyncError> {
     let _guard = try_sync_guard()?;
     let current_settings = crate::settings::get_settings();
+    if skip_when_confirmation_required && current_settings.sync_confirmation_required {
+        return Ok(None);
+    }
     if current_settings.webdav_url.trim().is_empty() {
-        return Ok(SyncResult {
+        return Ok(Some(SyncResult {
             success: false,
             message: "WebDAV 地址未配置，请在设置中填写".into(),
             ..Default::default()
-        });
+        }));
     }
 
     let base = WebDavBase::parse(&current_settings.webdav_url)
@@ -162,7 +171,7 @@ fn sync_merge_internal() -> Result<SyncResult, SyncError> {
         result.downloaded_count,
         result.total_count
     );
-    Ok(SyncResult {
+    Ok(Some(SyncResult {
         success: true,
         message,
         uploaded: result.uploaded_count > 0,
@@ -174,7 +183,7 @@ fn sync_merge_internal() -> Result<SyncResult, SyncError> {
         protocol_version: 2,
         manifest_generation: result.generation,
         total_count: result.total_count,
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -219,7 +228,13 @@ pub(crate) fn test_try_sync_lock() -> Result<(), SyncFailure> {
 }
 
 pub fn sync_merge() -> Result<SyncResult, SyncFailure> {
-    sync_merge_internal().map_err(SyncFailure::from)
+    sync_merge_internal(false)
+        .map_err(SyncFailure::from)?
+        .ok_or_else(|| SyncFailure::from(SyncError::busy()))
+}
+
+pub(crate) fn sync_scheduled_merge() -> Result<Option<SyncResult>, SyncFailure> {
+    sync_merge_internal(true).map_err(SyncFailure::from)
 }
 
 pub fn sync_to_webdav() -> Result<SyncResult, SyncFailure> {

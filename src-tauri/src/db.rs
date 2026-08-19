@@ -1,6 +1,7 @@
 use crate::paths::get_db_path;
 use crate::revision::{
     canonical_live_payload, canonical_tombstone_payload, deterministic_conflict_uuid, sha256_hex,
+    CanonicalLivePayload, CanonicalTombstonePayload,
 };
 use once_cell::sync::OnceCell;
 use rusqlite::{Connection, DatabaseName, OptionalExtension, Result as SqliteResult, Row};
@@ -12,7 +13,7 @@ use std::sync::Mutex;
 
 static DB: OnceCell<Mutex<Connection>> = OnceCell::new();
 
-const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 7;
 const EXPORT_FORMAT_ID: &str = "snipvault.snippets";
 const EXPORT_SCHEMA_VERSION: u32 = 1;
 const OUTBOX_KIND_UPSERT: &str = "upsert";
@@ -22,6 +23,7 @@ const REVISION_ORIGIN_IMPORT: &str = "import";
 const REVISION_ORIGIN_REMOTE: &str = "remote";
 pub const MAX_PENDING_OUTBOX_COUNT: usize = 10_000;
 pub const MAX_PENDING_OUTBOX_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_REVISION_HISTORY_PAGE_SIZE: usize = 100;
 const MAX_REVISION_PAYLOAD_BYTES: usize = MAX_CONTENT_BYTES + 256 * 1024;
 const MAX_SYNC_ANCESTRY_OBJECTS: usize = 25_000;
 const MAX_SYNC_ANCESTRY_BYTES: usize = 64 * 1024 * 1024;
@@ -204,6 +206,14 @@ fn initialize_connection(conn: &mut Connection) -> SqliteResult<()> {
     }
     if version == 4 {
         migrate_to_v5(conn)?;
+        version = 5;
+    }
+    if version == 5 {
+        migrate_to_v6(conn)?;
+        version = 6;
+    }
+    if version == 6 {
+        migrate_to_v7(conn)?;
     }
 
     Ok(())
@@ -661,7 +671,7 @@ fn migrate_to_v5(conn: &mut Connection) -> SqliteResult<()> {
              DELETE FROM snippet_usage WHERE snippet_id=old.id;
          END;",
     )?;
-    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    tx.pragma_update(None, "user_version", 5)?;
     tx.commit()
 }
 
@@ -775,6 +785,36 @@ pub struct OutboxRevision {
     pub payload_bytes: usize,
     #[serde(default)]
     pub conflict_of: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct RevisionSummary {
+    pub revision_id: String,
+    pub parent_revision_id: Option<String>,
+    pub revision_time: String,
+    pub origin: String,
+    pub deleted: bool,
+    pub conflict_of: Option<String>,
+    pub is_current_head: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct RevisionContent {
+    pub revision: RevisionSummary,
+    pub snippet: Option<Snippet>,
+    pub deleted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct RevisionComparison {
+    pub left: RevisionContent,
+    pub right: RevisionContent,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct RevisionPage {
+    pub items: Vec<RevisionSummary>,
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
@@ -1148,6 +1188,56 @@ fn ensure_pending_capacity(conn: &Connection, payload_bytes: usize) -> Result<()
     Ok(())
 }
 
+fn migrate_to_v6(conn: &mut Connection) -> SqliteResult<()> {
+    let tx = conn.transaction()?;
+    tx.execute_batch(
+        "CREATE TABLE sync_notifications (
+             id TEXT PRIMARY KEY,
+             occurred_at TEXT NOT NULL,
+             source TEXT NOT NULL CHECK(source IN ('toolbar', 'settings', 'tray', 'background')),
+             status TEXT NOT NULL CHECK(status IN ('result', 'error', 'busy')),
+             category TEXT NOT NULL CHECK(category IN ('success', 'pending', 'conflict', 'failure', 'busy', 'restore_required')),
+             error_code TEXT,
+             retryable INTEGER NOT NULL DEFAULT 0 CHECK(retryable IN (0, 1)),
+             uploaded_count INTEGER,
+             downloaded_count INTEGER,
+             deleted_count INTEGER,
+             conflict_count INTEGER,
+             pending_count INTEGER,
+             total_count INTEGER,
+             protocol_version INTEGER,
+             manifest_generation INTEGER,
+             read_at TEXT,
+             dismissed_at TEXT
+         );
+         CREATE INDEX sync_notifications_inbox_idx
+             ON sync_notifications(dismissed_at, occurred_at DESC, id DESC);",
+    )?;
+    tx.pragma_update(None, "user_version", 6)?;
+    tx.commit()
+}
+
+fn migrate_to_v7(conn: &mut Connection) -> SqliteResult<()> {
+    let tx = conn.transaction()?;
+    tx.execute_batch(
+        "CREATE TABLE local_snapshots (
+             id TEXT PRIMARY KEY,
+             filename TEXT NOT NULL UNIQUE,
+             created_at TEXT NOT NULL,
+             schema_version INTEGER NOT NULL CHECK(schema_version >= 1),
+             byte_count INTEGER NOT NULL CHECK(byte_count >= 0),
+             snippet_count INTEGER NOT NULL CHECK(snippet_count >= 0),
+             checksum TEXT NOT NULL CHECK(length(checksum) = 64),
+             verified_at TEXT NOT NULL,
+             unavailable_at TEXT
+         );
+         CREATE INDEX local_snapshots_recent_idx
+             ON local_snapshots(created_at DESC, id DESC);",
+    )?;
+    tx.pragma_update(None, "user_version", 7)?;
+    tx.commit()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn insert_revision(
     conn: &Connection,
@@ -1230,6 +1320,320 @@ fn insert_revision(
         )?;
     }
     Ok(())
+}
+
+fn validate_history_snippet_id(snippet_id: &str) -> SqliteResult<()> {
+    if snippet_id.is_empty()
+        || snippet_id.len() > MAX_ID_BYTES
+        || snippet_id.chars().any(char::is_control)
+        || snippet_id.contains(CURSOR_SEPARATOR)
+    {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "invalid snippet revision request".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn decode_revision_summary(
+    row: &Row<'_>,
+    current_revision_id: Option<&str>,
+) -> SqliteResult<RevisionSummary> {
+    let summary = RevisionSummary {
+        revision_id: row.get(0)?,
+        parent_revision_id: row.get(1)?,
+        revision_time: row.get(2)?,
+        origin: row.get(3)?,
+        deleted: decode_bool(row, 4)?,
+        conflict_of: row.get(5)?,
+        is_current_head: false,
+    };
+    if !validate_revision_token(&summary.revision_id)
+        || summary
+            .parent_revision_id
+            .as_deref()
+            .is_some_and(|value| !validate_revision_token(value))
+        || !matches!(
+            summary.origin.as_str(),
+            "local" | "import" | "remote" | "conflict"
+        )
+        || summary
+            .conflict_of
+            .as_deref()
+            .is_some_and(|value| !validate_revision_token(value))
+    {
+        return Err(decode_error(
+            0,
+            rusqlite::types::Type::Text,
+            "stored revision history entry is invalid",
+        ));
+    }
+    require_rfc3339(&summary.revision_time, 2, "revision_time")?;
+    Ok(RevisionSummary {
+        is_current_head: current_revision_id == Some(summary.revision_id.as_str()),
+        ..summary
+    })
+}
+
+fn load_revision_object_on_connection(
+    conn: &Connection,
+    snippet_id: &str,
+    revision_id: &str,
+) -> SqliteResult<StoredRevisionObject> {
+    validate_history_snippet_id(snippet_id)?;
+    if !validate_revision_token(revision_id) {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "invalid snippet revision request".into(),
+        ));
+    }
+    conn.query_row(
+        "SELECT revision_id, snippet_id, parent_revision_id, device_id, content_hash,
+                revision_time, deleted, origin, payload_json, payload_bytes, conflict_of
+         FROM revision_objects
+         WHERE snippet_id=?1 AND revision_id=?2",
+        rusqlite::params![snippet_id, revision_id],
+        decode_stored_revision_object,
+    )
+}
+
+fn revision_content_from_object(
+    object: StoredRevisionObject,
+    current_revision_id: Option<&str>,
+) -> SqliteResult<RevisionContent> {
+    let revision = RevisionSummary {
+        revision_id: object.revision_id.clone(),
+        parent_revision_id: object.parent_revision_id.clone(),
+        revision_time: object.revision_time.clone(),
+        origin: object.origin,
+        deleted: object.deleted,
+        conflict_of: object.conflict_of,
+        is_current_head: current_revision_id == Some(object.revision_id.as_str()),
+    };
+    if object.deleted {
+        let tombstone = serde_json::from_str::<CanonicalTombstonePayload>(&object.payload_json)
+            .map_err(|_| {
+                decode_error(
+                    8,
+                    rusqlite::types::Type::Text,
+                    "stored tombstone revision payload is invalid",
+                )
+            })?;
+        if !tombstone.deleted
+            || tombstone.id != object.snippet_id
+            || tombstone.id.is_empty()
+            || tombstone.id.len() > MAX_ID_BYTES
+        {
+            return Err(decode_error(
+                8,
+                rusqlite::types::Type::Text,
+                "stored tombstone revision payload is invalid",
+            ));
+        }
+        require_rfc3339(&tombstone.deleted_at, 8, "deleted_at")?;
+        return Ok(RevisionContent {
+            revision,
+            snippet: None,
+            deleted_at: Some(tombstone.deleted_at),
+        });
+    }
+
+    let payload =
+        serde_json::from_str::<CanonicalLivePayload>(&object.payload_json).map_err(|_| {
+            decode_error(
+                8,
+                rusqlite::types::Type::Text,
+                "stored live revision payload is invalid",
+            )
+        })?;
+    if payload.deleted
+        || payload.id != object.snippet_id
+        || payload.id.is_empty()
+        || payload.id.len() > MAX_ID_BYTES
+    {
+        return Err(decode_error(
+            8,
+            rusqlite::types::Type::Text,
+            "stored live revision payload is invalid",
+        ));
+    }
+    let snippet = payload.into_snippet(object.revision_id);
+    validate_snippet(&snippet).map_err(|_| {
+        decode_error(
+            8,
+            rusqlite::types::Type::Text,
+            "stored live revision payload violates snippet constraints",
+        )
+    })?;
+    Ok(RevisionContent {
+        revision,
+        snippet: Some(snippet),
+        deleted_at: None,
+    })
+}
+
+pub fn list_snippet_revisions(
+    snippet_id: &str,
+    cursor: Option<&str>,
+    limit: Option<usize>,
+) -> SqliteResult<RevisionPage> {
+    validate_history_snippet_id(snippet_id)?;
+    let limit = limit.unwrap_or(30).clamp(1, MAX_REVISION_HISTORY_PAGE_SIZE);
+    let cursor = cursor
+        .map(|value| {
+            if !validate_revision_token(value) {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "invalid snippet revision cursor".into(),
+                ));
+            }
+            Ok(value)
+        })
+        .transpose()?;
+    with_db(|conn| {
+        let current_revision_id: Option<String> = conn
+            .query_row(
+                "SELECT revision_id FROM snippet_heads WHERE snippet_id=?1",
+                [snippet_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if current_revision_id.is_none() {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+        let mut statement = conn.prepare(
+            "SELECT revision_id, parent_revision_id, revision_time, origin, deleted, conflict_of
+             FROM revision_objects
+             WHERE snippet_id=?1
+               AND (?2 IS NULL OR (revision_time, revision_id) < (
+                    SELECT revision_time, revision_id FROM revision_objects
+                    WHERE snippet_id=?1 AND revision_id=?2
+               ))
+             ORDER BY revision_time DESC, revision_id DESC
+             LIMIT ?3",
+        )?;
+        let rows = statement.query_map(
+            rusqlite::params![snippet_id, cursor, (limit + 1) as i64],
+            |row| decode_revision_summary(row, current_revision_id.as_deref()),
+        )?;
+        let mut items = rows.collect::<SqliteResult<Vec<_>>>()?;
+        let next_cursor = if items.len() > limit {
+            let cursor = items
+                .get(limit - 1)
+                .map(|item| item.revision_id.clone())
+                .expect("history page contains the final visible entry");
+            items.truncate(limit);
+            Some(cursor)
+        } else {
+            None
+        };
+        Ok(RevisionPage { items, next_cursor })
+    })
+}
+
+pub fn get_snippet_revision(snippet_id: &str, revision_id: &str) -> SqliteResult<RevisionContent> {
+    with_db(|conn| {
+        let current_revision_id: Option<String> = conn
+            .query_row(
+                "SELECT revision_id FROM snippet_heads WHERE snippet_id=?1",
+                [snippet_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let object = load_revision_object_on_connection(conn, snippet_id, revision_id)?;
+        revision_content_from_object(object, current_revision_id.as_deref())
+    })
+}
+
+pub fn compare_snippet_revisions(
+    snippet_id: &str,
+    left_revision_id: &str,
+    right_revision_id: &str,
+) -> SqliteResult<RevisionComparison> {
+    with_db(|conn| {
+        let current_revision_id: Option<String> = conn
+            .query_row(
+                "SELECT revision_id FROM snippet_heads WHERE snippet_id=?1",
+                [snippet_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let left = revision_content_from_object(
+            load_revision_object_on_connection(conn, snippet_id, left_revision_id)?,
+            current_revision_id.as_deref(),
+        )?;
+        let right = revision_content_from_object(
+            load_revision_object_on_connection(conn, snippet_id, right_revision_id)?,
+            current_revision_id.as_deref(),
+        )?;
+        Ok(RevisionComparison { left, right })
+    })
+}
+
+fn restore_snippet_revision_on_connection(
+    conn: &Connection,
+    snippet_id: &str,
+    target_revision_id: &str,
+    base_revision_id: &str,
+) -> Result<Snippet, MutationError> {
+    let current = get_snippet_on_connection(conn, snippet_id)?;
+    if current.revision_id != base_revision_id {
+        return Err(MutationError::StaleRevision {
+            current_revision_id: current.revision_id,
+        });
+    }
+    let target = revision_content_from_object(
+        load_revision_object_on_connection(conn, snippet_id, target_revision_id)?,
+        Some(base_revision_id),
+    )?;
+    let Some(mut restored) = target.snippet else {
+        return Err(MutationError::Sqlite(
+            rusqlite::Error::InvalidParameterName("tombstone revisions cannot be restored".into()),
+        ));
+    };
+    restored.id = current.id.clone();
+    restored.created_at = current.created_at;
+    restored.updated_at = chrono::Utc::now().to_rfc3339();
+    restored.revision_id = uuid::Uuid::new_v4().to_string();
+    validate_snippet(&restored).map_err(rusqlite::Error::InvalidParameterName)?;
+    let payload = canonical_revision_payload(&restored, false)?;
+    let hash = sha256_hex(payload.as_bytes());
+    let device_id = local_device_id(conn)?;
+    write_snippet_row(conn, &restored)?;
+    insert_revision(
+        conn,
+        &restored.id,
+        Some(base_revision_id),
+        &restored.revision_id,
+        &device_id,
+        &hash,
+        &restored.updated_at,
+        false,
+        OUTBOX_KIND_UPSERT,
+        REVISION_ORIGIN_LOCAL,
+        &payload,
+        None,
+        true,
+    )?;
+    Ok(restored)
+}
+
+pub fn restore_snippet_revision(
+    snippet_id: &str,
+    target_revision_id: &str,
+    base_revision_id: &str,
+) -> Result<Snippet, MutationError> {
+    let result = with_db_mut(|conn| {
+        let tx = conn.transaction()?;
+        let restored = restore_snippet_revision_on_connection(
+            &tx,
+            snippet_id,
+            target_revision_id,
+            base_revision_id,
+        )
+        .map_err(mutation_into_sqlite)?;
+        tx.commit()?;
+        Ok(restored)
+    });
+    result.map_err(mutation_from_sqlite)
 }
 
 fn write_snippet_row(conn: &Connection, snippet: &Snippet) -> SqliteResult<()> {
@@ -3047,6 +3451,251 @@ fn commit_published_revisions_on_connection(
     )?;
     tx.commit()?;
     Ok(acknowledged)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SyncNotification {
+    pub id: String,
+    pub occurred_at: String,
+    pub source: String,
+    pub status: String,
+    pub category: String,
+    pub error_code: Option<String>,
+    pub retryable: bool,
+    pub uploaded_count: Option<i64>,
+    pub downloaded_count: Option<i64>,
+    pub deleted_count: Option<i64>,
+    pub conflict_count: Option<i64>,
+    pub pending_count: Option<i64>,
+    pub total_count: Option<i64>,
+    pub protocol_version: Option<i64>,
+    pub manifest_generation: Option<i64>,
+    pub read_at: Option<String>,
+}
+
+fn valid_sync_notification_source(value: &str) -> bool {
+    matches!(value, "toolbar" | "settings" | "tray" | "background")
+}
+
+fn valid_sync_notification_status(value: &str) -> bool {
+    matches!(value, "result" | "error" | "busy")
+}
+
+fn valid_sync_notification_category(value: &str) -> bool {
+    matches!(
+        value,
+        "success" | "pending" | "conflict" | "failure" | "busy" | "restore_required"
+    )
+}
+
+fn nullable_nonnegative(value: Option<i64>, column: usize) -> SqliteResult<Option<i64>> {
+    if value.is_some_and(|count| count < 0) {
+        return Err(decode_error(
+            column,
+            rusqlite::types::Type::Integer,
+            "stored sync notification count is invalid",
+        ));
+    }
+    Ok(value)
+}
+
+impl TryFrom<&Row<'_>> for SyncNotification {
+    type Error = rusqlite::Error;
+
+    fn try_from(row: &Row<'_>) -> SqliteResult<Self> {
+        let notification = Self {
+            id: row.get(0)?,
+            occurred_at: row.get(1)?,
+            source: row.get(2)?,
+            status: row.get(3)?,
+            category: row.get(4)?,
+            error_code: row.get(5)?,
+            retryable: decode_bool(row, 6)?,
+            uploaded_count: nullable_nonnegative(row.get(7)?, 7)?,
+            downloaded_count: nullable_nonnegative(row.get(8)?, 8)?,
+            deleted_count: nullable_nonnegative(row.get(9)?, 9)?,
+            conflict_count: nullable_nonnegative(row.get(10)?, 10)?,
+            pending_count: nullable_nonnegative(row.get(11)?, 11)?,
+            total_count: nullable_nonnegative(row.get(12)?, 12)?,
+            protocol_version: nullable_nonnegative(row.get(13)?, 13)?,
+            manifest_generation: nullable_nonnegative(row.get(14)?, 14)?,
+            read_at: row.get(15)?,
+        };
+        if !valid_uuid_id(&notification.id)
+            || !valid_sync_notification_source(&notification.source)
+            || !valid_sync_notification_status(&notification.status)
+            || !valid_sync_notification_category(&notification.category)
+            || notification.error_code.as_deref().is_some_and(|code| {
+                code.len() > 64
+                    || !code
+                        .bytes()
+                        .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
+            })
+        {
+            return Err(decode_error(
+                0,
+                rusqlite::types::Type::Text,
+                "stored sync notification is invalid",
+            ));
+        }
+        require_rfc3339(&notification.occurred_at, 1, "occurred_at")?;
+        if let Some(read_at) = notification.read_at.as_deref() {
+            require_rfc3339(read_at, 15, "read_at")?;
+        }
+        Ok(notification)
+    }
+}
+
+fn valid_uuid_id(value: &str) -> bool {
+    uuid::Uuid::parse_str(value)
+        .map(|parsed| parsed.hyphenated().to_string() == value.to_ascii_lowercase())
+        .unwrap_or(false)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn record_sync_notification(
+    source: &str,
+    status: &str,
+    category: &str,
+    error_code: Option<&str>,
+    retryable: bool,
+    uploaded_count: Option<usize>,
+    downloaded_count: Option<usize>,
+    deleted_count: Option<usize>,
+    conflict_count: Option<usize>,
+    pending_count: Option<usize>,
+    total_count: Option<usize>,
+    protocol_version: Option<u64>,
+    manifest_generation: Option<u64>,
+) -> SqliteResult<()> {
+    if !valid_sync_notification_source(source)
+        || !valid_sync_notification_status(status)
+        || !valid_sync_notification_category(category)
+        || error_code.is_some_and(|code| {
+            code.len() > 64
+                || !code
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
+        })
+    {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "invalid sync notification".into(),
+        ));
+    }
+    let to_i64 = |value: Option<usize>| -> SqliteResult<Option<i64>> {
+        value
+            .map(|value| {
+                i64::try_from(value).map_err(|_| {
+                    rusqlite::Error::InvalidParameterName(
+                        "sync notification count is too large".into(),
+                    )
+                })
+            })
+            .transpose()
+    };
+    let to_version = |value: Option<u64>| -> SqliteResult<Option<i64>> {
+        value
+            .map(|value| {
+                i64::try_from(value).map_err(|_| {
+                    rusqlite::Error::InvalidParameterName(
+                        "sync notification version is too large".into(),
+                    )
+                })
+            })
+            .transpose()
+    };
+    with_db_mut(|conn| {
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO sync_notifications
+             (id, occurred_at, source, status, category, error_code, retryable,
+              uploaded_count, downloaded_count, deleted_count, conflict_count,
+              pending_count, total_count, protocol_version, manifest_generation, read_at, dismissed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, NULL, NULL)",
+            rusqlite::params![
+                uuid::Uuid::new_v4().to_string(),
+                chrono::Utc::now().to_rfc3339(),
+                source,
+                status,
+                category,
+                error_code,
+                i64::from(retryable),
+                to_i64(uploaded_count)?,
+                to_i64(downloaded_count)?,
+                to_i64(deleted_count)?,
+                to_i64(conflict_count)?,
+                to_i64(pending_count)?,
+                to_i64(total_count)?,
+                to_version(protocol_version)?,
+                to_version(manifest_generation)?,
+            ],
+        )?;
+        tx.execute(
+            "DELETE FROM sync_notifications WHERE id NOT IN
+             (SELECT id FROM sync_notifications ORDER BY occurred_at DESC, id DESC LIMIT 200)",
+            [],
+        )?;
+        tx.commit()
+    })
+}
+
+pub fn list_sync_notifications(limit: Option<usize>) -> SqliteResult<Vec<SyncNotification>> {
+    let limit = limit.unwrap_or(50).clamp(1, 100) as i64;
+    with_db(|conn| {
+        let mut statement = conn.prepare(
+            "SELECT id, occurred_at, source, status, category, error_code, retryable,
+                    uploaded_count, downloaded_count, deleted_count, conflict_count,
+                    pending_count, total_count, protocol_version, manifest_generation, read_at
+             FROM sync_notifications WHERE dismissed_at IS NULL
+             ORDER BY occurred_at DESC, id DESC LIMIT ?1",
+        )?;
+        let rows = statement.query_map([limit], |row| SyncNotification::try_from(row))?;
+        rows.collect()
+    })
+}
+
+pub fn mark_sync_notification_read(id: &str) -> SqliteResult<()> {
+    if !valid_uuid_id(id) {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "invalid sync notification id".into(),
+        ));
+    }
+    with_db_mut(|conn| {
+        conn.execute(
+            "UPDATE sync_notifications SET read_at=COALESCE(read_at, ?2)
+             WHERE id=?1 AND dismissed_at IS NULL",
+            rusqlite::params![id, chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    })
+}
+
+pub fn dismiss_sync_notification(id: &str) -> SqliteResult<()> {
+    if !valid_uuid_id(id) {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "invalid sync notification id".into(),
+        ));
+    }
+    with_db_mut(|conn| {
+        conn.execute(
+            "UPDATE sync_notifications
+             SET dismissed_at=COALESCE(dismissed_at, ?2), read_at=COALESCE(read_at, ?2)
+             WHERE id=?1",
+            rusqlite::params![id, chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    })
+}
+
+pub fn mark_all_sync_notifications_read() -> SqliteResult<()> {
+    with_db_mut(|conn| {
+        conn.execute(
+            "UPDATE sync_notifications SET read_at=?1
+             WHERE read_at IS NULL AND dismissed_at IS NULL",
+            [chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    })
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

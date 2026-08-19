@@ -7,7 +7,9 @@ import React, {
 } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
+import { RevisionHistoryWindow } from "./components/RevisionHistoryWindow";
 import "./index.css";
 import { LanguageProvider } from "./context/LanguageProvider";
 import type { AccentPreset, SettingsView } from "./hooks/useSettings";
@@ -36,7 +38,12 @@ function getCachedAccentPreset(): AccentPreset {
   return normalizeAccentPreset(localStorage.getItem(ACCENT_PRESET_KEY));
 }
 
+const root = document.getElementById("root")!;
+const windowLabel = getCurrentWindow().label;
+const isMainWindow = windowLabel === "main";
+
 window.__bootMarkToNative = (stage: string) => {
+  if (!isMainWindow) return;
   const tMs = performance.now() - (window.__bootT0 ?? 0);
   window.__bootMark?.(stage);
   void invoke("boot_mark", { stage, tMs }).catch(() => {});
@@ -44,7 +51,6 @@ window.__bootMarkToNative = (stage: string) => {
 
 window.__bootMarkToNative("main_eval_start");
 
-const root = document.getElementById("root")!;
 const bootTheme = resolveBootTheme();
 const bootAccentPreset = getCachedAccentPreset();
 applyAppearance(bootTheme, bootAccentPreset);
@@ -54,28 +60,34 @@ let bootSettingsPromise: Promise<SettingsView | null> | null = null;
 function getBootSettings() {
   if (!bootSettingsPromise) {
     const t = performance.now() - (window.__bootT0 ?? 0);
-    window.__bootMark?.("get_settings_start");
-    void invoke("boot_mark", { stage: "get_settings_start", tMs: t }).catch(
-      () => {},
-    );
+    if (isMainWindow) {
+      window.__bootMark?.("get_settings_start");
+      void invoke("boot_mark", { stage: "get_settings_start", tMs: t }).catch(
+        () => {},
+      );
+    }
 
     bootSettingsPromise = invoke<SettingsView>("get_settings")
       .then((settings) => {
         const done = performance.now() - (window.__bootT0 ?? 0);
-        window.__bootMark?.("get_settings_done");
-        void invoke("boot_mark", {
-          stage: "get_settings_done",
-          tMs: done,
-        }).catch(() => {});
+        if (isMainWindow) {
+          window.__bootMark?.("get_settings_done");
+          void invoke("boot_mark", {
+            stage: "get_settings_done",
+            tMs: done,
+          }).catch(() => {});
+        }
         return settings;
       })
       .catch(() => {
         const fail = performance.now() - (window.__bootT0 ?? 0);
-        window.__bootMark?.("get_settings_fail");
-        void invoke("boot_mark", {
-          stage: "get_settings_fail",
-          tMs: fail,
-        }).catch(() => {});
+        if (isMainWindow) {
+          window.__bootMark?.("get_settings_fail");
+          void invoke("boot_mark", {
+            stage: "get_settings_fail",
+            tMs: fail,
+          }).catch(() => {});
+        }
         return null;
       });
   }
@@ -109,17 +121,19 @@ export const ThemeContext = createContext<{
 }>({ theme: bootTheme, accentPreset: bootAccentPreset, setTheme: () => {} });
 
 window.__bootMark?.("react_render_start");
-void invoke("boot_mark", {
-  stage: "react_render_start",
-  tMs: performance.now() - (window.__bootT0 ?? 0),
-}).catch(() => {});
+if (isMainWindow) {
+  void invoke("boot_mark", {
+    stage: "react_render_start",
+    tMs: performance.now() - (window.__bootT0 ?? 0),
+  }).catch(() => {});
+}
 
 ReactDOM.createRoot(root).render(
   <React.StrictMode>
     <SettingsProvider initialSettings={getBootSettings()}>
       <ThemeProvider>
         <LanguageProvider loadInitialLanguage={getBootLanguage}>
-          <App />
+          {isMainWindow ? <App /> : <RevisionHistoryWindow />}
         </LanguageProvider>
       </ThemeProvider>
     </SettingsProvider>
@@ -127,45 +141,53 @@ ReactDOM.createRoot(root).render(
 );
 
 window.__bootMark?.("react_render_called");
-void invoke("boot_mark", {
-  stage: "react_render_called",
-  tMs: performance.now() - (window.__bootT0 ?? 0),
-}).catch(() => {});
-
-void invoke("frontend_ready", { phase: "react_render_called" }).catch(() => {});
-window.__bootMark?.("frontend_ready_sent");
-void invoke("boot_mark", {
-  stage: "frontend_ready_sent",
-  tMs: performance.now() - (window.__bootT0 ?? 0),
-}).catch(() => {});
-
-requestAnimationFrame(() => {
-  window.__bootMark?.("raf_1");
+if (isMainWindow) {
   void invoke("boot_mark", {
-    stage: "raf_1",
+    stage: "react_render_called",
     tMs: performance.now() - (window.__bootT0 ?? 0),
   }).catch(() => {});
 
-  requestAnimationFrame(() => {
-    window.__bootMark?.("raf_2");
+  void invoke("frontend_ready", { phase: "react_render_called" }).catch(() => {});
+  window.__bootMark?.("frontend_ready_sent");
+  void invoke("boot_mark", {
+    stage: "frontend_ready_sent",
+    tMs: performance.now() - (window.__bootT0 ?? 0),
+  }).catch(() => {});
+}
+
+requestAnimationFrame(() => {
+  window.__bootMark?.("raf_1");
+  if (isMainWindow) {
     void invoke("boot_mark", {
-      stage: "raf_2",
+      stage: "raf_1",
       tMs: performance.now() - (window.__bootT0 ?? 0),
     }).catch(() => {});
+  }
+
+  requestAnimationFrame(() => {
+    window.__bootMark?.("raf_2");
+    if (isMainWindow) {
+      void invoke("boot_mark", {
+        stage: "raf_2",
+        tMs: performance.now() - (window.__bootT0 ?? 0),
+      }).catch(() => {});
+    }
 
     document.getElementById("boot-splash")?.remove();
     window.__bootMark?.("splash_removed");
-    void invoke("boot_mark", {
-      stage: "splash_removed",
-      tMs: performance.now() - (window.__bootT0 ?? 0),
-    }).catch(() => {});
+    if (isMainWindow) {
+      void invoke("boot_mark", {
+        stage: "splash_removed",
+        tMs: performance.now() - (window.__bootT0 ?? 0),
+      }).catch(() => {});
 
-    void invoke("frontend_ready", { phase: "splash_removed" }).catch(() => {});
-    window.__bootMark?.("frontend_ready_sent_after_splash");
-    void invoke("boot_mark", {
-      stage: "frontend_ready_sent_after_splash",
-      tMs: performance.now() - (window.__bootT0 ?? 0),
-    }).catch(() => {});
+      void invoke("frontend_ready", { phase: "splash_removed" }).catch(() => {});
+      window.__bootMark?.("frontend_ready_sent_after_splash");
+      void invoke("boot_mark", {
+        stage: "frontend_ready_sent_after_splash",
+        tMs: performance.now() - (window.__bootT0 ?? 0),
+      }).catch(() => {});
+    }
   });
 });
 

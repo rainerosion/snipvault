@@ -6,9 +6,10 @@ import appIcon from "../../assets/app-icon.png";
 interface TitlebarProps {
   /** @deprecated Titlebar colors are supplied by global semantic tokens. */
   theme?: "dark" | "light";
+  title?: string;
 }
 
-export function Titlebar(_props: TitlebarProps) {
+export function Titlebar({ title }: TitlebarProps) {
   const { t } = useTranslation();
   const [maximized, setMaximized] = useState(false);
 
@@ -37,7 +38,7 @@ export function Titlebar(_props: TitlebarProps) {
       <div className="titlebar-icon" data-tauri-drag-region>
         <img src={appIcon} alt="SnipVault" width="16" height="16" />
       </div>
-      <span className="titlebar-title" data-tauri-drag-region>{t("app.title")}</span>
+      <span className="titlebar-title" data-tauri-drag-region>{title ?? t("app.title")}</span>
 
       <div className="titlebar-controls">
         <button type="button" className="titlebar-btn minimize" onClick={handleMinimize} title={t("titlebar.minimize")} aria-label={t("titlebar.minimize")}>

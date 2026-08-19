@@ -6,6 +6,7 @@ pub mod error;
 pub mod paths;
 pub mod revision;
 pub mod settings;
+pub mod snapshots;
 pub mod sync;
 pub mod tray;
 pub mod webdav;

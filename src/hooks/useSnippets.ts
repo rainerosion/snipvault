@@ -7,6 +7,9 @@ import {
   SnippetQueryResult,
   SnippetSort,
   SnippetSummary,
+  type RevisionComparison,
+  type RevisionContent,
+  type RevisionPage,
   type BulkMutationResult,
 } from "../types";
 import { normalizeCommandError, type CommandError } from "../utils/commandErrors";
@@ -185,6 +188,35 @@ export function useSnippets() {
     return invoke<Snippet>("get_snippet", { id });
   }, []);
 
+  const listRevisions = useCallback(
+    async (id: string, cursor: string | null = null, limit = 30) =>
+      invoke<RevisionPage>("list_snippet_revisions", { id, cursor, limit }),
+    [],
+  );
+  const getRevision = useCallback(
+    async (id: string, revisionId: string) =>
+      invoke<RevisionContent>("get_snippet_revision", { id, revisionId }),
+    [],
+  );
+  const compareRevisions = useCallback(
+    async (id: string, leftRevisionId: string, rightRevisionId: string) =>
+      invoke<RevisionComparison>("compare_snippet_revisions", {
+        id,
+        leftRevisionId,
+        rightRevisionId,
+      }),
+    [],
+  );
+  const restoreRevision = useCallback(
+    async (id: string, targetRevisionId: string, baseRevisionId: string) =>
+      invoke<Snippet>("restore_snippet_revision", {
+        id,
+        targetRevisionId,
+        baseRevisionId,
+      }),
+    [],
+  );
+
   const create = useCallback(async (form: SnippetForm) => {
     const id = crypto.randomUUID();
     return invoke<Snippet>("create_snippet", {
@@ -254,6 +286,10 @@ export function useSnippets() {
     load,
     loadMore,
     get,
+    listRevisions,
+    getRevision,
+    compareRevisions,
+    restoreRevision,
     create,
     update,
     remove,

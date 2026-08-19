@@ -8,7 +8,7 @@
 |---|---|
 | P0 同步协议 | WebDAV v2 的 HTTP/SQLite 操作仍不是跨系统原子事务；strong ETag/conditional PUT 是硬服务器要求；immutable revisions/tombstones 没有 GC；冲突没有完整解决 UI |
 | P1 安全与隐私 | 平台凭据库可用性/授权与补偿恢复仍有平台和崩溃边界；loopback 测试例外允许 HTTP；CSP inline style 例外仍存在 |
-| P2 产品与工程 | WebDAV v2 已有 transport wire 与 fresh engine bootstrap 的 dedicated loopback coverage，但更宽的 cutover/hard-stop/CAS/crash/concurrency engine-loopback 矩阵及真实服务 compatibility、production Tauri smoke 仍缺；搜索 fallback 在无 trigram 时退化为 LIKE；StreamLanguage 语言不是完整 Lezer parser；还缺桌面端 E2E 与真实跨平台凭据库测试；普通 CI 仅有 Linux full gate |
+| P2 产品与工程 | WebDAV v2 已有 transport wire 与 fresh engine bootstrap 的 dedicated loopback coverage，但更宽的 cutover/hard-stop/CAS/crash/concurrency engine-loopback 矩阵及真实服务 compatibility、production Tauri smoke 仍缺；版本历史比较不是语义/三方 diff，tombstone 不可恢复且没有 revision GC；本地快照只在运行中的应用内按有限策略执行；搜索 fallback 在无 trigram 时退化为 LIKE；StreamLanguage 语言不是完整 Lezer parser；还缺桌面端 E2E 与真实跨平台凭据库测试；普通 CI 仅有 Linux full gate |
 | P3 发布 | 无应用内更新、无完整 Windows/macOS 签名/公证与真实签名产物验证；release dry-run/tag workflow 仍未在 GitHub Actions 中实跑验证 |
 
 ## 1. WebDAV v2 协议与多设备并发
@@ -41,7 +41,7 @@ Ready v2 同步会从每个 manifest head 沿 parent links GET immutable objects
 
 并发分支先按 ancestry；无祖先关系时，已经发布的远端 original 确定性胜出。远端覆盖 live 本地分支时，SQLite 会创建幂等 conflict copy/index；没有属性级或正文 semantic merge。
 
-剩余边界：应用没有冲突列表、diff、选择赢家、合并、标记已解决或归档 UI；副本标题目前使用固定英文 suffix。若本地 tombstone 是落败分支，没有正文可生成 conflict copy。确定性排序保证收敛，不表达用户业务优先级。
+剩余边界：应用没有冲突列表、用于冲突解决的双方/祖先 diff、选择赢家、合并、标记已解决或归档 UI；副本标题目前使用固定英文 suffix。已实现的同片段历史并排比较不等于冲突解决流程或 semantic merge。若本地 tombstone 是落败分支，没有正文可生成 conflict copy。确定性排序保证收敛，不表达用户业务优先级。
 
 ### 1.6 数据库复制会复制 device ID
 
@@ -61,11 +61,11 @@ worker 每 15 秒观察一次设置。有效配置首次出现时会在该次观
 
 影响：这些时间都受 15 秒 poll 粒度、同步本身耗时和线程调度影响，不是精确 wall-clock 定时；应用进程退出期间也不会补跑。当前没有持久化 scheduler/backoff 状态或 OS 后台任务。
 
-### 2.2 后台反馈是非模态且短暂的
+### 2.2 后台反馈保持非模态，但结果可持久追溯
 
-后台成功、busy 和失败都会 emit typed `sync-complete`；成功时已打开前端会刷新片段、共享设置和同步历史，dirty editor 保留。为避免后台流程打断用户，反馈只进入 `aria-live` 区域，不弹 Dialog，也没有持久通知中心。
+后台成功、busy 和失败都会 emit typed `sync-complete`；成功时已打开前端会刷新片段、共享设置、同步历史和 notification inbox，dirty editor 保留。为避免后台流程打断用户，background 反馈只进入 `aria-live` 区域，不弹 Dialog；但每个同步终态会先写入去标识化的本地通知中心，用户可通过工具栏铃铛稍后检查。
 
-影响：用户离开窗口或读屏器未及时播报时，可能错过一次失败状态；可通过设置页同步历史查看成功记录，但失败不会写入该历史表。
+影响：通知中心不保存服务器地址、凭据、片段内容、revision 标识、路径、远端响应或自由文本消息；它只保存固定来源/状态/类别、稳定错误码、可重试性、聚合计数、protocol 元数据与 read/dismiss 状态。inbox 与最近 20 条成功技术同步历史分离，只保留最新 200 条，默认显示 50 条、最多 100 条，且作为完整 SQLite vault snapshot 的一部分恢复；应用退出期间不会补跑同步或产生后台记录。
 
 ## 3. 搜索、语言与规模边界
 
@@ -119,17 +119,25 @@ CSP 已启用本地 script、精确 IPC scheme，并禁用 `unsafe-eval`、远�
 
 ### 5.1 数据库升级备份是保留的恢复工件
 
-任何既有磁盘 v0/v1/v2/v3/v4 数据库升级到当前 schema v5 前都会创建并验证唯一 `pre-v5` online backup；迁移链任一步失败时恢复并重新验证原来源版本，同时保留失败数据库副本供人工诊断。成功升级后 preflight backup 也有意保留，不会由应用自动轮转或删除。
+任何既有磁盘 v0/v1/v2/v3/v4/v5/v6 数据库升级到当前 schema v7 前都会创建并验证唯一 `pre-v7` online backup；迁移链任一步失败时恢复并重新验证原来源版本，同时保留失败数据库副本供人工诊断。成功升级后 preflight backup 也有意保留，不会由应用自动轮转或删除。
 
 影响：多次历史升级可能留下额外同级备份文件，需要用户在确认新版本数据正常且另有备份后人工归档。公开 IPC/错误不会返回这些绝对路径。
 
 ### 5.2 没有通用 migrations 目录
 
-当前已有 temp-DB 覆盖的 v0→v1→v2→v3→v4→v5 顺序路径、未来版本拒绝、重复初始化、transaction rollback，以及历史版本 preflight restore，但迁移代码仍集中在 [db.rs](../src-tauri/src/db.rs)，不是可声明式扩展的 migration framework。v5 的 `snippet_usage` 是有意本地化的 usage 元数据：它不进入 JSON、revision、outbox 或 WebDAV，既有片段升级后没有虚构 usage。每个未来 schema 版本仍必须新增专门步骤、全部历史 fixture、来源版本 backup/restore 和 import/WebDAV compatibility 测试。
+当前已有 temp-DB 覆盖的 v0→v1→v2→v3→v4→v5→v6→v7 顺序路径、未来版本拒绝、重复初始化、transaction rollback，以及历史版本 preflight restore，但迁移代码仍集中在 [db.rs](../src-tauri/src/db.rs)，不是可声明式扩展的 migration framework。v5 的 `snippet_usage` 是有意本地化的 usage 元数据：它不进入 JSON、revision、outbox 或 WebDAV，既有片段升级后没有虚构 usage。v6 新建脱敏 `sync_notifications` 收件箱；v7 新建 `local_snapshots` catalog，实际 snapshot 文件由受控目录中的 [snapshots.rs](../src-tauri/src/snapshots.rs) 管理。每个未来 schema 版本仍必须新增专门步骤、全部历史 fixture、来源版本 backup/restore 和 import/WebDAV compatibility 测试。
 
-### 5.3 本地 revision archive 不是用户可用版本历史
+### 5.3 版本历史已产品化，但没有合并或保留治理
 
-Schema v4 的 `revision_objects` 会在 exact acknowledgement 删除 `revision_outbox` 后继续保留本地/远端/冲突 revision payload，使 WebDAV v2 后续同步仍可离线读取当前 head 与 pending ancestry。它目前只是同步协议需要的 durable archive：没有版本历史 UI、diff/rollback 操作、retention window、compaction 或 reachability-based GC，也不提供面向用户的完整历史审计承诺。长期编辑、冲突和删除会继续增加本地与远端 immutable object 数量；未来若要把它作为产品化版本历史或实现清理，必须设计独立 retention/compaction、迁移和并发安全协议。
+Schema v4 的 `revision_objects` 会在 exact acknowledgement 删除 `revision_outbox` 后继续保留本地/远端/冲突 revision payload，使 WebDAV v2 后续同步仍可离线读取当前 head 与 pending ancestry。已保存片段现在可以分页浏览经过验证的 immutable metadata、查看 live/tombstone 内容状态、并排比较同一片段的两个 revision，并把历史 live 内容作为以当前 head 为 parent 的新 local descendant 恢复；恢复不重写历史并照常进入 outbox。tombstone 可检视/比较但不能恢复。
+
+剩余边界：比较是本地有界的两路逐行 diff，不是 word-level/semantic diff、三方合并或冲突解决 UI。版本历史在独立原生工作区中使用紧凑时间线；宽度至少 1200px 时使用弹性双栏，历史窗口最小宽度的 1000–1199px 区间则以已加载的“比较基线 / 所选版本”单 pane 切换避免压缩非换行源代码。两种呈现都不会强制外层横向滚动，代码不会自动换行；只有真实超出可见 source pane 的长行会在该 pane 内横向滚动，详细双栏对齐才同步纵向位置。为防止大正文或高度差异版本阻塞 WebView，line-diff 对总字符/行数、矩阵/渲染行数和短计算时间设有上限；超过上限会明确退回为带行号、语法高亮且不自动换行的完整并排源代码。没有 revision retention window、compaction 或 reachability-based GC，也不提供面向用户的完整历史审计承诺。长期编辑、冲突和删除会继续增加本地与远端 immutable object 数量；未来清理必须设计独立 retention/compaction、迁移和并发安全协议。
+
+### 5.4 本地快照只提供有限的设备内恢复
+
+本地快照是经过 integrity、schema、device identity、live-count、size 和 SHA-256 验证的完整 SQLite checkpoint，不是 JSON export、云备份、加密 archive 或 WebDAV artifact。策略仅支持应用运行期间的 daily / weekly 检查和 7 / 30 / 90 保留值；worker 每 15 分钟轮询，创建失败的重试最多延后一小时，因此不提供精确时刻调度、离线补跑、跨设备同步或用户自定义保留期。
+
+完整恢复会先建立 emergency checkpoint，并通过 SQLite backup 写入活动连接而非替换打开的文件；`settings.json` 和 OS credentials 保持不变。由于快照包含整个数据库，也会恢复 `sync_identity`、本机 usage、通知收件箱、同步状态和 catalog；恢复旧 checkpoint 可能回退这些本机状态。恢复后 automatic sync 会暂停，直到工具栏、设置或托盘的一次成功手动同步清除确认锁。当前没有快照加密、云归档、任意文件选择、已删除 snapshot 的恢复、跨平台 smoke 或新的自动化覆盖。
 
 ## 6. 前端交互与可访问性
 
@@ -165,8 +173,8 @@ Canvas codeglance、viewport 和宽度分隔器是装饰性/增强型视觉导�
 
 当前数据库、设置/凭据、command transaction、scheduler/event/tray pure logic、前端协调与 accessibility 均有 focused tests。WebDAV v2 的 protocol/transport/engine/database synthetic/unit tests 覆盖 canonical DTO/hash/ancestry、strong ETag validator、pending ancestry、exact acknowledgement/later edit 和 tombstone/conflict reconcile；`tiny_http` loopback 另外覆盖 v2 精确 marker/object/manifest wire、条件请求头、parsed metadata、不可变碰撞恢复与 fresh engine bootstrap/exact acknowledgement，同时保留 v1 transport/engine cases。仍缺少：
 
-- 完整 App、真实 CodeMirror、Tauri event 并发和桌面焦点管理的广泛 integration/E2E 测试。
-- Tauri IPC/真实窗口/托盘/自启动 smoke automation；本次 v2 activation 没有 production Tauri desktop smoke。
+- 完整 App、真实 CodeMirror、Tauri event 并发、revision-history 跨窗口目标/restore handoff 与桌面焦点管理的广泛 integration/E2E 测试。
+- Tauri IPC/真实窗口/托盘/自启动 smoke automation；本次 v2 activation 和独立版本历史窗口都没有 production Tauri desktop smoke。
 - 安装、升级、真实历史迁移、跨平台真实凭据库测试。
 - WebDAV v2 legacy cutover、全部 ambiguous bootstrap hard-stop、412/428/CAS exhaustion、crash before/after CAS、concurrent local edit、missing/cyclic/aggregate-bounded ancestry 等完整 engine-level loopback 矩阵；现有 v2 loopback 只覆盖 transport wire 与 fresh bootstrap/exact acknowledgement。
 - Nextcloud、ownCloud、Apache mod_dav 或其他真实第三方 WebDAV 测试/兼容矩阵；loopback mock 与 v2 unit tests 都不是实服兼容性证明。
@@ -241,7 +249,7 @@ WebDAV v2 activation 已解决下列旧 P0 缺口；剩余约束见第 1 节：
 - 主列表改为有界 `SnippetSummary` cursor pages，完整正文选择后懒加载；`updated` 与本机 `recent` 使用独立 cursor，generation/query/cursor guards 抑制 stale response；使用记录不参与同步或导入导出。
 - schema v2 建立同步 FTS5 external-content 索引；schema v3 保持 `snippets`/FTS 不变，并增加稳定 device identity、revision head/tombstone、bounded immutable outbox、remote state/conflict index 和扩展 sync history；schema v4 增加 durable `revision_objects`，用于 outbox 确认后的本地 ancestry 保留。
 - create/update/favorite/delete/import winner 以及最多 200 项的批量收藏/删除现在原子维护 live row、FTS、head、durable revision object 与按需 outbox；批量操作先验证整组，收藏只为实际状态改变生成 revision，delete 从 FTS 移除 live row并保留 tombstone。
-- v0/v1/v2/v3/v4 既有磁盘库升级到当前 v5 前创建/验证唯一 backup，任一步失败恢复来源版本；v2 live rows 获得确定性 legacy head 且不批量进入 outbox，v4 会从 pending outbox、当前 live heads 和 tombstones 回填 durable revision objects，v5 增加不参与同步/导入导出的本地 `snippet_usage`。
+- v0/v1/v2/v3/v4/v5/v6 既有磁盘库升级到当前 v7 前创建/验证唯一 `pre-v7` backup，任一步失败恢复来源版本；v2 live rows 获得确定性 legacy head 且不批量进入 outbox，v4 会从 pending outbox、当前 live heads 和 tombstones 回填 durable revision objects，v5 增加不参与同步/导入导出的本地 `snippet_usage`，v6 增加去标识化 `sync_notifications` inbox，v7 增加 `local_snapshots` catalog。
 - v4 的 snapshot、validated no-echo remote plan、durable revision-object archive、deterministic conflict index/copy 与 exact revision acknowledgement seams 已由 production WebDAV v2 engine 消费；即时结果契约包含 deletion、conflict、pending、protocol 与 manifest generation，历史包含除 pending 外的对应计数与 protocol/generation。
 - WebDAV v2 通过 `protocol-v2.json`、immutable `objects/<revision_uuid>.json`、tombstone revisions、strong ETag 和 conditional manifest PUT 实现单向 v1→v2 activation 与跨设备 CAS；v1 legacy payload 保留但激活后忽略。
 - Snippet、summary、head/outbox/remote state 和 sync history 行解码严格验证必需类型、tags JSON、boolean、revision/hash 约束和 RFC 3339，不再静默默认。

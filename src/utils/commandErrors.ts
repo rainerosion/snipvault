@@ -16,6 +16,7 @@ export const COMMAND_ERROR_CODES = [
   "autostart",
   "credential",
   "recovery",
+  "snapshot",
   "open",
   "unknown",
 ] as const;

@@ -74,7 +74,7 @@ npm run tauri build
 
 前端测试使用 Vitest、jsdom、React Testing Library、`user-event` 和 `jest-axe`。共享 [setup.ts](../src/test/setup.ts) 提供 Testing Library 清理、jest-dom/axe 断言，以及 Tauri core invoke、event、clipboard 和 window API mock。测试现在覆盖窗口控制、列表/工具栏语义与名称、嵌套模态焦点、Settings 关闭 guard、标签 combobox、文本菜单范围/导航、HTML `lang` 同步、语言扩展穷尽分类，以及既有片段/设置/同步/安全工作流；它们仍不是应用级 E2E。命令面板、原生全局快捷键、托盘捕获、真实剪贴板可用性、recent cursor 和批量 mutation 的新增生产路径没有新测试代码（遵循本任务不新增测试代码的约束），必须通过对应的现有 gate 和隔离的真实 Tauri smoke 补充验证。
 
-Rust 测试覆盖数据库数据格式、v3/v4/v5 migration/FTS/query、ignored benchmark、凭据/设置恢复、command transaction、scheduler/event/tray pure logic，以及 WebDAV v1/v2 protocol、transport、engine 和 store seams。当前 `tiny_http` suite 只绑定 `127.0.0.1:0`，使用专用 `/dedicated-test-root/snipvault/` 路径和 fake/in-memory store；除保留的 v1 transport/engine 行为外，也覆盖 v2 精确 marker/object/manifest 路径、条件请求头、parsed metadata、不可变对象碰撞恢复，以及 fresh v2 engine bootstrap/exact acknowledgement。其余 legacy cutover、ambiguous hard-stop、CAS exhaustion、crash/retry 和并发矩阵仍主要由 synthetic/pure unit tests 覆盖。它不访问真实用户数据库、平台凭据库或真实 WebDAV 服务。
+Rust 测试覆盖数据库数据格式、v3/v4/v5/v6/v7 migration/FTS/query、ignored benchmark、凭据/设置恢复、command transaction、scheduler/event/tray pure logic，以及 WebDAV v1/v2 protocol、transport、engine 和 store seams。当前 `tiny_http` suite 只绑定 `127.0.0.1:0`，使用专用 `/dedicated-test-root/snipvault/` 路径和 fake/in-memory store；除保留的 v1 transport/engine 行为外，也覆盖 v2 精确 marker/object/manifest 路径、条件请求头、parsed metadata、不可变对象碰撞恢复，以及 fresh v2 engine bootstrap/exact acknowledgement。其余 legacy cutover、ambiguous hard-stop、CAS exhaustion、crash/retry 和并发矩阵仍主要由 synthetic/pure unit tests 覆盖。它不访问真实用户数据库、平台凭据库或真实 WebDAV 服务。按照本阶段“不要新增或修改测试相关代码”的约束，revision history/descendant restore、snapshot worker/full-vault restore、restore/write gate 与 notification inbox 没有新增 focused 自动化覆盖；必须通过既有 gate 与隔离的真实 Tauri smoke 补充验证。
 
 普通 [ci.yml](../.github/workflows/ci.yml) 在 push 和 pull request 上运行 Linux full gate：`npm ci`、format/lint/typecheck/frontend test/build、文档链接、版本一致性、图标完整性，以及 Rust fmt/check/clippy/test。workflow 不打包、不签名、不上传、不发布。发布产物仍由独立 [release.yml](../.github/workflows/release.yml) 处理。
 
@@ -98,12 +98,16 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ```text
 src/
-├── main.tsx                 # 共享启动设置、SettingsProvider、语言和前端 ready
+├── main.tsx                 # 依窗口 label 选择主 App 或独立历史根；共享启动设置、SettingsProvider、语言和主窗口 ready
 ├── boot.ts / boot.css       # Vite 管理的主题 anti-flash 和 splash 样式
 ├── App.tsx                  # 根业务、片段 reconciliation、同步/快速捕获完成协调、命令注册、批量选择和快捷键
 ├── index.css                # 全局主题变量和布局样式
 ├── types/index.ts           # 前端 Snippet / SnippetForm / query、usage、bulk 协议
 ├── components/
+│   ├── RevisionHistoryWindow.tsx # 独立原生窗口 target pull、事件刷新与 restore-request 控制器
+│   ├── RevisionHistory.tsx    # immutable history、review desk 比较与仅请求式 descendant restore UI
+│   ├── RestoreWizard.tsx      # 本地 SQLite checkpoint 管理与完整恢复确认
+│   ├── SyncNotificationCenter.tsx # 持久脱敏同步收件箱
 │   ├── CommandPalette.tsx    # 共享 ModalSurface 的命令面板
 │   ├── ModalSurface.tsx      # 共享嵌套模态栈、focus trap 和焦点恢复
 │   ├── languageExtensions.ts # 编辑器专用 parser/stream/plaintext 分类与 factory
@@ -118,7 +122,8 @@ src-tauri/
 ├── src/main.rs              # Tauri 启动、插件、窗口生命周期和 worker wiring
 ├── src/capture.rs           # 原生快速捕获、全局快捷键和脱敏完成事件
 ├── src/tray.rs              # 托盘所有权、菜单、事件与状态刷新
-├── src/sync.rs              # typed sync event 和自动同步 scheduler
+├── src/sync.rs              # typed sync event、脱敏 inbox 持久化和自动同步 scheduler
+├── src/snapshots.rs         # SQLite online snapshot、验证、catalog、恢复与保留 worker
 ├── src/commands.rs          # IPC command 与内部错误边界映射
 ├── src/error.rs             # 稳定可序列化 CommandError
 ├── src/credentials.rs       # 平台 CredentialStore 与可注入测试边界
@@ -134,7 +139,8 @@ src-tauri/
 │   ├── store.rs              # v1/v2 可注入持久化 seam；生产 SQLite adapter
 │   ├── error.rs              # 内部 structured failure 分类
 │   └── integration_tests.rs  # loopback tiny_http mock suite
-├── capabilities/default.json
+├── capabilities/default.json # main 窗口最小权限
+├── capabilities/revision-history.json # history 窗口最小标题栏权限
 ├── tauri.conf.json
 └── Cargo.toml
 ```
@@ -147,8 +153,8 @@ src-tauri/
 
 - **可复用展示和局部交互**：优先放到 `src/components/`。
 - **根业务流程、片段选择、跨组件状态**：当前集中在 [App.tsx](../src/App.tsx)；命令 registry、command enabled 状态、当前已加载项的 `Set<string>` 批量选择、dirty-editor guard 和捕获完成后的权威 reload 都必须继续通过该层协调，避免在命令面板/列表中复制业务逻辑。
-- **Tauri IPC 与片段状态**：放在 [useSnippets.ts](../src/hooks/useSnippets.ts)；`updated` 与 `recent` 排序字段都必须进入 request key，`recent` cursor 不得与 `updated` cursor 混用。usage 写入可 best-effort，但批量 mutation 必须直接等待结果。
-- **设置、同步状态与设置 IPC**：扩展 [useSettings.ts](../src/hooks/useSettings.ts) 中的 root `SettingsProvider` 和 injectable `SettingsApi`；消费者必须使用 provider，不得重新引入独立 `useSettings()` state 实例或绕过 provider 的 `get_settings` fallback。
+- **Tauri IPC 与片段状态**：放在 [useSnippets.ts](../src/hooks/useSnippets.ts)；`updated` 与 `recent` 排序字段都必须进入 request key，`recent` cursor 不得与 `updated` cursor 混用。usage 写入可 best-effort，但批量 mutation 必须直接等待结果。版本历史窗口可用窄的 direct revision IPC wrapper，但不得装载主列表 Hook 状态；新 window command 必须由 Rust 校验调用 window label。
+- **设置、同步状态与设置 IPC**：扩展 [useSettings.ts](../src/hooks/useSettings.ts) 中的 root `SettingsProvider` 和 injectable `SettingsApi`；消费者必须使用 provider，不得重新引入独立 `useSettings()` state 实例或绕过 provider 的 `get_settings` fallback。成功技术历史、持久脱敏 notification inbox 与 snapshot policy/status 都经此 provider 协调；notification reload 必须保留 request generation 保护，read/dismiss mutation 成功后要使旧 reload 失效。
 - **共享协议类型**：更新 [types/index.ts](../src/types/index.ts)，并同步核对 Rust 参数和序列化名称。
 - **外观与界面配色**：深浅偏好与 `sky | violet | emerald | amber | rose | white` 精选界面配色是独立的 persisted Settings 字段；类型、normalizer、启动镜像键和 `data-theme` / `data-accent` 写入集中在 [theme.ts](../src/theme.ts)。`ThemeProvider` 必须只消费根级 `SettingsProvider` 的权威 SettingsView；Settings 面板不得直接写 DOM attribute/localStorage 或成为第二个外观状态来源。六个精选值均须在 `index.css` 提供显式 dark × light 的 12 组完整 semantic token matrix（其中 `white` 的界面名称为“简约白”，并复现初始版本的中性深浅界面）。组件不得加入 palette-dependent raw 色值。不得把 preset 扩展为 raw CSS/hex 输入，也不得改变 syntax token、语言标签或状态语义。
 - **语言信息**：可选择项、颜色和 `LanguageId` 在 [utils/languages.ts](../src/utils/languages.ts)；parser/stream/plaintext 分类与 factory 在 [languageExtensions.ts](../src/components/languageExtensions.ts)。元数据层必须保持无 CodeMirror import；新增 ID 时两处都要更新，穷尽分类测试会在遗漏时失败。
@@ -165,7 +171,7 @@ src-tauri/
 - 外部 reload 与 save 必须保留 provider 的 request ID race protection；旧 reload 不能覆盖成功 save。
 - Settings 面板需要局部 draft/baseline，但权威状态变化时只有 clean draft 可自动采用，dirty draft 必须保留并反馈冲突。
 
-同步扩展必须保留 `SyncCompletionEvent` 的来源和状态 union；toolbar/settings direct command 由前端协调，tray/background 由 Rust event 协调，所有成功来源只调用一次 `refreshAfterSync()`。后台来源不得显示 modal。WebDAV `SyncFailure` 的 busy/retryable 元数据必须一直保留到 `CommandError` 映射；不要退回字符串匹配来判断认证/validation 是否可重试。
+同步扩展必须保留 `SyncCompletionEvent` 的来源和状态 union；toolbar/settings direct command 由前端协调，tray/background 由 Rust event 协调，每个终态恰好写入一条去标识化 inbox 记录。所有成功来源只调用一次 `refreshAfterSync()`，并刷新 snippets/settings/success history/notifications；失败或 busy 只刷新 notifications。后台来源不得显示 modal。完整 vault restore 置位 `sync_confirmation_required` 后，background scheduler 取得 WebDAV lock 后也必须重新检查该锁；只有 toolbar/settings/tray 的成功手动同步可清除它。WebDAV `SyncFailure` 的 busy/retryable 元数据必须一直保留到 `CommandError` 映射；不要退回字符串匹配来判断认证/validation 是否可重试。
 
 对片段表单做修改时，必须同步考虑：
 
@@ -178,7 +184,15 @@ src-tauri/
 - 导入导出 JSON 兼容性
 - WebDAV v2 revision object DTO 与 canonical hash/payload compatibility
 
-### 5.3 异步工作流
+### 5.3 原生辅助窗口与跨窗口请求
+
+版本历史是唯一按需创建的辅助 WebView：使用 Rust `WebviewWindowBuilder` 而不是在 `tauri.conf.json` 静态定义窗口。Windows 上不得在同步 command 或 event handler 里直接创建 WebView；`open_revision_history` 必须保持 async，并在建窗前以 Rust-managed Mutex state 写入 opaque target/generation。新窗口先 pull state，再把 event 当作刷新提示，不能让首次 target 仅依赖事件传送。任何新注册的 `#[tauri::command]` 都必须同步列入 [build.rs](../src-tauri/build.rs) 的 build-time `AppManifest` command 表，并在对应 capability 显式授予 `allow-<command>`；注册并不等于自动允许所有 WebView 调用。
+
+该 state 只能保存必要的 opaque snippet/revision IDs、generation、有限 restore request 和 `succeeded | cancelled | failed` outcome；禁止保存正文、绝对路径、远端 URL、凭据、token 或原始错误。对 history 相关 command 除 capability 外还要验证 `WebviewWindow.label()`：main 只能 open/consume/complete，且 mutation `restore_snippet_revision` 也必须拒绝非 main 调用；history 只能 read target/request restore/read outcome。每个新窗口都需独立 capability 文件，最小化权限；history 仅取得标题栏实际所需的 core/window 控制（含 `start_dragging`），不要为方便让 child 获得 clipboard、shell、filesystem、show/hide 或主窗口权限。
+
+跨窗口恢复必须由 `App` 主窗口执行。child window 只发 request；main 要同时监听通知并在注册后 pull pending request，防止 listener 尚未建立时丢失。主窗口独占 dirty guard、Dialog、权威 current-head 读取、restore IPC 和 reconciliation；不要在 child window 重建它们或让无关 dirty editor 被覆盖。主窗口隐藏到托盘时隐藏 child，实际退出前 destroy child；child CloseRequested 仅 hide 以供复用。
+
+### 5.4 异步工作流
 
 保存/导航工作流当前以 `handleSave(): Promise<boolean>` 表示成功与否；切换、新建和取消只能在返回 `true` 后继续。后续修改必须保留这个约束，不能在内部吞掉错误后让调用者误判成功。
 
@@ -195,6 +209,7 @@ src-tauri/
 - Plaintext 以及有意不支持的兼容 ID 必须显式返回空 `Extension`，不要通过漏掉 switch 分支获得隐式 fallback。
 - 修改编辑器主题、光标、选区、滚动或换行：更新 `buildMainExtensions()` 中的 `EditorView.theme()` / `HighlightStyle`。编辑器 surface/gutter/active gutter、光标、选区、匹配括号和 MiniMap viewport 必须只使用 `--editor-*` / `--minimap-*` 语义 token，不能重新硬编码 preset 色。Canvas 的背景色应从 `.minimap-pane` 的计算 token 读取，并在有效深浅模式或精选配色变化时重绘；syntax highlighter 仍必须先注册项目复合 `HighlightStyle`，再注册 UIW GitHub 主题，使它与 Codeglance 共用的 class 颜色在真实编辑区中具有最终级联优先级；不得额外添加会覆盖该顺序的 syntax highlighter。
 - 修改 Codeglance：复用 `MiniMap` 与 [syntaxHighlight.ts](../src/components/syntaxHighlight.ts) 的共享语言/语法高亮范围适配器；不要再建立独立正则 tokenizer 或硬编码 token 调色板。
+- 版本历史 live preview/diff 必须通过 [LazyRevisionCodePreview.tsx](../src/components/LazyRevisionCodePreview.tsx) / [LazyRevisionDiffViewer.tsx](../src/components/LazyRevisionDiffViewer.tsx) 按需加载，不能因 [RevisionHistory.tsx](../src/components/RevisionHistory.tsx) 被 App 静态引用而把 parser/highlighter 提前纳入启动图。它们重用 [codeHighlightTheme.ts](../src/components/codeHighlightTheme.ts) 的 editor token palette 和 [syntaxHighlight.ts](../src/components/syntaxHighlight.ts) 范围；plain DOM `<span>` 使用生成 class 前须调用 `StyleModule.mount(document, HighlightStyle.module)`，绝不能用 `dangerouslySetInnerHTML`。逐行比较由 [lineDiff.ts](../src/components/lineDiff.ts) 本地执行，必须保留字符/行数/matrix/渲染行数/时间上限与完整并排源码 fallback；历史 code review 固定 `white-space: pre` 和行号，弹性双栏不得为布局制造外层横向滚动，只有真实超出单个 source pane 的长行可在所属 pane 内横向滚动，详细对齐仅同步垂直位置。
 - 修改滚动：以 `EditorView.scrollDOM` 为主滚动源，不额外截获 wheel 事件。
 - 编辑器只在 `SnippetEditor` 首次渲染时通过 [LazySnippetEditor.tsx](../src/components/LazySnippetEditor.tsx) 的 lazy boundary 加载；不得在 `App.tsx` 静态导入 CodeMirror runtime 或无用户编辑意图时 idle-prefetch。`SnippetEditorLoadBoundary` 只能隔离懒模块被拒绝或 editor render 的 pane 级失败：Retry 必须由用户显式触发、由 `LazySnippetEditor` 在组件边界创建新的 lazy identity 并继续使用 App 持有的 selection/form；不得自动轮询、重启 Vite、重取详情或清空草稿。开发 retry 可使用独立 Vite `/src` query URL 避免浏览器缓存 rejected import，生产初始和 retry 路径必须继续有静态可分析的 editor import。文本菜单只有在明确命中 `.cm-editor` 时才可在其异步 action 内按需解析 `EditorView`，解析失败必须安全关闭，不得转而对其他元素执行操作。
 - [vite.config.ts](../vite.config.ts) 必须将 CodeMirror runtime、services、UI 与 parser/stream language family 分配到有界语义 chunk；新增语言包及其 Lezer grammar 必须进入对应 family，不能恢复 `@codemirror`/`@lezer`/`codemirror` 的宽泛 catch-all，也不能提高 `chunkSizeWarningLimit` 隐藏超限。chunk 拆分只能改变传输与缓存边界，`getLanguageExtensions()`、Codeglance 解析和同步 minimap 高亮仍必须在 editor 内保持当前同步共享契约；若要做按语言异步加载，需要独立设计 reconfigure、stale-result 和 fallback 流程。
@@ -277,6 +292,7 @@ Settings 和 Promise Dialog 必须复用 [ModalSurface.tsx](../src/components/Mo
 - `autostart`
 - `credential`
 - `recovery`
+- `snapshot`
 - `open`
 - `unknown`
 
@@ -301,9 +317,17 @@ Tauri 2 window event 使用 `getCurrentWindow().listen(...)`；异步注册必�
 
 ### 8.2 Schema 变更
 
-数据库使用 `PRAGMA user_version`，当前 schema v5，`initialize_connection()` 只按 `v0→v1→v2→v3→v4→v5` 顺序执行迁移：v1 建立业务表，v2 严格扫描既有行并建立/回填 FTS5 与 triggers，v3 保持 `snippets`/FTS 设计不变并增加稳定设备身份、revision head/tombstone、不可变 durable outbox、remote state、conflict index 和扩展 sync history，v4 增加 durable `revision_objects` 并从 outbox、当前 live heads 和 tombstones 回填 ancestry，v5 增加本机 `snippet_usage`、recent index 和 live-snippet 删除清理 trigger。既有磁盘 v0/v1/v2/v3/v4 在任何升级步骤前只创建并验证一个来源版本的 `pre-v5` online backup；任一步失败都会保留失败副本、恢复并重新验证原来源版本。真正新库、v5 重开和未来版本拒绝不创建升级备份。
+数据库使用 `PRAGMA user_version`，当前 schema v7，`initialize_connection()` 只按 `v0→v1→v2→v3→v4→v5→v6→v7` 顺序执行迁移：v1 建立业务表，v2 严格扫描既有行并建立/回填 FTS5 与 triggers，v3 保持 `snippets`/FTS 设计不变并增加稳定设备身份、revision head/tombstone、不可变 durable outbox、remote state、conflict index 和扩展 sync history，v4 增加 durable `revision_objects` 并从 outbox、当前 live heads 和 tombstones 回填 ancestry，v5 增加本机 `snippet_usage`、recent index 和 live-snippet 删除清理 trigger，v6 增加去标识化 `sync_notifications` inbox，v7 增加 `local_snapshots` catalog。既有磁盘 v0/v1/v2/v3/v4/v5/v6 在任何升级步骤前只创建并验证一个来源版本的 `pre-v7` online backup；任一步失败都会保留失败副本、恢复并重新验证原来源版本。真正新库、v7 重开和未来版本拒绝不创建升级备份。
 
 `snippet_usage` 只用于本机“最近使用”：打开详情、复制已保存正文和快速捕获可 best-effort 写入 `last_used_at`/计数，但不改变 snippet `updated_at`，也绝不能进入 revision payload/object、outbox、WebDAV、JSON 导出或导入。既有升级片段不伪造使用历史。删除 trigger 只清理本地 usage，不改变 tombstone/revision 语义。
+
+### 8.3 本地快照、恢复与通知不变量
+
+[snapshots.rs](../src-tauri/src/snapshots.rs) 是完整 vault checkpoint 的唯一业务边界。创建时只能从活动 SQLite connection 执行 online backup 到受控 snapshots 目录中的 pending 文件；候选必须以独立 `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NOFOLLOW` 连接通过 integrity、exact schema、唯一 `sync_identity`、live count、file size 与流式 SHA-256 验证，才可原子 rename、写入 catalog 并在成功后执行 retention。文件名只能是后端生成的 canonical `snapshot-<uuid>.sqlite`，IPC 只返回 opaque ID 和安全摘要，不能暴露 filename、checksum 或绝对路径。
+
+完整 restore 必须依次取得 snapshot serialization、WebDAV operation 与 restore/write gate，先重新验证目标、建立 verified emergency checkpoint，再由 SQLite `Backup` 写入既有活动 connection；不得以文件 copy/rename 覆盖打开的 DB。所有生产数据库 mutation—including snippet CRUD/import/usage/history restore、quick capture、remote plan/commit 与 notification read/dismiss/write—必须经 `snapshots::mutation_guard()`，避免 emergency checkpoint 与数据库替换之间丢失提交。restore 失败时应通过 emergency checkpoint 复原活动 connection；恢复成功后 catalog reconciliation、retention 失败或记录 `restore_required` 通知失败不能谎报已经提交的 vault restore 为失败。
+
+`sync_notifications` 是与 20 条成功 `sync_versions` 分离的本地隐私边界：只可持久化固定 source/status/category、稳定 error code/retryable、聚合计数、protocol/generation、时间与 read/dismiss metadata；绝不保存自由文本消息、URL、用户名、secret、远端响应、路径、片段正文或 revision/hash。写入最多保留最新 200 条，列表默认 50、上限 100。完整 SQLite snapshot 会包含 inbox 和 catalog；JSON export/import、WebDAV payload 与 OS credential store 均不包含它们。
 
 v2→v3 会为每条 live snippet 以固定 canonical JSON 字段顺序计算 SHA-256，并由 `id + content hash + updated_at` 生成确定性 `legacy-<sha256>` head；这些历史 head 不加入 outbox，避免升级时把整个现有库误当成待发布本地编辑。数据库 singleton device ID 只在 v3 migration 中生成一次，重复初始化必须保持稳定。
 
@@ -315,7 +339,7 @@ v2→v3 会为每条 live snippet 以固定 canonical JSON 字段顺序计算 SH
 - 测试真正新库、每个历史版本、既有空库、重复执行、高于当前版本的拒绝路径、稳定 identity、确定性 backfill、损坏 backfill rollback 和每个来源版本的磁盘恢复。
 - 不得对当前用户数据库做测试性手工修改、删除或迁移演练；migration/recovery fixture 只使用 temp DB。
 
-### 8.3 Revision、tombstone 与 outbox 不变量
+### 8.4 Revision、tombstone 与 outbox 不变量
 
 本地 create、update、favorite、delete 和 import winner 必须在同一 SQLite transaction 中完成 live snippet、既有 FTS trigger 副作用、`snippet_heads`、durable `revision_objects` 和按需 `revision_outbox` 写入；任一步失败必须整体回滚。delete 删除 live row/FTS 并保留 tombstone head/object/outbox。update 必须在该 transaction 内读取当前 head 并比较前端 `base_revision_id`；不匹配返回结构化 `stale_revision`，前端刷新权威 detail/base revision，但不得覆盖 dirty draft。
 
@@ -331,11 +355,11 @@ Production WebDAV v2 必须复用以下数据库边界：
 
 修改上述不变量至少覆盖 stale base、FTS tombstone removal、mutation rollback、strict row decoding、count/byte 精确边界、remote no-echo、conflict retry、invalid-plan rollback、exact/repeated ack 和 later-edit preservation。
 
-### 8.4 时间戳所有权
+### 8.5 时间戳所有权
 
 正常创建、编辑和收藏的版本时间由 Rust 在成功写入时生成，创建/更新 IPC 返回最终 `Snippet`。前端不得重新引入客户端时间作为数据库版本，也不能在本地伪造 `updated_at`。导入和 WebDAV 例外地使用外部数据携带的时间，但必须先通过 RFC 3339 与字段边界校验。
 
-### 8.5 查询、FTS 与摘要/详情协议
+### 8.6 查询、FTS 与摘要/详情协议
 
 主列表只能使用 `SnippetSummary` 分页协议，不得重新通过列表 IPC 返回完整 `content`。`updated`（默认）使用 `(updated_at DESC, id DESC)`；`recent` 先按 usage 是否存在、再按 `last_used_at DESC`，最后用 `(updated_at DESC, id DESC)` 稳定打破并列。两种排序的 cursor 都编码排序模式和对应排序键，不能互用。后端 page size 封顶 200；前端当前每页 100，搜索、筛选或排序变化会清空 cursor 和当前批量选择，并以 generation/query/cursor guard 丢弃 stale response。完整正文仅由 `get_snippet(id)` 懒加载，权威刷新必须继续保留 dirty editor。
 
@@ -351,7 +375,7 @@ cargo test --manifest-path src-tauri/Cargo.toml db::tests::benchmark_query_1k_an
 
 它使用内存临时数据库，不访问用户数据；结果是开发机 checkpoint，不是稳定性能 SLA。
 
-### 8.6 导入/导出格式
+### 8.7 导入/导出格式
 
 当前导入先限制 25 MiB / 10,000 条，并接受 `snipvault.snippets` schema v1 envelope 或遗留顶层 `Snippet[]`。Envelope version/metadata 和全部 Snippet 必须在写入前验证，再在单个 transaction 中按 ID/`updated_at` 合并；每个 winner 同时写 live row、FTS、head、revision object 和 import-origin outbox，任一无效条目或 pending limit 失败都会整体拒绝。返回结构为 `input_count / inserted / updated / skipped`。schema v1 envelope 可加法携带 `revision_id`，旧文档因 serde default 继续兼容；import 不信任该值作为本地 head，而会为 winner 生成新的本地 revision。
 
@@ -553,6 +577,9 @@ cargo test --manifest-path src-tauri/Cargo.toml
 - 命令面板的 `Ctrl/Cmd+K`、初始焦点、过滤、Arrow/Home/End/Enter/Escape、disabled 项、Settings/Promise Dialog 模态优先级与关闭后的焦点恢复。
 - 批量选择的 200 项可见边界、select-loaded/clear、收藏/取消收藏/删除、筛选或排序切换清空选择，以及当前 dirty 片段包含在批量操作时的 Save/Discard/Cancel guard。
 - 在隔离的临时数据目录、无真实 WebDAV/凭据且只使用非敏感剪贴板文本的环境中，验证全局快捷键注册成功或冲突 fallback、托盘快速捕获、隐藏/最小化窗口时的反馈、recent usage 更新，以及事件/日志不含剪贴板文本或标题。
+- 对同一示例片段执行多次保存：从主编辑器打开 History，确认只创建或复用一个独立原生窗口，紧凑时间线选中态与主列表一致，右侧 review command/context band 和唯一 code stage 不出现 document 级嵌套纵向滚动。检查分页元数据、live 版本的语法高亮预览、equal/insert/delete/replace/空行/长行/末尾换行的两路逐行比较和行号；代码不自动换行，正常桌面宽度（至少 1200px）没有布局造成的外层横向滚动，双 live pane 只同步垂直滚动，只有实际超出单个 source pane 的长行可在该 pane 内横向滚动。将窗口缩到 1000–1199px，确认只显示一个 pane、Baseline / Selected 原生按钮组可用键盘访问且默认 Selected，切换不重复 comparison IPC 或重新计算，并保留已加载内容/滚动状态。快速切换主窗口的目标片段、历史选择项或比较目标，确认旧异步结果不会覆盖新 generation；超出本地 diff 限制的可丢弃大文本快速退回带行号的完整并排源代码。live/tombstone 与 tombstone/tombstone 不得伪造正文，tombstone/current head 的恢复入口禁用。对历史 live revision 请求恢复时，确认主窗口被显示/聚焦；仅同一 target 的 dirty editor 触发 Save/Discard/Cancel guard，无关 dirty 草稿保留；确认后产生新的 current descendant 而非改写旧 revision，成功才隐藏历史窗口且不自动同步。关闭历史窗口应隐藏以便复用；主窗口最小化到托盘时历史窗口也隐藏，主窗口实际退出不遗留 child。该流程不配置或访问真实 WebDAV。
+- 启用/切换 daily、weekly 与 7/30/90 本地 snapshot policy，并在受控向导手动创建 checkpoint；修改可丢弃的隔离数据后确认恢复会先产生 emergency checkpoint、设置和 OS credentials 未变、界面正确 reload，scheduled sync latch 生效且只有工具栏/设置/托盘的成功手动同步可解除。不得以真实用户 DB、真实凭据或任意文件路径执行此验证。
+- 在没有 WebDAV URL 的隔离窗口和可控 tray/background 路径检查一条脱敏 notification 是否准确落入 inbox；检查未读徽标、已读、关闭、retry、默认 50/最多 100 列表和 failure/busy 文案，确认没有 URL、用户名、secret、路径、正文、revision ID 或原始远端错误。background 反馈必须保持非模态。
 - 主题、语言、设置保存和重启恢复。
 - 导入/导出和打开目录。
 - 托盘、关闭、第二实例和自启动。

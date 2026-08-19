@@ -25,6 +25,8 @@ export type AccentPreset =
   | "white";
 export type AppLanguage = "zh" | "en";
 export type WebDavAuthMode = "auto" | "basic" | "digest" | "bearer" | "none";
+export type LocalSnapshotFrequency = "daily" | "weekly";
+export type LocalSnapshotRetention = 7 | 30 | 90;
 export type CredentialStatusKind =
   | "configured"
   | "not_configured"
@@ -56,6 +58,12 @@ export interface SettingsView {
   webdav_timeout_secs: number;
   auto_sync: boolean;
   sync_interval_minutes: number;
+  /** Optional only while older frontend-provided boot/test values remain supported. */
+  local_snapshot_enabled?: boolean;
+  local_snapshot_frequency?: LocalSnapshotFrequency;
+  local_snapshot_retention?: LocalSnapshotRetention;
+  /** Backend-owned latch set by a full-vault restore until a user sync succeeds. */
+  sync_confirmation_required?: boolean;
   editor_line_wrap: boolean;
   last_sync_at: string;
   webdav_secret_configured: boolean;
@@ -75,6 +83,9 @@ export interface SettingsDraft {
   webdav_timeout_secs: number;
   auto_sync: boolean;
   sync_interval_minutes: number;
+  local_snapshot_enabled: boolean;
+  local_snapshot_frequency: LocalSnapshotFrequency;
+  local_snapshot_retention: LocalSnapshotRetention;
   editor_line_wrap: boolean;
 }
 
@@ -111,6 +122,33 @@ export interface SyncVersion {
   message: string;
 }
 
+export type SyncNotificationCategory =
+  | "success"
+  | "pending"
+  | "conflict"
+  | "failure"
+  | "busy"
+  | "restore_required";
+
+export interface SyncNotification {
+  id: string;
+  occurred_at: string;
+  source: SyncSource;
+  status: SyncCompletionStatus;
+  category: SyncNotificationCategory;
+  error_code: CommandError["code"] | null;
+  retryable: boolean;
+  uploaded_count: number | null;
+  downloaded_count: number | null;
+  deleted_count: number | null;
+  conflict_count: number | null;
+  pending_count: number | null;
+  total_count: number | null;
+  protocol_version: number | null;
+  manifest_generation: number | null;
+  read_at: string | null;
+}
+
 export type SyncSource = "toolbar" | "settings" | "tray" | "background";
 export type SyncCompletionStatus = "result" | "error" | "busy";
 
@@ -124,8 +162,12 @@ export interface SyncCompletionEvent {
 export interface SettingsApi {
   load: () => Promise<SettingsView>;
   save: (settings: SettingsDraft, secretAction: SecretAction) => Promise<SettingsView>;
-  sync: () => Promise<SyncResult>;
+  sync: (source: Extract<SyncSource, "toolbar" | "settings">) => Promise<SyncResult>;
   getSyncVersions: () => Promise<SyncVersion[]>;
+  getSyncNotifications?: (limit?: number) => Promise<SyncNotification[]>;
+  markSyncNotificationRead?: (id: string) => Promise<void>;
+  dismissSyncNotification?: (id: string) => Promise<void>;
+  markAllSyncNotificationsRead?: () => Promise<void>;
   getSystemTheme: () => Promise<string>;
   getSystemLocale: () => Promise<string>;
 }
@@ -137,8 +179,16 @@ const defaultApi: SettingsApi = {
       newSettings: settings,
       secretAction,
     }),
-  sync: () => invoke<SyncResult>("sync_upload"),
+  sync: (source) => invoke<SyncResult>("sync_upload", { source }),
   getSyncVersions: () => invoke<SyncVersion[]>("get_sync_versions"),
+  getSyncNotifications: (limit = 50) =>
+    invoke<SyncNotification[]>("list_sync_notifications", { limit }),
+  markSyncNotificationRead: (id) =>
+    invoke<void>("mark_sync_notification_read", { id }),
+  dismissSyncNotification: (id) =>
+    invoke<void>("dismiss_sync_notification", { id }),
+  markAllSyncNotificationsRead: () =>
+    invoke<void>("mark_all_sync_notifications_read"),
   getSystemTheme: () => invoke<string>("get_system_theme"),
   getSystemLocale: () => invoke<string>("get_system_locale"),
 };
@@ -152,12 +202,19 @@ export interface SettingsContextValue {
   syncHistory: SyncVersion[];
   historyLoading: boolean;
   historyError: CommandError | null;
+  syncNotifications: SyncNotification[];
+  notificationsLoading: boolean;
+  notificationsError: CommandError | null;
   syncStatus: SyncCompletionEvent | null;
   reload: () => Promise<SettingsView>;
   load: () => Promise<SettingsView>;
   save: (draft: SettingsDraft, secretAction?: SecretAction) => Promise<SettingsView>;
   sync: (source: Extract<SyncSource, "toolbar" | "settings">) => Promise<SyncResult>;
   reloadHistory: () => Promise<SyncVersion[]>;
+  reloadNotifications: () => Promise<SyncNotification[]>;
+  markSyncNotificationRead: (id: string) => Promise<void>;
+  dismissSyncNotification: (id: string) => Promise<void>;
+  markAllSyncNotificationsRead: () => Promise<void>;
   getSyncVersions: () => Promise<SyncVersion[]>;
   getSystemTheme: () => Promise<string>;
   getSystemLocale: () => Promise<string>;
@@ -185,6 +242,9 @@ export function settingsToDraft(settings: SettingsView): SettingsDraft {
     webdav_timeout_secs: settings.webdav_timeout_secs,
     auto_sync: settings.auto_sync,
     sync_interval_minutes: settings.sync_interval_minutes,
+    local_snapshot_enabled: settings.local_snapshot_enabled ?? false,
+    local_snapshot_frequency: settings.local_snapshot_frequency ?? "daily",
+    local_snapshot_retention: settings.local_snapshot_retention ?? 7,
     editor_line_wrap: settings.editor_line_wrap,
   };
 }
@@ -206,11 +266,15 @@ export function SettingsProvider({
   const [syncHistory, setSyncHistory] = useState<SyncVersion[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<CommandError | null>(null);
+  const [syncNotifications, setSyncNotifications] = useState<SyncNotification[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsError, setNotificationsError] = useState<CommandError | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncCompletionEvent | null>(null);
   const settingsRef = useRef<SettingsView | null>(null);
   const latestReloadRef = useRef(0);
   const latestSaveRef = useRef(0);
   const activeSyncsRef = useRef(0);
+  const latestNotificationsRef = useRef(0);
 
   const applySettings = useCallback((next: SettingsView) => {
     settingsRef.current = next;
@@ -296,11 +360,11 @@ export function SettingsProvider({
   );
 
   const sync = useCallback(
-    async (_source: Extract<SyncSource, "toolbar" | "settings">) => {
+    async (source: Extract<SyncSource, "toolbar" | "settings">) => {
       activeSyncsRef.current += 1;
       setSyncing(true);
       try {
-        return await api.sync();
+        return await api.sync(source);
       } finally {
         activeSyncsRef.current -= 1;
         if (activeSyncsRef.current === 0) setSyncing(false);
@@ -324,6 +388,62 @@ export function SettingsProvider({
     }
   }, [api]);
 
+  const reloadNotifications = useCallback(async () => {
+    const requestId = ++latestNotificationsRef.current;
+    setNotificationsLoading(true);
+    setNotificationsError(null);
+    try {
+      const notifications = await api.getSyncNotifications?.() ?? [];
+      if (requestId === latestNotificationsRef.current) {
+        setSyncNotifications(notifications);
+      }
+      return notifications;
+    } catch (cause) {
+      if (requestId === latestNotificationsRef.current) {
+        setNotificationsError(normalizeCommandError(cause));
+      }
+      throw cause;
+    } finally {
+      if (requestId === latestNotificationsRef.current) {
+        setNotificationsLoading(false);
+      }
+    }
+  }, [api]);
+
+  const markSyncNotificationRead = useCallback(async (id: string) => {
+    if (!api.markSyncNotificationRead) return;
+    await api.markSyncNotificationRead(id);
+    latestNotificationsRef.current += 1;
+    setSyncNotifications((notifications) =>
+      notifications.map((notification) =>
+        notification.id === id && notification.read_at === null
+          ? { ...notification, read_at: new Date().toISOString() }
+          : notification,
+      ),
+    );
+  }, [api]);
+
+  const dismissSyncNotification = useCallback(async (id: string) => {
+    if (!api.dismissSyncNotification) return;
+    await api.dismissSyncNotification(id);
+    latestNotificationsRef.current += 1;
+    setSyncNotifications((notifications) =>
+      notifications.filter((notification) => notification.id !== id),
+    );
+  }, [api]);
+
+  const markAllSyncNotificationsRead = useCallback(async () => {
+    if (!api.markAllSyncNotificationsRead) return;
+    await api.markAllSyncNotificationsRead();
+    latestNotificationsRef.current += 1;
+    const readAt = new Date().toISOString();
+    setSyncNotifications((notifications) =>
+      notifications.map((notification) =>
+        notification.read_at === null ? { ...notification, read_at: readAt } : notification,
+      ),
+    );
+  }, [api]);
+
   const value = useMemo<SettingsContextValue>(
     () => ({
       settings,
@@ -334,12 +454,19 @@ export function SettingsProvider({
       syncHistory,
       historyLoading,
       historyError,
+      syncNotifications,
+      notificationsLoading,
+      notificationsError,
       syncStatus,
       reload,
       load: reload,
       save,
       sync,
       reloadHistory,
+      reloadNotifications,
+      markSyncNotificationRead,
+      dismissSyncNotification,
+      markAllSyncNotificationsRead,
       getSyncVersions: reloadHistory,
       getSystemTheme: api.getSystemTheme,
       getSystemLocale: api.getSystemLocale,
@@ -351,13 +478,20 @@ export function SettingsProvider({
       historyError,
       historyLoading,
       loading,
+      notificationsError,
+      notificationsLoading,
       reload,
       reloadHistory,
+      reloadNotifications,
+      markSyncNotificationRead,
+      dismissSyncNotification,
+      markAllSyncNotificationsRead,
       save,
       saving,
       settings,
       sync,
       syncHistory,
+      syncNotifications,
       syncing,
       syncStatus,
     ],

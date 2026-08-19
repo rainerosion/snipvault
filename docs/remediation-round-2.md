@@ -177,7 +177,7 @@ workflow 使用只读 contents 权限，不构建发布包、不签名、不上�
 - v2 使用 FTS5 external-content table 和 insert/update/delete triggers，覆盖 CRUD、收藏、导入与 WebDAV merge。trigram 可用且查询至少 3 字符时使用字面量 MATCH，否则以转义 LIKE 保留子串/CJK；不做相关度排序。
 - 新增 `SnippetSummary` cursor query、`get_snippet(id)` 与 distinct tags IPC。列表页限制正文 preview，按 `(updated_at, id)` 稳定排序；query/language/favorite/exact-tag 组合，通配符和反斜线按字面值。
 - [useSnippets.ts](../src/hooks/useSnippets.ts) 使用 generation/query/cursor 与独立 append request guards、独立首屏与追加状态、100 条 Load More；并立即阻止同一 cursor 的重复在途追加。[App.tsx](../src/App.tsx) 在选择后懒加载详情，提供详情 loading/error/retry，mutation/sync/import 只做一次权威摘要刷新，并继续保护 dirty editor。
-- Rust tests 覆盖 decoder、format compatibility、collision、v1/v2/future/recovery、FTS trigger、分页、literal wildcard 与 CJK；前端覆盖 stale response、pagination reset/成功追加/重复追加 guard/load-more、lazy detail/stale detail/retry 和 dirty reconciliation。另有 ignored 1k/10k 内存 benchmark，运行方式见 [开发指南](development.md#85-查询fts-与摘要详情协议)。
+- Rust tests 覆盖 decoder、format compatibility、collision、v1/v2/future/recovery、FTS trigger、分页、literal wildcard 与 CJK；前端覆盖 stale response、pagination reset/成功追加/重复追加 guard/load-more、lazy detail/stale detail/retry 和 dirty reconciliation。另有 ignored 1k/10k 内存 benchmark，运行方式见 [开发指南](development.md#86-查询fts-与摘要详情协议)。
 
 剩余搜索边界是无 trigram tokenizer 时为保持语义而退化为 LIKE，见 [已知限制](known-limitations.md#31-无-trigram-tokenizer-时搜索退化为-like)。
 

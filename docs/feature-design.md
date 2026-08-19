@@ -1,6 +1,6 @@
 # SnipVault 功能设计
 
-> 本文按用户能力描述当前 v2.3.0 发布实现，截至 2026-08-14。异常行为和能力缺口统一链接到 [已知限制](known-limitations.md)，不在本文中包装为预期设计。
+> 本文按用户能力描述当前开发中的 v2.3.0 实现，截至 2026-08-17。异常行为和能力缺口统一链接到 [已知限制](known-limitations.md)，不在本文中包装为预期设计。
 
 ## 1. 产品信息架构
 
@@ -17,6 +17,9 @@ flowchart TB
         EDITOR[右栏：片段编辑器]
     end
     SETTINGS[设置模态层] -. 覆盖 .-> MAIN
+    HISTORY[独立版本历史窗口] -. 原生工作区 .-> EDITOR
+    RESTORE[快照恢复向导] -. 嵌套设置 .-> SETTINGS
+    INBOX[同步通知中心] -. 覆盖 .-> MAIN
     PALETTE[命令面板模态层] -. 覆盖 .-> MAIN
     DIALOG[全局对话框] -. 覆盖 .-> MAIN
     CAPTURE[原生快捷键 / 托盘快速捕获] --> MAIN
@@ -26,7 +29,7 @@ flowchart TB
 - 左栏固定显示当前过滤结果；结果使用语义 list/listitem，每个片段有独立打开详情按钮、复选框以及同级收藏和删除按钮，不产生嵌套交互元素。复选框不打开详情；批量操作只针对当前已加载的至多 200 项。
 - 右栏在无选择时显示空状态；选择片段或新建草稿时懒加载编辑器。
 - 设置在同一个 WebView 中以 overlay 方式显示，不创建第二个系统窗口。
-- Settings 与全局 Dialog 共享模态栈，提供 dialog/alertdialog 语义、确定性初始焦点、焦点约束、背景隔离和关闭后焦点恢复；嵌套时只有最上层响应 Tab/Escape。
+- 设置、快照恢复、通知中心与全局 Dialog 共享模态栈，提供 dialog/alertdialog 语义、确定性初始焦点、焦点约束、背景隔离和关闭后焦点恢复；嵌套时只有最上层响应 Tab/Escape。版本历史是独立原生窗口，不属于该 DOM 模态栈：关闭会隐藏窗口以便复用，恢复确认和 Save/Discard/Cancel 始终回到主窗口处理。
 
 主要编排位于 [App.tsx](../src/App.tsx)，视觉样式位于 [index.css](../src/index.css)。
 
@@ -41,6 +44,7 @@ flowchart TB
 | 收藏筛选 | 工具栏星标 | 在“全部”和“只看收藏”之间切换 | [Toolbar.tsx](../src/components/Toolbar.tsx) |
 | 新建 | 新建按钮、空状态、`Ctrl/Meta+N` | 创建本地草稿，保存时前端生成 UUID | [App.tsx](../src/App.tsx)、[useSnippets.ts](../src/hooks/useSnippets.ts) |
 | 编辑与保存 | 编辑器、`Ctrl/Meta+S` | 保存标题、代码、语言、描述、标签、收藏 | [SnippetEditor.tsx](../src/components/SnippetEditor.tsx)、[commands.rs](../src-tauri/src/commands.rs) |
+| 版本历史与恢复 | 已保存片段编辑器的 History | 打开或复用独立原生窗口，分页检查 immutable revision、以紧凑时间线/语法预览/并排比较审阅两个版本；只可将历史 live 内容恢复为新的 descendant revision，tombstone 不可恢复、不会自动同步 | [RevisionHistoryWindow.tsx](../src/components/RevisionHistoryWindow.tsx)、[RevisionHistory.tsx](../src/components/RevisionHistory.tsx)、[commands.rs](../src-tauri/src/commands.rs) |
 | 未保存保护 | 切换、新建、取消 | 显示“保存 / 不保存 / 取消”三选一 Dialog | [Dialog.tsx](../src/components/Dialog.tsx)、[App.tsx](../src/App.tsx) |
 | 删除 | 列表卡片删除按钮 | 确认后按 ID 删除，并在必要时清空编辑区 | [App.tsx](../src/App.tsx)、[db.rs](../src-tauri/src/db.rs) |
 | 收藏 | 列表星标或编辑器星标 | 列表立即持久化；编辑器仅修改表单，保存后持久化 | [SnippetList.tsx](../src/components/SnippetList.tsx)、[SnippetEditor.tsx](../src/components/SnippetEditor.tsx) |
@@ -53,9 +57,11 @@ flowchart TB
 | 文本右键菜单 | input、textarea、CodeMirror | 剪切、复制、粘贴、全选；编辑器额外切换换行 | [App.tsx](../src/App.tsx) |
 | JSON 导入 | 工具栏上传按钮 | 读取 `.json`，按 ID 和时间戳合并，再刷新列表 | [Toolbar.tsx](../src/components/Toolbar.tsx)、[db.rs](../src-tauri/src/db.rs) |
 | JSON 导出 | 工具栏下载按钮、`Ctrl/Meta+E` | 后端写文件，成功后可通过受控命令打开后端派生的导出目录 | [commands.rs](../src-tauri/src/commands.rs)、[paths.rs](../src-tauri/src/paths.rs) |
-| 设置 | 工具栏或托盘 | 使用共享权威脱敏设置、可编辑非敏感 draft、显式凭据操作、恢复状态、外部更新提示和未保存关闭保护 | [Settings.tsx](../src/components/Settings.tsx)、[useSettings.ts](../src/hooks/useSettings.ts) |
-| 手动同步 | 工具栏、设置、托盘 | 三个入口执行同一个 WebDAV 合并，并通过统一完成协调刷新片段、设置和历史 | [App.tsx](../src/App.tsx)、[sync.rs](../src-tauri/src/sync.rs) |
-| 同步历史 | 设置页展开项 | 显示后端最近 20 条同步记录 | [Settings.tsx](../src/components/Settings.tsx)、[db.rs](../src-tauri/src/db.rs) |
+| 设置 | 工具栏或托盘 | 使用共享权威脱敏设置、可编辑非敏感 draft、显式凭据操作、恢复状态、local SQLite snapshot 策略/管理、外部更新提示和未保存关闭保护 | [Settings.tsx](../src/components/Settings.tsx)、[useSettings.ts](../src/hooks/useSettings.ts) |
+| 本地快照与完整恢复 | 设置的 Manage snapshots | 创建/列出后端验证的本地 SQLite checkpoint；恢复前创建 emergency checkpoint，完整恢复活动 vault，设置/OS 凭据不变并暂停自动同步 | [RestoreWizard.tsx](../src/components/RestoreWizard.tsx)、[snapshots.rs](../src-tauri/src/snapshots.rs) |
+| 手动同步 | 工具栏、设置、托盘 | 三个入口执行同一个 WebDAV 合并；每个终态写一条脱敏通知，成功时统一刷新片段、设置、成功历史和 inbox | [App.tsx](../src/App.tsx)、[sync.rs](../src-tauri/src/sync.rs) |
+| 同步通知 | 工具栏铃铛 | 持久、去标识化的终态 inbox，显示未读、已读、关闭和可重试的 Sync now；background 不弹 modal | [SyncNotificationCenter.tsx](../src/components/SyncNotificationCenter.tsx)、[db.rs](../src-tauri/src/db.rs) |
+| 同步历史 | 设置页展开项 | 显示后端最近 20 条成功技术记录；与通知 inbox 分离 | [Settings.tsx](../src/components/Settings.tsx)、[db.rs](../src-tauri/src/db.rs) |
 | 托盘 | 系统托盘 | 显示窗口、从剪贴板快速捕获、同步、设置、自启、退出 | [tray.rs](../src-tauri/src/tray.rs) |
 | 单实例 | 再次启动程序 | 唤醒并聚焦已有窗口 | [main.rs](../src-tauri/src/main.rs) |
 | 国际化 | 设置语言 | 中文/英文运行时切换并保存 | [LanguageContext.tsx](../src/context/LanguageContext.tsx)、[i18n](../src/i18n/index.ts) |
@@ -248,9 +254,45 @@ App.handleSave
 
 本地 revision/head/outbox 是当前 WebDAV v2 的持久同步基础。待处理 outbox 超过 10,000 条、64 MiB 或单 revision payload 上限时，mutation 以 `outbox_full` 整体拒绝；同步成功只按精确 revision ID 确认已经发布且仍 pending 的条目。
 
-## 6. 删除和收藏
+## 6. 版本历史、比较与安全恢复
 
-### 6.1 删除
+已保存片段的编辑器头部提供“历史”入口。它调用主窗口专用 `open_revision_history`，动态创建或复用 [RevisionHistoryWindow.tsx](../src/components/RevisionHistoryWindow.tsx) 的独立原生工作区；该窗口只通过 Rust state pull opaque target 和 generation，不把 ID 放进 URL、标题或浏览器存储，也不持有正文、路径、WebDAV URL、凭据或诊断。时间线以有界 cursor page 读取该片段已有的 immutable `revision_objects`，而不建立第二份 history 表；选择一项后才请求经过 hash/payload/片段归属验证的只读 live preview 或 tombstone 元数据。
+
+- 历史按 revision time/id 倒序分页；当前 head 与 local/import/remote origin 在 UI 中可辨认。紧凑时间线使用主列表一致的中性 active surface、边框和左侧 accent rail，而非完整 accent-dim diff 卡片。
+- 两个同片段 revision 可在紧凑的 review desk 中比较：左侧时间线轨道，右侧固定的已选 revision 上下文/比较/恢复命令带，以及占据剩余高度的唯一代码 stage。左侧是可任意选择的“比较基线”，右侧是所选版本；live 内容按原始行号对齐，显示新增/删除/替换 marker 及编辑器同款语法颜色。所选版本保持中性编辑器 surface，新增/替换只用窄 marker/边缘提示，不使用整行 Git 绿色填充。代码 review 一律不自动换行；窗口宽度至少 1200px 时采用弹性双栏，不产生外层横向滚动，只有单个真实长行会在其所属 source pane 内横向滚动。历史窗口最小宽度的 1000–1199px 范围会显示明确的“比较基线 / 所选版本”单 pane 切换按钮，默认所选版本；切换只改变已加载比较的呈现，不重新请求或重新计算，也会用 `display: none` 移除未显示 pane 的键盘与辅助技术焦点。每一侧按该历史 revision 自身的 language 着色，语言变更不会错误继承当前编辑器语言；双栏详细对齐时仅同步两侧垂直滚动。
+- 比较是前端本地、受限的两路逐行 diff：只在总字符/行数、matrix/渲染行数和短计算预算内执行；超限或高度差异时明确退回为有行号、语法高亮、无自动换行的完整并排源代码，绝不冻结界面、生成部分结果或伪造差异。它不是 word-level/semantic diff、三方 merge 或冲突解决 UI。
+- tombstone 仍明确显示为“无源代码”的删除状态；与 live revision 对比时不会把 tombstone 伪装为空文件，两个 tombstone 不绘制伪造代码 diff。
+- 浏览/比较不改变当前 editor draft。历史窗口关闭时隐藏以便复用，主窗口不会因关闭/托盘/第二实例而被错误切换；主窗口隐藏到托盘时历史窗口也隐藏。
+- 当前 revision 与 tombstone 都不可恢复。选择历史 live revision 后，历史窗口只提交 generation 和 target revision ID；Rust 验证后持久保留 pending request 并通知主窗口，且直接 descendant restore IPC 同样拒绝非 main window，从协议边界阻断 child 绕过确认。App 显示、解除最小化并聚焦主窗口，只在该 target 正好是当前 dirty draft 时复用 Save/Discard/Cancel guard，任何 target 都需要主窗口确认后才重新读取 current head 并调用 restore。
+- Rust 在同一 transaction 比较 current head 与 `base_revision_id`。成功时保留片段 ID 和原 `created_at`，以**当前 head 为 parent**创建一条新的 local descendant revision、更新 live row/FTS/head/object，并像普通编辑一样写 pending outbox。任何历史 object/head 都不改写、不重定向，也不会自动同步。
+- 如果 restore 发现 stale base，App 只在当前显示该 target 时刷新权威 selected base，绝不覆盖 dirty form；成功才刷新列表、向历史窗口回传成功并隐藏它。取消/失败只回传稳定状态，不传草稿或原始诊断。
+
+```mermaid
+flowchart TD
+    A[主窗口打开已保存片段历史] --> B[Rust 写入 opaque target generation]
+    B --> C[打开/复用原生 history 窗口]
+    C --> D[分页读取 immutable metadata]
+    D --> E[选择 revision 后验证并只读预览/比较]
+    E --> F{恢复按钮可用?}
+    F -- 当前 head 或 tombstone --> G[禁用并说明不可恢复]
+    F -- 历史 live revision --> H[历史窗口提交 target revision 请求]
+    H --> I[主窗口 pull request 并显示/聚焦]
+    I --> J{该 target 是 dirty editor?}
+    J -- 是 --> K[Save / Discard / Cancel guard]
+    J -- 否 --> L[主窗口确认恢复]
+    K -- Cancel 或保存失败 --> M[回传 cancelled]
+    K -- 继续 --> L
+    L -- Cancel --> M
+    L -- Confirm --> N[重新读取 current head + restore target]
+    N --> O{base 与 current head 一致?}
+    O -- 否 --> P[stale_revision；只刷新权威 base]
+    O -- 是 --> Q[新 local descendant + FTS/head/object/outbox]
+    Q --> R[刷新摘要；回传 succeeded；隐藏 history；不自动同步]
+```
+
+## 7. 删除和收藏
+
+### 7.1 删除
 
 列表删除按钮阻止卡片选择事件，调用 `handleDelete(id)`：
 
@@ -259,15 +301,15 @@ App.handleSave
 3. 只有 IPC 成功后，如果删除的是当前片段才清空编辑状态；失败时保留 selection、form 和 dirty snapshot，并显示本地化错误。
 4. 成功后重新加载列表；若删除已完成但权威 reload 失败，明确提示“更改已保存但刷新失败”，不会把它表述为删除失败。
 
-SQLite v5 的 tombstone 由 production WebDAV v2 作为不可变 deletion revision 上传，并同时保存在本地 durable `revision_objects` 中。其他设备把该 tombstone 作为 head 时会删除对应 live row/FTS 并保留删除 ancestry；本地和远端 tombstone 当前无限期保留，不提供自动 GC 或恢复/清除 UI。
+SQLite v5 的 tombstone 由 production WebDAV v2 作为不可变 deletion revision 上传，并同时保存在本地 durable `revision_objects` 中。其他设备把该 tombstone 作为 head 时会删除对应 live row/FTS 并保留删除 ancestry；本地和远端 tombstone 当前无限期保留。历史时间线会将 tombstone 明确标为已删除并允许只读检视/比较，但第一版不允许恢复 tombstone，也不提供自动 GC 或完整冲突解决 UI。
 
-### 6.2 批量整理
+### 7.2 批量整理
 
 操作条只选择当前已经加载在 WebView 中的摘要，最多 200 个，不隐式匹配或修改未加载的搜索结果。用户可以选择“设为收藏”“取消收藏”或“删除”：收藏操作是幂等 set，不是对混合状态的歧义 toggle；删除先显示选择数量确认。
 
 后端对每个批量请求排序/去重并校验边界，先读取并验证全部 ID 都是 live snippets，再在一个 SQLite transaction 中执行。实际改变的每条收藏和每条删除各自产生 immutable revision/object/outbox（删除为 tombstone）；已经满足目标收藏状态的片段不产生 revision。任一 ID 不存在、已删除、outbox 满或任意写入失败时，整个 transaction 回滚，绝不会部分成功。前端若当前 dirty 编辑片段被包含，先复用 Save/Discard/Cancel guard；取消或保存失败不执行 mutation。成功只做一次权威 reload，reload 失败明确报告“更改已保存、刷新失败”。
 
-### 6.3 收藏的两种单项语义
+### 7.3 收藏的两种单项语义
 
 | 入口 | 行为 |
 |---|---|
@@ -276,11 +318,11 @@ SQLite v5 的 tombstone 由 production WebDAV v2 作为不可变 deletion revisi
 
 列表收藏 IPC 失败时 Hook 不做 optimistic 更新，当前可见收藏状态保持不变并显示本地化错误。成功后的权威 reload 会刷新干净的已选表单；如果编辑器已有未保存修改，表单不会被覆盖，右侧显示非模态“有新数据、已保留编辑”状态。reload 自身失败会准确提示收藏更改已经保存、仅刷新失败。
 
-## 7. 标签系统
+## 8. 标签系统
 
 标签存储在片段的 `tags: string[]`，后端以 JSON 字符串保存在 SQLite TEXT 字段。
 
-### 7.1 添加和删除
+### 8.1 添加和删除
 
 - 在标签输入框按 Enter 或逗号提交。
 - 输入为空时按 Backspace 删除最后一个标签。
@@ -288,7 +330,7 @@ SQLite v5 的 tombstone 由 production WebDAV v2 作为不可变 deletion revisi
 - 完全相同的标签不会重复添加。
 - 比较区分大小写，因此 `React` 和 `react` 是不同标签。
 
-### 7.2 建议
+### 8.2 建议
 
 `useSnippets` 通过轻量 `get_snippet_tags` IPC 从 SQLite 的 `json_each(tags)` 读取去重、排序后的标签元数据，不读取完整正文。编辑器：
 
@@ -303,13 +345,13 @@ SQLite v5 的 tombstone 由 production WebDAV v2 作为不可变 deletion revisi
 
 标签建议失败属于补充元数据错误：保留上次成功值，不覆盖主列表的权威错误/空状态。
 
-## 8. CodeMirror 编辑器
+## 9. CodeMirror 编辑器
 
-### 8.1 加载策略
+### 9.1 加载策略
 
 [LazySnippetEditor.tsx](../src/components/LazySnippetEditor.tsx) 使用 `React.lazy()` 延迟加载 `SnippetEditor`：只有选择片段或新建草稿才请求编辑器模块；无选择的浏览、搜索、同步和设置流程不会在空闲时预加载 CodeMirror。生产构建将 editor runtime、UI/services 和语言 parser family 分为有界独立 chunk，使首次进入编辑流程并行加载所需依赖，而不保留单个超大 editor chunk。
 
-### 8.2 编辑器加载失败与恢复
+### 9.2 编辑器加载失败与恢复
 
 `Suspense` 只负责等待 editor module 的下载；如果懒加载模块请求被拒绝，或编辑器首次 render 抛出异常，`SnippetEditorLoadBoundary` 会把故障限制在右侧编辑器 pane，而不会让整个 WebView 白屏。右侧显示本地化的 `role="alert"`、明确的“重试加载编辑器”按钮；侧栏、工具栏、设置、Dialog、当前选择和 App 持有的 `form` 草稿继续可用。
 
@@ -317,7 +359,7 @@ Retry 只在用户明确点击后发生：App 递增加载尝试号，`LazySnipp
 
 在开发模式里，如果 Vite server 已停止，提示会要求先恢复 Vite 后再重试；该 UI 只防止应用白屏，不负责重启或解释 Vite 进程为何退出，详见[已知限制](known-limitations.md#62-vite-开发服务器中断仍需单独诊断)。
 
-### 8.3 基础能力
+### 9.3 基础能力
 
 当前 `basicSetup` 开启：
 
@@ -330,7 +372,7 @@ Retry 只在用户明确点击后发生：App 递增加载尝试号，`LazySnipp
 - 代码折叠 gutter。
 - 输入缩进。
 
-### 8.3 主题和高亮
+### 9.4 主题和高亮
 
 编辑器组合：
 
@@ -340,7 +382,7 @@ Retry 只在用户明确点击后发生：App 递增加载尝试号，`LazySnipp
 
 主题由当前有效 `dark` / `light` 值驱动，而不是直接读取持久化的 `system` 偏好。
 
-### 8.4 自动换行
+### 9.5 自动换行
 
 `editor_line_wrap` 是持久设置。当前可见入口位于编辑器右键菜单，而不是设置页：
 
@@ -349,9 +391,9 @@ Retry 只在用户明确点击后发生：App 递增加载尝试号，`LazySnipp
 
 切换会从共享 provider 读取脱敏设置视图，只修改非敏感 `SettingsDraft`，并以 `SecretAction.Keep` 调用 `save_settings`；持久凭据不会进入该流程。
 
-## 9. 语言选择和解析器能力
+## 10. 语言选择和解析器能力
 
-### 9.1 UI 可选择语言
+### 10.1 UI 可选择语言
 
 [utils/languages.ts](../src/utils/languages.ts) 定义语言选项和颜色。当前 UI 包含：
 
@@ -363,7 +405,7 @@ Retry 只在用户明确点击后发生：App 递增加载尝试号，`LazySnipp
 | 数据与配置 | `sql`, `json`, `xml`, `yaml`, `toml`, `dockerfile` |
 | 文档及其他 | `markdown`, `scala`, `elixir`, `plaintext` |
 
-### 9.2 编辑器语言扩展分类
+### 10.2 编辑器语言扩展分类
 
 编辑器专用 [languageExtensions.ts](../src/components/languageExtensions.ts) 与 UI 元数据 [languages.ts](../src/utils/languages.ts) 分离；后者不导入 CodeMirror 包。分类由 `Record<LanguageId, LanguageSupportKind>` 穷尽约束，并由测试保证每个可选择 ID 都有明确策略。
 
@@ -375,11 +417,11 @@ Retry 只在用户明确点击后发生：App 递增加载尝试号，`LazySnipp
 
 HTML 使用 `@codemirror/lang-html`，Go 使用官方 `@codemirror/lang-go`，C# 使用维护的 `@replit/codemirror-lang-csharp`，Elixir 使用 `codemirror-lang-elixir`。StreamLanguage 映射来自 `@codemirror/legacy-modes`，提供词法流式语法着色，**不是完整 Lezer parser**；因此不能承诺与 parser-backed 语言相同的结构折叠、语法树导航或语言服务能力。未知旧持久 ID 安全回退 plaintext。
 
-## 10. Canvas Codeglance MiniMap
+## 11. Canvas Codeglance MiniMap
 
 MiniMap 是 [SnippetEditor.tsx](../src/components/SnippetEditor.tsx) 内的自研 Canvas 实现；仓库不依赖第三方 minimap 包。
 
-### 10.1 绘制
+### 11.1 绘制
 
 - 将内容按行拆分，每行默认 4px 高。
 - 复用 CodeMirror 的语言扩展、语法树和 `HighlightStyle` 取得 token 范围，并读取编辑器实际计算后的颜色；无 token、纯文本或受限解析预算未完成的部分使用编辑器默认前景色。
@@ -389,7 +431,7 @@ MiniMap 是 [SnippetEditor.tsx](../src/components/SnippetEditor.tsx) 内的自�
 
 Canvas 仍只压缩代码的几何形状，但语义 token 和颜色与当前 CodeMirror 编辑区共用同一条语言/高亮管线：parser-backed 语言可覆盖嵌入式和跨行 token，StreamLanguage 则匹配编辑区自身产生的词法着色。
 
-### 10.2 滚动同步
+### 11.2 滚动同步
 
 CodeMirror 的 `view.scrollDOM` 是主滚动源：
 
@@ -400,26 +442,26 @@ CodeMirror 的 `view.scrollDOM` 是主滚动源：
 - Canvas、minimap wrapper 和 viewport 对辅助技术隐藏；CodeMirror 本体保持可聚焦、可编辑和键盘滚动。
 - 分隔拖拽只调整非必要的视觉 codeglance 宽度，标记为装饰性，不改变编辑器内容访问。
 
-### 10.3 宽度
+### 11.3 宽度
 
 - 默认 96px。
 - 最小 96px。
 - 最大 360px，同时不超过整个 split 宽度约 45%。
 - 宽度只保存在组件 state，切换片段或重启不持久化。
 
-## 11. 剪贴板和文本右键菜单
+## 12. 剪贴板和文本右键菜单
 
-### 11.1 复制完整代码
+### 12.1 复制完整代码
 
 编辑器“复制”按钮调用 Tauri Clipboard 插件的 `writeText(form.content)`；成功后按钮显示“已复制”两秒，同时以 best-effort `record_snippet_usage` 写入本机 usage；usage 失败不会阻断复制或提示错误。普通复制和文本右键菜单不是快速捕获，不会创建新片段。
 
-### 11.2 快速捕获
+### 12.2 快速捕获
 
 `Ctrl/Meta+Shift+V` 是 Rust 原生注册的全局快捷键，托盘“从剪贴板快速捕获”是其可见替代入口。二者仅在用户显式触发时调用原生 Clipboard Manager 读取文本：空白、非文本、读取失败或字段校验/写入失败时不创建任何片段，前端只显示脱敏失败反馈，Rust 日志、公开事件和错误都不包含剪贴板正文、派生标题、token 或绝对路径。全局快捷键因 OS 冲突、权限或平台限制注册失败只记录通用 warning，不阻止启动，托盘入口仍可使用。
 
 成功时后台线程从首个非空行生成受字段边界限制的标题，立即创建普通 plaintext snippet、对应 revision/object/outbox 和一条本机 usage；它会按用户已有 WebDAV 配置正常参与同步。完成事件只含 `source`、`success` 和可选 `snippet_id`，不会自动抢占或唤醒隐藏主窗口；若 WebView 已打开，前端刷新列表但不覆盖 dirty 草稿，并给出短暂状态反馈。listener 尚未就绪时，前端用 `take_quick_capture_completion` 消费最近一次结果。快速触发期间原生服务只处理一个捕获，避免重复创建。
 
-### 11.3 全局右键菜单
+### 12.3 全局右键菜单
 
 `App` 在 window 上监听 `contextmenu`，只对以下可编辑文本目标显示自定义菜单：
 
@@ -437,9 +479,9 @@ CodeMirror 的 `view.scrollDOM` 是主滚动源：
 
 普通 input/textarea 使用 selection range 和 `setRangeText()`；CodeMirror 仅在已打开的 `.cm-editor` 菜单动作中按需加载 `EditorView` 后使用 `findFromDOM()` 和 transaction，解析不到 view 时安全关闭菜单而不会回退操作其他元素；其他 contenteditable 回退到 `document.execCommand()`。Clipboard read/write 失败显示本地化反馈；剪切只有在 `writeText` 成功后才删除选区，避免复制失败时丢失文本。
 
-## 12. JSON 导入和导出
+## 13. JSON 导入和导出
 
-### 12.1 导入
+### 13.1 导入
 
 入口是工具栏隐藏 file input，只接受 `.json`。
 
@@ -469,7 +511,7 @@ flowchart LR
 
 任一条无效会整体拒绝，不产生部分写入。成功后只执行一次共享权威 reload/reconcile，不在 Hook 和 App 重复加载；成功提示数量是 `inserted + updated`，不是输入总条目。导入已完成但 reload 失败时，Dialog 明确说明“导入更改已保存、刷新失败”。
 
-### 12.2 导出
+### 13.2 导出
 
 入口：工具栏下载按钮或 `Ctrl/Meta+E`。
 
@@ -481,24 +523,24 @@ flowchart LR
 
 导入继续接受旧顶层 `Snippet[]`。不支持的 format/schema 或 malformed envelope metadata 在任何写入前整体拒绝；已有大小、条目、字段校验和 transaction merge 语义保持不变。
 
-## 13. 设置
+## 14. 设置
 
 设置是主窗口内的 modal overlay。根级 [SettingsProvider](../src/hooks/useSettings.ts) 持有一份由 `App`、`SettingsPanel` 和其他设置消费者共享的权威 `SettingsView`；该 DTO 只包含非敏感设置、`webdav_secret_configured` 和安全状态，不含 persisted secret。[Settings.tsx](../src/components/Settings.tsx) 只维护本次打开期间的非敏感 draft/baseline，以及独立的临时 secret 输入/操作。
 
-`last_sync_at`、凭据状态和恢复状态是后端维护的字段，不进入 draft/baseline 脏比较。面板收到新的权威设置时：
+`last_sync_at`、凭据状态、设置恢复状态和 `sync_confirmation_required` 是后端维护的字段，不进入 draft/baseline 脏比较。面板收到新的权威设置时：
 
 - draft 干净：baseline 和 draft 一起采用新的用户可编辑字段。
 - draft 已脏：保留用户输入；如果权威用户字段相对 baseline 变化，显示非模态、可访问的“已在其他位置更改”状态。
 - 仅 `last_sync_at` 变化：更新上次同步显示，不制造 draft 冲突。
 
-### 13.1 通用设置
+### 14.1 通用设置
 
 - 开机自启。
 - 关闭时最小化到托盘。
 - 主题：跟随系统、暗色、亮色；界面配色可选天空蓝、紫罗兰、翡翠绿、琥珀金、玫瑰红或简约白（内部值 `white`）。每项以可辨识的 mini palette 卡片展示深色 canvas、raised panel、交互 accent 与内容标记，而非难以分辨的单色图标；简约白会在浅色/深色模式下分别复现初始版本的中性界面。每个精选值在暗色和亮色下都有经审查的完整 surface/text/border/action token，覆盖背景、侧栏、卡片、标题栏、弹窗、输入控件、状态消息、编辑器 chrome 和 codeglance；不改变语法高亮、语言标签色或状态的语义含义。
 - 界面语言：中文、英文。
 
-### 13.2 WebDAV 设置
+### 14.2 WebDAV 设置
 
 - WebDAV URL：必须为 HTTPS；只为本机测试允许 `http://localhost`、`http://127.0.0.1` 和 `http://[::1]`。
 - 用户名。
@@ -519,7 +561,7 @@ flowchart LR
 
 面板显示安全的 configured/not configured/unavailable/denied/invalid/ambiguous/migration required/recovery required 状态。需要操作时禁用 Sync Now；迁移或补偿恢复只能通过 Replace 或 Clear 解除，Keep 会被后端拒绝。
 
-### 13.3 保存与关闭保护
+### 14.3 保存与关闭保护
 
 保存设置时：
 
@@ -536,21 +578,43 @@ Save 在 draft 干净或正在保存时禁用。X、外层 backdrop 和 Escape �
 
 设置首次加载失败显示与 loading 分离的错误和“重试”按钮；手动同步失败也使用同一结构化错误本地化。
 
-### 13.4 损坏设置与旧凭据恢复
+### 14.4 损坏设置与旧凭据恢复
 
 启动时如果当前 `settings.json` 仍含旧 `webdav_password` 字段，Rust 会尝试一次性迁移到平台凭据库，只有安全写入成功后才重写并移除 JSON 字段。失败时保留遗留文件但不加载其 secret，也不允许凭据驱动的持久自动同步；设置页显示恢复说明，用户需 Replace 或 Clear。
 
 如果当前 `settings.json` 是无效 JSON，应用把它移到唯一、不覆盖的隐藏 `.corrupt` 同级文件，再尝试有效 `.bak`；没有有效备份时写入并加载安全默认值。设置页分别显示 backup-restored/defaults-loaded 提示，并可调用受控后端命令打开数据目录；错误和 IPC 不显示绝对路径。
 
-### 13.5 立即同步与未保存设置
+### 14.5 立即同步与未保存设置
 
 设置面板“立即同步”始终使用后端已持久化配置。只要 WebDAV URL、用户名、secret action、认证模式、超时、自动同步开关或同步间隔中的任一 draft 状态与 baseline 不同，Sync Now 就禁用，并通过 `aria-describedby` 显示本地化“请先保存设置再同步”说明。URL 为空、凭据状态需要操作或已有同步运行时同样禁用。
 
 自动同步说明明确区分首次与后续尝试：启用或改变有效配置后，首次尝试可能在下一次约 15 秒 worker poll 内开始；成功后恢复所选间隔。
 
-## 14. 主题与国际化
+### 14.6 本地快照与完整恢复
 
-### 14.1 主题
+设置的“本地快照”区可以启用或关闭本机策略，频率仅为 daily / weekly，保留数量仅为 7 / 30 / 90。独立 worker 仅在 SnipVault 正在运行时每 15 分钟检查当前策略：没有有效快照时补建一个，达到选定最小间隔后创建下一份；失败后最多等待一小时再试。用户也可以在快照管理向导中立即创建 checkpoint，或通过后端受控目录动作打开快照目录；WebView 从不接收路径、filename、checksum 或数据库诊断。
+
+快照管理向导列出经过 catalog 验证的安全摘要。每份候选在创建和恢复前都会使用 read-only/no-follow SQLite 连接校验 integrity、当前 schema、唯一 device identity、snippet count、文件大小和 SHA-256；缺失或不能再次验证的条目明确标为 unavailable，不能恢复。快照文件是完整 SQLite vault checkpoint，包含片段、FTS、revision history/outbox、同步/冲突状态、本机 usage、device identity、成功历史、通知收件箱和 snapshot catalog；它不包含 `settings.json` 或 OS 凭据库中的 WebDAV secret，也不发送至 WebDAV。
+
+完整恢复是高影响操作：App 先对当前 dirty 编辑器复用 Save / Discard / Cancel guard，再显示范围确认。Rust 验证选定 checkpoint 后先创建并验证 emergency checkpoint，使用 SQLite `Backup` 写入已有活动连接而不替换打开中的数据库文件。成功恢复后清空当前选择并重新读取片段、设置、成功历史和通知；若只是界面刷新失败，UI 会明确说明 vault 已恢复而不是报告恢复失败。恢复会保留设置和凭据，但置位 `sync_confirmation_required`：scheduled WebDAV synchronization 停止，用户审查恢复状态后，必须从工具栏、设置或系统托盘成功执行一次手动同步才会解除该锁。恢复不会自动同步。
+
+```mermaid
+flowchart TD
+    A[设置策略或手动创建] --> B[SQLite online backup 到 pending 文件]
+    B --> C[独立 no-follow 验证]
+    C --> D[原子发布文件与 catalog]
+    D --> E[Manage snapshots]
+    E --> F[App dirty-editor guard + 明确确认]
+    F --> G[重新验证目标]
+    G --> H[创建并验证 emergency checkpoint]
+    H --> I[Backup 写入活动 SQLite connection]
+    I --> J[重新验证活动 vault]
+    J --> K[置位手动同步确认锁并刷新 UI]
+```
+
+## 15. 主题与国际化
+
+### 15.1 主题
 
 持久深浅偏好：`dark`、`light`、`system`；持久主题色：`sky`、`violet`、`emerald`、`amber`、`rose`、`white`（界面名称“简约白”）。两者独立：前者只决定浅/深 surface，后者决定完整界面配色与交互色；`white` 在对应深浅模式下恢复初始版本的中性 UI。
 
@@ -562,7 +626,7 @@ Save 在 draft 干净或正在保存时禁用。X、外层 backdrop 和 Escape �
 
 因此工具栏按钮是临时有效主题切换，设置页才是深浅偏好和主题色的持久入口。
 
-### 14.2 国际化
+### 15.2 国际化
 
 资源：
 
@@ -573,7 +637,7 @@ Save 在 draft 干净或正在保存时禁用。X、外层 backdrop 和 Escape �
 
 当前仍有部分固定文案没有完整国际化，例如 Rust 托盘菜单、启动 splash、部分错误消息、单位和同步方向。
 
-## 15. Dialog 系统
+## 16. Dialog 系统
 
 [Dialog.tsx](../src/components/Dialog.tsx) 通过 `forwardRef()` 暴露：
 
@@ -595,7 +659,7 @@ ask(message, title?): Promise<"save" | "discard" | "cancel">
 
 应用有两个 Dialog 实例：App 全局流程和 Settings 内部流程。
 
-## 16. 键盘、焦点与动画
+## 17. 键盘、焦点与动画
 
 - 所有按钮显式使用 `type="button"`；图标按钮有本地化可访问名称，收藏、主题、换行等二态操作暴露 `aria-pressed`。
 - 共享 `:focus-visible` 样式覆盖原生控件、显式 tabindex 和 CodeMirror focused host，不依赖 hover 显示键盘焦点。
@@ -604,7 +668,7 @@ ask(message, title?): Promise<"save" | "discard" | "cancel">
 - 字体使用仓库中明确声明的系统 UI 与系统 monospace fallback stack，不依赖未声明的本地字体文件。
 
 
-### 16.1 快捷键与命令面板
+### 17.1 快捷键与命令面板
 
 | 快捷键 | 当前动作 |
 |---|---|
@@ -617,9 +681,9 @@ ask(message, title?): Promise<"save" | "discard" | "cancel">
 
 WebView 快捷键监听在 window 上，使用 `event.key.toLowerCase()` 统一大小写，并跳过 IME composing/repeat。命令面板使用共享 `ModalSurface` 的 dialog 语义，输入框获得初始焦点，命令列表用 listbox/option、`aria-activedescendant` 和 ArrowUp/ArrowDown/Home/End/Enter；执行命令前先关闭面板，因此既有 dirty guard、同步确认和 Dialog 不会与面板竞争。选择“聚焦代码片段搜索”会记录一次关闭后的焦点意图：在 `ModalSurface` 恢复背景并完成默认焦点恢复后，`App` 才将焦点移到工具栏的代码片段搜索输入框，使用户可立即输入查询，而不会把焦点留在命令面板触发按钮上。设置或 Promise Dialog 打开时不会打开面板；顶层模态拥有 Escape/Tab 和背景 inert/focus 恢复。
 
-## 17. 窗口控制、托盘和后台行为
+## 18. 窗口控制、托盘和后台行为
 
-### 17.1 自定义标题栏
+### 18.1 自定义标题栏
 
 [Titlebar.tsx](../src/components/Titlebar.tsx) 使用 Tauri Window API：
 
@@ -632,7 +696,7 @@ WebView 快捷键监听在 window 上，使用 `event.key.toLowerCase()` 统一�
 
 关闭调用最终是否退出由 Rust 的 `CloseRequested` 监听决定。
 
-### 17.2 托盘菜单
+### 18.2 托盘菜单
 
 | 菜单项 | 行为 |
 |---|---|
@@ -645,25 +709,25 @@ WebView 快捷键监听在 window 上，使用 `event.key.toLowerCase()` 统一�
 
 左键点击图标等同“打开”。
 
-### 17.3 单实例
+### 18.3 单实例
 
 第二实例由 single-instance 插件拦截，忽略其命令行参数和 cwd，直接调用 `reveal_main_window()`。
 
-### 17.4 后台自动同步
+### 18.4 后台自动同步
 
 应用启动一个持有 `AppHandle` 的常驻 Rust worker，每 15 秒读取最新设置：
 
-1. 自动同步关闭、URL 为空或间隔无效时重置本轮调度并继续等待。
+1. 自动同步关闭、URL 为空、间隔无效或 `sync_confirmation_required` 已置位时重置本轮调度并继续等待。
 2. 有效配置在某一轮被观察后即尝试，因此启用后首次尝试发生在下一次约 15 秒 poll window 内，不先等待完整配置间隔。
 3. 成功后按当前配置间隔安排下一次尝试；`sync_busy` 约 15 秒后快速重试。
 4. 其他失败按约 15、30、60 秒继续指数退避，最长 15 分钟；成功后清零失败计数并恢复配置间隔。
 5. 修改开关、间隔或 WebDAV 连接相关字段无需重启；配置变化会重置 scheduler，在下一次观察时按首次尝试语义执行。
-6. 所有入口调用同一 `sync_merge()` 和进程级 mutex。
-7. 每次后台结果、busy 或失败都 emit 来源为 `background` 的 typed `sync-complete`。前端成功时刷新片段、共享设置和历史；dirty editor 保留，clean form 采用权威值。反馈只进入非模态 `aria-live`，不会打开 Dialog。
+6. 所有入口调用同一 `sync_merge()` 和进程级 mutex；background 在取得该锁后再次检查 restore latch，避免已排队的旧 worker 在完整恢复后运行。
+7. 每次后台结果、busy 或失败都 emit 来源为 `background` 的 typed `sync-complete`，并先持久化一条去标识化终态 inbox 记录。前端成功时刷新片段、共享设置、成功历史和 inbox；busy/失败只刷新 inbox。dirty editor 保留，clean form 采用权威值。反馈只进入非模态 `aria-live`，不会打开 Dialog，但用户可以在工具栏铃铛中稍后查看记录。
 
-## 18. WebDAV 同步
+## 19. WebDAV 同步
 
-### 18.1 入口
+### 19.1 入口
 
 - 工具栏云图标。
 - 设置面板“立即同步”。
@@ -672,31 +736,32 @@ WebView 快捷键监听在 window 上，使用 `event.key.toLowerCase()` 统一�
 
 前两个 UI 入口最终调用 `sync_upload`，Rust 的 `sync_upload` / `sync_download` 又都委托 `sync_merge()`。
 
-### 18.2 前端交互与统一完成协调
+### 19.2 前端交互与统一完成协调
 
 四个来源使用同一完成协议：`source = toolbar | settings | tray | background`，`status = result | error | busy`。工具栏和设置是 direct command，并由 `App` 从 command result 本地构造 completion；Rust 不再为这两个 direct command 额外 emit，因此不会重复 reload 或 Dialog。托盘和 worker 通过 `sync-complete` event 进入相同路径。
 
 ```mermaid
 flowchart TD
-    A[任一同步来源完成] --> B{result.success?}
-    B -- 否 --> C[更新统一非模态状态]
-    B -- 是 --> D[refreshAfterSync]
-    D --> E[并行 reload snippets / settings / history]
-    E --> F{当前 editor dirty?}
-    F -- 是 --> G[保留 draft + stale status]
-    F -- 否 --> H[采用权威片段或清空失效选择]
-    C --> I{来源?}
-    G --> I
-    H --> I
-    I -- tray --> J[显示显式 Dialog]
-    I -- background --> K[只更新 aria-live]
-    I -- settings --> L[面板内 status]
-    I -- toolbar --> M[工具栏确认后显示结果 Dialog]
+    A[任一同步来源完成] --> B[持久化一条脱敏终态 inbox 记录]
+    B --> C{result.success?}
+    C -- 否或 busy --> D[更新统一非模态状态并 reload inbox]
+    C -- 是 --> E[refreshAfterSync]
+    E --> F[并行 reload snippets / settings / history / inbox]
+    F --> G{当前 editor dirty?}
+    G -- 是 --> H[保留 draft + stale status]
+    G -- 否 --> I[采用权威片段或清空失效选择]
+    D --> J{来源?}
+    H --> J
+    I --> J
+    J -- tray --> K[显示显式 Dialog]
+    J -- background --> L[只更新 aria-live]
+    J -- settings --> M[面板内 status]
+    J -- toolbar --> N[工具栏确认后显示结果 Dialog]
 ```
 
-工具栏同步先检查共享权威设置与 WebDAV URL，再请求用户确认；设置面板另有自己的确认 Dialog 和 status。成功来源都刷新片段、设置和同步历史。若同步成功但 reload 失败，反馈明确区分“同步失败”和“同步后刷新失败”。托盘允许显式 modal；后台在成功、busy 或失败时都不显示 modal。
+工具栏同步先检查共享权威设置与 WebDAV URL，再请求用户确认；设置面板另有自己的确认 Dialog 和 status。每次工具栏、设置、托盘或 background 终态只持久化一条不含自由文本、URL、用户名、secret、路径、片段数据或 revision 标识的 inbox 记录。成功来源都刷新片段、设置、同步历史和 inbox；失败/busy 只刷新 inbox。若同步成功但 reload 失败，反馈明确区分“同步失败”和“同步后刷新失败”。托盘允许显式 modal；后台在成功、busy 或失败时都不显示 modal。
 
-### 18.3 远端协议、激活与同步规则
+### 19.3 远端协议、激活与同步规则
 
 远端 v2 布局：
 
@@ -714,7 +779,7 @@ snipvault/objects/<revision_uuid>.json
 - 不可变 revision objects 先发布，然后条件发布下一代 manifest，再条件创建 marker；最后重读精确 manifest bytes/hash/strong ETag 与 marker。只有远端验证、本地 remote-state/history/exact outbox ack 和 `last_sync_at` 都成功才报告成功。
 - 网络期间不持有 SQLite mutex；同进程入口由 process mutex 串行，不同设备通过 manifest CAS 协调。
 
-### 18.4 Revision、删除和冲突语义
+### 19.4 Revision、删除和冲突语义
 
 - head 相同：无需内容仲裁；仅确认对应的确切 pending revision ID。
 - 一端 revision 是另一端祖先：后代胜出并成为 manifest head。
@@ -727,10 +792,21 @@ snipvault/objects/<revision_uuid>.json
 
 WebDAV 与 SQLite 不能构成单个跨系统事务，revision/object 遍历也会增加请求与带宽；真实服务兼容性与桌面 smoke 的验证边界见 [已知限制](known-limitations.md#1-webdav-v2-协议与多设备并发)。
 
-## 19. 同步历史
+## 20. 同步通知中心
 
-`sync_versions` 保存：
+同步通知中心是工具栏铃铛打开的持久本地收件箱，不替代设置中的成功同步技术历史。每个工具栏、设置、托盘和 background 同步的终态都会写入一条记录；完整 vault restore 也会写入 `restore_required` 注意事项。记录只含来源（toolbar / settings / tray / background）、结果状态（result / error / busy）、类别（success / pending / conflict / failure / busy / restore_required）、稳定公开错误码/可重试性、聚合计数、protocol/generation、发生时间和已读/关闭状态。它不保存 `SyncResult.message`、任意错误细节、WebDAV URL、用户名、secret、远端响应、路径、片段正文、revision ID 或 hash。
 
+- 工具栏显示未读数量；视觉徽标最多显示 `99+`，可访问名称保留实际未读数。
+- 中心加载最新未关闭记录，默认请求 50 条、后端最多返回 100 条；持久层按时间只保留最新 200 条。
+- 用户可标记单条或全部已读，也可关闭一条记录。读/关闭写入在完整 vault restore 的 mutation gate 内串行，避免在活动数据库替换时丢失状态。
+- retryable 记录提供 Sync now，并复用既有同步确认和来源协调；background 仍从不自动打开中心或 Dialog。
+- `restore_required` 说明 scheduled sync 已被暂停；用户必须从工具栏、设置或系统托盘成功完成一次手动同步后才会解除该锁。
+
+## 21. 同步历史
+
+`sync_versions` 保存成功同步的技术记录，不保存通知收件箱的 read/dismiss 状态，也不能代替失败、busy、pending、冲突或 restore-required 的用户反馈；这些终态见[同步通知中心](#20-同步通知中心)。
+
+它包含：
 - 同步时间与方向（production v2 当前写入 `publish`；兼容历史 `merge` 也会本地化显示）。
 - 片段总数。
 - 上传、下载、删除与冲突计数。
@@ -739,15 +815,15 @@ WebDAV 与 SQLite 不能构成单个跨系统事务，revision/object 遍历也�
 
 数据库只保留最近 20 条；history 不保存即时结果中的 `pending_count`。设置页按需调用 `get_sync_versions` 展开显示，并本地化 `publish`、兼容历史 `merge` 与未知方向。注意即时 `SyncResult` 的 generation 字段名是 `manifest_generation`，history row 对应字段名是 `generation`。
 
-## 20. 首次运行和本地数据
+## 22. 首次运行和本地数据
 
-数据库 v5 初始化时，只有迁移前不存在 `snippets` 表的真正新库会插入 7 条示例：Ruby、Rust、TypeScript、Python、SQL、CSS 和 YAML/Docker Compose。任何既有磁盘 v0/v1/v2/v3/v4 库升级前都创建并验证唯一 `pre-v5` backup；逐步 v0→v1→v2→v3→v4→v5 链中的严格 backfill 或迁移失败会恢复原始版本数据库。v2 live rows会得到确定性 `legacy-<sha256>` head，不会被批量加入 pending outbox；v4 会从 pending outbox、当前 live heads 和 tombstones 回填 durable revision objects，v5 仅创建空的 local-only usage 表，因此既有片段没有使用历史。
+数据库 v7 初始化时，只有迁移前不存在 `snippets` 表的真正新库会插入 7 条示例：Ruby、Rust、TypeScript、Python、SQL、CSS 和 YAML/Docker Compose。任何既有磁盘 v0/v1/v2/v3/v4/v5/v6 库升级前都创建并验证唯一 `pre-v7` backup；逐步 v0→v1→v2→v3→v4→v5→v6→v7 链中的严格 backfill 或迁移失败会恢复原始版本数据库。v2 live rows 会得到确定性 `legacy-<sha256>` head，不会被批量加入 pending outbox；v4 从 pending outbox、当前 live heads 和 tombstones 回填 durable revision objects，v5 创建空的 local-only usage 表，v6 创建去标识化通知 inbox，v7 创建本地 snapshot catalog；既有片段不凭空获得 usage 历史。
 
 用户删除所有片段后，既有空库保持为空；后续初始化不会重新插入示例。
 
-## 21. 构建与发布功能
+## 23. 构建与发布功能
 
-### 21.1 本地构建
+### 23.1 本地构建
 
 现有脚本：
 
@@ -760,7 +836,7 @@ WebDAV 与 SQLite 不能构成单个跨系统事务，revision/object 遍历也�
 
 详细说明见 [开发指南](development.md)。
 
-### 21.2 GitHub Release
+### 23.2 GitHub Release
 
 [release.yml](../.github/workflows/release.yml) 的 tag 发布当前产出：
 

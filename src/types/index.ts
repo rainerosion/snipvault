@@ -60,6 +60,55 @@ export interface SnippetForm {
   is_favorite: boolean;
 }
 
+export interface RevisionSummary {
+  revision_id: string;
+  parent_revision_id: string | null;
+  revision_time: string;
+  origin: "local" | "import" | "remote" | "conflict";
+  deleted: boolean;
+  conflict_of: string | null;
+  is_current_head: boolean;
+}
+
+export interface RevisionContent {
+  revision: RevisionSummary;
+  snippet: Snippet | null;
+  deleted_at: string | null;
+}
+
+export interface RevisionComparison {
+  left: RevisionContent;
+  right: RevisionContent;
+}
+
+export interface RevisionPage {
+  items: RevisionSummary[];
+  next_cursor: string | null;
+}
+
+export interface LocalSnapshot {
+  id: string;
+  created_at: string;
+  schema_version: number;
+  byte_count: number;
+  snippet_count: number;
+  verified_at: string;
+  unavailable_at: string | null;
+}
+
+export interface SnapshotStatus {
+  snapshots: LocalSnapshot[];
+  latest_created_at: string | null;
+  automatic_enabled: boolean;
+  frequency: "daily" | "weekly";
+  retention: 7 | 30 | 90;
+}
+
+export interface RestoreResult {
+  restored_snapshot_id: string;
+  emergency_snapshot_id: string;
+}
+
 export interface BulkMutationResult {
   requested_count: number;
   changed_count: number;

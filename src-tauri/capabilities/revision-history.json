@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schemas.tauri.app/config/2/capability",
+  "identifier": "revision-history",
+  "description": "Least-privilege native window controls for revision history",
+  "windows": ["revision-history"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-start-dragging",
+    "allow-get-settings",
+    "allow-get-system-locale",
+    "allow-get-revision-history-target",
+    "allow-get-revision-history-restore-outcome",
+    "allow-request-revision-history-restore",
+    "allow-list-snippet-revisions",
+    "allow-get-snippet-revision",
+    "allow-compare-snippet-revisions"
+  ]
+}

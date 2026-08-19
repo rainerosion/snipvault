@@ -116,6 +116,7 @@ pub fn run_quick_capture(app: AppHandle, source: QuickCaptureSource) {
         };
 
         let completion = match crate::db::validate_snippet(&snippet).and_then(|()| {
+            let _mutation_guard = crate::snapshots::mutation_guard();
             crate::db::create_snippet_and_record_usage(&snippet)
                 .map(|created| created.id)
                 .map_err(|_| "quick capture write failed".to_string())

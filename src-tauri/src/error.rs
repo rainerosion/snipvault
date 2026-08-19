@@ -21,8 +21,34 @@ pub enum ErrorCode {
     Autostart,
     Credential,
     Recovery,
+    Snapshot,
     Open,
     Unknown,
+}
+
+impl ErrorCode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Validation => "validation",
+            Self::NotFound => "not_found",
+            Self::StaleRevision => "stale_revision",
+            Self::OutboxFull => "outbox_full",
+            Self::Database => "database",
+            Self::Settings => "settings",
+            Self::Network => "network",
+            Self::SyncBusy => "sync_busy",
+            Self::SyncCasConflict => "sync_cas_conflict",
+            Self::SyncLegacyChanged => "sync_legacy_changed",
+            Self::Import => "import",
+            Self::Export => "export",
+            Self::Autostart => "autostart",
+            Self::Credential => "credential",
+            Self::Recovery => "recovery",
+            Self::Snapshot => "snapshot",
+            Self::Open => "open",
+            Self::Unknown => "unknown",
+        }
+    }
 }
 
 /// A serializable command error containing only safe, user-facing data.
@@ -141,6 +167,14 @@ impl CommandError {
             ErrorCode::Credential,
             "The operating-system credential store could not complete the request.",
             retryable,
+        )
+    }
+
+    pub fn snapshot() -> Self {
+        Self::new(
+            ErrorCode::Snapshot,
+            "The local snapshot operation could not be completed.",
+            true,
         )
     }
 

@@ -143,6 +143,10 @@ pub fn get_settings_path() -> PathBuf {
     get_settings_dir().join("settings.json")
 }
 
+pub fn get_snapshots_dir() -> PathBuf {
+    get_data_dir().join("snapshots")
+}
+
 pub fn get_export_dir() -> (PathBuf, bool) {
     if let Some(downloads) = dirs::download_dir() {
         let downloads_export_dir = downloads.join("SnipVault");

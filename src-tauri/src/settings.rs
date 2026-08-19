@@ -41,6 +41,11 @@ pub struct Settings {
     pub webdav_timeout_secs: u64,
     pub auto_sync: bool,
     pub sync_interval_minutes: i32,
+    pub local_snapshot_enabled: bool,
+    pub local_snapshot_frequency: String,
+    pub local_snapshot_retention: i32,
+    /// A full-vault restore pauses scheduled WebDAV until the user starts a later manual sync.
+    pub sync_confirmation_required: bool,
     pub editor_line_wrap: bool,
     pub last_sync_at: String,
     pub credential_revision: u64,
@@ -62,6 +67,10 @@ impl Default for Settings {
             webdav_timeout_secs: 30,
             auto_sync: false,
             sync_interval_minutes: 30,
+            local_snapshot_enabled: false,
+            local_snapshot_frequency: "daily".into(),
+            local_snapshot_retention: 7,
+            sync_confirmation_required: false,
             editor_line_wrap: true,
             last_sync_at: String::new(),
             credential_revision: 0,
@@ -86,6 +95,10 @@ struct LegacySettings {
     webdav_timeout_secs: u64,
     auto_sync: bool,
     sync_interval_minutes: i32,
+    local_snapshot_enabled: bool,
+    local_snapshot_frequency: String,
+    local_snapshot_retention: i32,
+    sync_confirmation_required: bool,
     editor_line_wrap: bool,
     last_sync_at: String,
     credential_revision: u64,
@@ -115,6 +128,10 @@ impl LegacySettings {
             webdav_timeout_secs: defaults.webdav_timeout_secs,
             auto_sync: defaults.auto_sync,
             sync_interval_minutes: defaults.sync_interval_minutes,
+            local_snapshot_enabled: defaults.local_snapshot_enabled,
+            local_snapshot_frequency: defaults.local_snapshot_frequency,
+            local_snapshot_retention: defaults.local_snapshot_retention,
+            sync_confirmation_required: defaults.sync_confirmation_required,
             editor_line_wrap: defaults.editor_line_wrap,
             last_sync_at: defaults.last_sync_at,
             credential_revision: defaults.credential_revision,
@@ -139,6 +156,10 @@ impl LegacySettings {
                 webdav_timeout_secs: self.webdav_timeout_secs,
                 auto_sync: self.auto_sync,
                 sync_interval_minutes: self.sync_interval_minutes,
+                local_snapshot_enabled: self.local_snapshot_enabled,
+                local_snapshot_frequency: self.local_snapshot_frequency,
+                local_snapshot_retention: self.local_snapshot_retention,
+                sync_confirmation_required: self.sync_confirmation_required,
                 editor_line_wrap: self.editor_line_wrap,
                 last_sync_at: self.last_sync_at,
                 credential_revision: self.credential_revision,
@@ -189,6 +210,10 @@ pub struct SettingsView {
     pub webdav_timeout_secs: u64,
     pub auto_sync: bool,
     pub sync_interval_minutes: i32,
+    pub local_snapshot_enabled: bool,
+    pub local_snapshot_frequency: String,
+    pub local_snapshot_retention: i32,
+    pub sync_confirmation_required: bool,
     pub editor_line_wrap: bool,
     pub last_sync_at: String,
     pub webdav_secret_configured: bool,
@@ -209,7 +234,17 @@ pub struct SettingsInput {
     pub webdav_timeout_secs: u64,
     pub auto_sync: bool,
     pub sync_interval_minutes: i32,
+    pub local_snapshot_enabled: bool,
+    pub local_snapshot_frequency: String,
+    pub local_snapshot_retention: i32,
     pub editor_line_wrap: bool,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+pub struct SnapshotSettingsInput {
+    pub enabled: bool,
+    pub frequency: String,
+    pub retention: i32,
 }
 
 impl SettingsInput {
@@ -226,12 +261,24 @@ impl SettingsInput {
             webdav_timeout_secs: self.webdav_timeout_secs,
             auto_sync: self.auto_sync,
             sync_interval_minutes: self.sync_interval_minutes,
+            local_snapshot_enabled: self.local_snapshot_enabled,
+            local_snapshot_frequency: self.local_snapshot_frequency.clone(),
+            local_snapshot_retention: self.local_snapshot_retention,
+            sync_confirmation_required: current.sync_confirmation_required,
             editor_line_wrap: self.editor_line_wrap,
             last_sync_at: current.last_sync_at.clone(),
             credential_revision: current.credential_revision,
             credential_recovery_status: current.credential_recovery_status,
             settings_recovery_status: current.settings_recovery_status,
         }
+    }
+}
+
+impl SnapshotSettingsInput {
+    pub fn apply_to(&self, settings: &mut Settings) {
+        settings.local_snapshot_enabled = self.enabled;
+        settings.local_snapshot_frequency = self.frequency.clone();
+        settings.local_snapshot_retention = self.retention;
     }
 }
 
@@ -269,6 +316,15 @@ pub fn validate_settings(settings: &Settings) -> Result<(), String> {
         || (settings.auto_sync && settings.sync_interval_minutes == 0)
     {
         return Err("invalid sync interval".into());
+    }
+    if !matches!(
+        settings.local_snapshot_frequency.as_str(),
+        "daily" | "weekly"
+    ) {
+        return Err("invalid local snapshot frequency".into());
+    }
+    if !matches!(settings.local_snapshot_retention, 7 | 30 | 90) {
+        return Err("invalid local snapshot retention".into());
     }
     if settings.webdav_url.len() > 4096 || settings.webdav_username.len() > 1024 {
         return Err("WebDAV setting is too long".into());
@@ -620,6 +676,14 @@ pub fn mark_credential_recovery_required() {
     }
 }
 
+pub fn require_manual_sync_confirmation() -> Result<(), String> {
+    update_settings(|settings| settings.sync_confirmation_required = true).map(|_| ())
+}
+
+pub fn confirm_manual_sync() -> Result<(), String> {
+    update_settings(|settings| settings.sync_confirmation_required = false).map(|_| ())
+}
+
 pub fn get_settings() -> Settings {
     init_settings();
     SETTINGS
@@ -703,6 +767,10 @@ pub fn get_settings_view() -> SettingsView {
         webdav_timeout_secs: settings.webdav_timeout_secs,
         auto_sync: settings.auto_sync,
         sync_interval_minutes: settings.sync_interval_minutes,
+        local_snapshot_enabled: settings.local_snapshot_enabled,
+        local_snapshot_frequency: settings.local_snapshot_frequency.clone(),
+        local_snapshot_retention: settings.local_snapshot_retention,
+        sync_confirmation_required: settings.sync_confirmation_required,
         editor_line_wrap: settings.editor_line_wrap,
         last_sync_at: settings.last_sync_at.clone(),
         webdav_secret_configured: status.kind == CredentialStatusKind::Configured,

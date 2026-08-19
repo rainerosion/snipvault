@@ -1,3 +1,57 @@
+const APP_COMMANDS: &[&str] = &[
+    "get_snippets",
+    "query_snippets",
+    "get_snippet",
+    "open_revision_history",
+    "get_revision_history_target",
+    "request_revision_history_restore",
+    "take_revision_history_restore_request",
+    "complete_revision_history_restore",
+    "get_revision_history_restore_outcome",
+    "get_snippet_revision",
+    "list_snippet_revisions",
+    "compare_snippet_revisions",
+    "restore_snippet_revision",
+    "record_snippet_usage",
+    "take_quick_capture_completion",
+    "get_snippet_tags",
+    "create_snippet",
+    "update_snippet",
+    "delete_snippet",
+    "search_snippets",
+    "toggle_favorite",
+    "set_snippets_favorite",
+    "delete_snippets",
+    "export_snippets",
+    "export_snippets_to_file",
+    "open_project_repository",
+    "open_trusted_directory",
+    "import_snippets",
+    "get_settings",
+    "save_settings",
+    "set_auto_start",
+    "is_auto_start_enabled",
+    "sync_upload",
+    "sync_download",
+    "get_sync_versions",
+    "list_sync_notifications",
+    "mark_sync_notification_read",
+    "dismiss_sync_notification",
+    "mark_all_sync_notifications_read",
+    "get_snapshot_status",
+    "create_local_snapshot",
+    "restore_local_snapshot",
+    "update_snapshot_policy",
+    "get_system_theme",
+    "get_system_locale",
+    "frontend_ready",
+    "boot_mark",
+];
+
 fn main() {
-    tauri_build::build()
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(APP_COMMANDS)),
+    )
+    .expect("failed to generate Tauri command permissions");
 }

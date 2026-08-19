@@ -37,6 +37,7 @@ impl V2SyncStore for ProductionStore {
         &self,
         plan: &ValidatedRemotePlan,
     ) -> Result<ApplyRemotePlanResult, SyncError> {
+        let _mutation_guard = crate::snapshots::mutation_guard();
         db::apply_validated_remote_plan(plan).map_err(|_error| {
             log::error!("Applying remote synchronization plan failed");
             SyncError::local("Persisting downloaded synchronization data failed")
@@ -44,6 +45,7 @@ impl V2SyncStore for ProductionStore {
     }
 
     fn commit_published(&self, commit: &PublishCommit) -> Result<usize, SyncError> {
+        let _mutation_guard = crate::snapshots::mutation_guard();
         db::commit_published_revisions(commit).map_err(|_error| {
             log::error!("Committing published synchronization revisions failed");
             SyncError::local("Persisting synchronization status failed")

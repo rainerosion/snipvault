@@ -22,6 +22,8 @@ interface ToolbarProps {
   onOpenCommandPalette?: () => void;
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
   onOpenSettings: () => void;
+  onOpenNotifications?: () => void;
+  unreadNotifications?: number;
   onSync?: () => void;
   syncing?: boolean;
   favoriteFilter: boolean | null;
@@ -45,6 +47,8 @@ export function Toolbar({
   onOpenCommandPalette,
   searchInputRef,
   onOpenSettings,
+  onOpenNotifications = () => {},
+  unreadNotifications = 0,
   onSync,
   syncing,
   favoriteFilter,
@@ -274,6 +278,23 @@ export function Toolbar({
               <path d="M21 12a9 9 0 1 1-9-9" opacity="0.4"/>
             )}
           </svg>
+        </button>
+        <button
+          type="button"
+          className="action-btn notification-btn"
+          onClick={onOpenNotifications}
+          title={t("syncNotifications.open")}
+          aria-label={t("syncNotifications.open")}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+            <path d="M10 21h4" />
+          </svg>
+          {unreadNotifications > 0 && (
+            <span className="notification-badge" aria-label={t("syncNotifications.unread", { count: unreadNotifications })}>
+              {unreadNotifications > 99 ? "99+" : unreadNotifications}
+            </span>
+          )}
         </button>
         <button type="button" className="action-btn" onClick={onOpenSettings} title={t("toolbar.settings")} aria-label={t("toolbar.settings")}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, useContext, Suspense } from "react";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTranslation } from "react-i18next";
 import { useSnippets } from "./hooks/useSnippets";
 import {
@@ -16,6 +17,7 @@ import { CommandPalette, type CommandDefinition } from "./components/CommandPale
 import { SnippetEditorLoadBoundary } from "./components/SnippetEditorLoadBoundary";
 import { LazySnippetEditor } from "./components/LazySnippetEditor";
 import { SettingsPanel, type SettingsPanelHandle } from "./components/Settings";
+import { SyncNotificationCenter } from "./components/SyncNotificationCenter";
 import { Dialog, DialogHandle } from "./components/Dialog";
 import { Snippet, SnippetForm, SnippetSummary, type QuickCaptureCompletion, type SnippetSort } from "./types";
 import { localizeCommandError, normalizeCommandError } from "./utils/commandErrors";
@@ -29,6 +31,12 @@ const EMPTY_FORM: SnippetForm = {
   tags: [],
   is_favorite: false,
 };
+
+interface RevisionHistoryRestoreRequest {
+  generation: number;
+  snippet_id: string;
+  target_revision_id: string;
+}
 
 function isFormDirty(current: SnippetForm, original: SnippetForm): boolean {
   return (
@@ -66,6 +74,7 @@ export default function App() {
     load,
     loadMore,
     get,
+    restoreRevision,
     create,
     update,
     remove,
@@ -85,6 +94,8 @@ export default function App() {
     reload: reloadSettings,
     save: saveSettings,
     reloadHistory,
+    reloadNotifications,
+    syncNotifications,
   } = useSettings();
 
   const [selected, setSelected] = useState<Snippet | null>(null);
@@ -103,6 +114,7 @@ export default function App() {
   const [favFilter, setFavFilter] = useState<boolean | null>(null);
   const [sort, setSort] = useState<SnippetSort>("updated");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [focusSearchAfterPaletteClose, setFocusSearchAfterPaletteClose] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -202,9 +214,10 @@ export default function App() {
       reloadSnippets(),
       reloadSettings(),
       reloadHistory().catch(() => []),
+      reloadNotifications().catch(() => []),
     ]);
     return authoritative;
-  }, [reloadHistory, reloadSettings, reloadSnippets]);
+  }, [reloadHistory, reloadNotifications, reloadSettings, reloadSnippets]);
 
   const reconcileSyncCompletion = useCallback(
     async (
@@ -238,6 +251,10 @@ export default function App() {
         }
       }
 
+      if (completion.status !== "result" || !completion.result?.success) {
+        void reloadNotifications().catch(() => {});
+      }
+
       if (options.showDialog) {
         const text = completion.result?.message
           || (completion.error ? localizeCommandError(completion.error, t) : t("errors.syncFailedShort"));
@@ -246,7 +263,7 @@ export default function App() {
 
       return completion;
     },
-    [refreshAfterSync, setSyncStatus, t],
+    [refreshAfterSync, reloadNotifications, setSyncStatus, t],
   );
 
   const runManualSync = useCallback(
@@ -351,38 +368,36 @@ export default function App() {
     let disposed = false;
     const unlisteners: Array<() => void> = [];
 
-    void import("@tauri-apps/api/window")
-      .then(async ({ getCurrentWindow }) => {
-        const tauriWindow = getCurrentWindow();
-        const registered = await Promise.all([
-          tauriWindow.listen<SyncCompletionEvent>("sync-complete", async (event) => {
-            const source = event.payload.source;
-            await reconcileSyncCompletion(event.payload, {
-              showDialog: source === "tray",
-            });
-          }),
-          tauriWindow.listen<QuickCaptureCompletion>("quick-capture-complete", (event) => {
-            void invoke("take_quick_capture_completion").catch(() => {});
-            void handleQuickCaptureCompletion(event.payload);
-          }),
-          tauriWindow.listen("open-settings", () => setSettingsOpen(true)),
-          tauriWindow.listen("autostart-toggled", () => {
-            void reloadSettings().catch(() => {});
-          }),
-        ]);
+    void (async () => {
+      const tauriWindow = getCurrentWindow();
+      const registered = await Promise.all([
+        tauriWindow.listen<SyncCompletionEvent>("sync-complete", async (event) => {
+          const source = event.payload.source;
+          await reconcileSyncCompletion(event.payload, {
+            showDialog: source === "tray",
+          });
+        }),
+        tauriWindow.listen<QuickCaptureCompletion>("quick-capture-complete", (event) => {
+          void invoke("take_quick_capture_completion").catch(() => {});
+          void handleQuickCaptureCompletion(event.payload);
+        }),
+        tauriWindow.listen("open-settings", () => setSettingsOpen(true)),
+        tauriWindow.listen("autostart-toggled", () => {
+          void reloadSettings().catch(() => {});
+        }),
+      ]);
 
-        if (disposed) {
-          registered.forEach((unlisten) => unlisten());
-          return;
-        }
+      if (disposed) {
+        registered.forEach((unlisten) => unlisten());
+        return;
+      }
 
-        unlisteners.push(...registered);
-        const pending = await invoke<QuickCaptureCompletion | null>("take_quick_capture_completion");
-        if (!disposed && pending) {
-          await handleQuickCaptureCompletion(pending);
-        }
-      })
-      .catch(() => {});
+      unlisteners.push(...registered);
+      const pending = await invoke<QuickCaptureCompletion | null>("take_quick_capture_completion");
+      if (!disposed && pending) {
+        await handleQuickCaptureCompletion(pending);
+      }
+    })().catch(() => {});
 
     return () => {
       disposed = true;
@@ -624,6 +639,165 @@ export default function App() {
       }
     }
   }, [saving, isNew, form, selected, create, update, get, reloadSnippets, t]);
+
+  const completeHistoryRestore = useCallback(async (
+    generation: number,
+    status: "succeeded" | "cancelled" | "failed",
+  ) => {
+    await invoke("complete_revision_history_restore", { generation, status });
+  }, []);
+
+  const handleHistoryRestoreRequest = useCallback(async (request: RevisionHistoryRestoreRequest) => {
+    const targetIsSelected = selected?.id === request.snippet_id && !isNew;
+    if (targetIsSelected && isDirty) {
+      const action = await dialogRef.current?.ask(t("dialog.unsavedChanges"));
+      if (action === "save") {
+        const saved = await handleSave();
+        if (!saved) {
+          await completeHistoryRestore(request.generation, "cancelled");
+          return;
+        }
+      } else if (action !== "discard") {
+        await completeHistoryRestore(request.generation, "cancelled");
+        return;
+      }
+    }
+
+    const confirmed = await dialogRef.current?.confirm(t("snippet.restoreRevisionConfirm"));
+    if (confirmed !== true) {
+      await completeHistoryRestore(request.generation, "cancelled");
+      return;
+    }
+
+    try {
+      const current = await get(request.snippet_id);
+      const restored = await restoreRevision(
+        current.id,
+        request.target_revision_id,
+        current.revision_id,
+      );
+      if (editorTargetRef.current === restored.id) {
+        loadSnippet(restored);
+      }
+      try {
+        await reloadSnippets();
+      } catch (cause) {
+        await dialogRef.current?.alert(
+          t("errors.reloadAfterMutationFailed", {
+            error: localizeCommandError(cause, t),
+          }),
+        );
+      }
+      await completeHistoryRestore(request.generation, "succeeded");
+    } catch (cause) {
+      const normalized = normalizeCommandError(cause);
+      if (normalized.code === "stale_revision" && editorTargetRef.current === request.snippet_id) {
+        try {
+          const latest = await get(request.snippet_id);
+          setSelected(latest);
+          setRefreshStatus("stale");
+        } catch {
+          setRefreshStatus("stale");
+        }
+      }
+      await completeHistoryRestore(request.generation, "failed").catch(() => {});
+      await dialogRef.current?.alert(localizeCommandError(cause, t));
+    }
+  }, [completeHistoryRestore, get, handleSave, isDirty, isNew, loadSnippet, reloadSnippets, restoreRevision, selected, t]);
+
+  const openRevisionHistory = useCallback(async () => {
+    if (!selected || isNew) return;
+    try {
+      await invoke("open_revision_history", { id: selected.id });
+    } catch (cause) {
+      await dialogRef.current?.alert(localizeCommandError(cause, t));
+    }
+  }, [isNew, selected, t]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
+    const processRequest = async (request: RevisionHistoryRestoreRequest) => {
+      if (disposed) return;
+      try {
+        const mainWindow = getCurrentWindow();
+        await mainWindow.show();
+        await mainWindow.unminimize().catch(() => {});
+        await mainWindow.setFocus().catch(() => {});
+      } catch {
+        // The confirmation flow remains safe if native focus restoration is unavailable.
+      }
+      await handleHistoryRestoreRequest(request);
+    };
+
+    const consumePendingRequest = async () => {
+      const pending = await invoke<RevisionHistoryRestoreRequest | null>(
+        "take_revision_history_restore_request",
+      );
+      if (pending) await processRequest(pending);
+    };
+
+    void getCurrentWindow()
+      .listen("revision-history-restore-request", () => void consumePendingRequest())
+      .then(async (registered) => {
+        unlisten = registered;
+        await consumePendingRequest();
+      })
+      .catch(() => {});
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [handleHistoryRestoreRequest]);
+
+
+  useEffect(() => {
+    void reloadNotifications().catch(() => {});
+  }, [reloadNotifications]);
+
+  const handleSnapshotRestore = useCallback(async (snapshotId: string): Promise<boolean> => {
+    if (isDirty) {
+      const action = await dialogRef.current?.ask(t("dialog.unsavedChanges"));
+      if (action === "save") {
+        const saved = await handleSave();
+        if (!saved) return false;
+      } else if (action !== "discard") {
+        return false;
+      }
+    }
+
+    const confirmed = await dialogRef.current?.confirm(t("snapshots.restoreConfirm"));
+    if (confirmed !== true) return false;
+
+    try {
+      await invoke("restore_local_snapshot", { snapshotId });
+    } catch (cause) {
+      await dialogRef.current?.alert(localizeCommandError(cause, t));
+      return false;
+    }
+
+    resetToEmpty();
+    try {
+      await Promise.all([
+        reloadSnippets(),
+        reloadSettings(),
+        reloadHistory().catch(() => []),
+        reloadNotifications().catch(() => []),
+      ]);
+    } catch (cause) {
+      await dialogRef.current?.alert(
+        t("errors.reloadAfterRestoreFailed", {
+          error: localizeCommandError(cause, t),
+        }),
+      );
+      return true;
+    }
+
+    await dialogRef.current?.alert(t("snapshots.restoreComplete"));
+    return true;
+  }, [handleSave, isDirty, reloadHistory, reloadNotifications, reloadSettings, reloadSnippets, resetToEmpty, t]);
 
   const fetchSnippetDetail = useCallback(async (snippet: SnippetSummary) => {
     const requestId = ++detailRequestRef.current;
@@ -1125,6 +1299,14 @@ export default function App() {
         commands={commandDefinitions}
         onClose={() => setCommandPaletteOpen(false)}
       />
+      {notificationsOpen && (
+        <SyncNotificationCenter
+          onClose={() => setNotificationsOpen(false)}
+          onSync={async () => {
+            await handleSync();
+          }}
+        />
+      )}
       {settingsOpen && (
         <div
           className="app-modal-layer"
@@ -1138,6 +1320,7 @@ export default function App() {
             ref={settingsPanelRef}
             onClose={() => setSettingsOpen(false)}
             onSync={() => runManualSync("settings")}
+            onRestoreSnapshot={handleSnapshotRestore}
           />
         </div>
       )}
@@ -1176,6 +1359,8 @@ export default function App() {
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         searchInputRef={searchInputRef}
         onOpenSettings={handleOpenSettings}
+        onOpenNotifications={() => setNotificationsOpen(true)}
+        unreadNotifications={syncNotifications.filter((notification) => notification.read_at === null).length}
         onSync={handleSync}
         syncing={syncing}
         favoriteFilter={favFilter}
@@ -1268,6 +1453,7 @@ export default function App() {
                   }}
                   onSave={handleSave}
                   onCancel={handleCancel}
+                  onOpenHistory={() => void openRevisionHistory()}
                   onClipboardError={(cause) => {
                     void dialogRef.current?.alert(
                       t("errors.clipboardFailed", { error: localizeCommandError(cause, t) })

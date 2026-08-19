@@ -1,12 +1,15 @@
 use crate::db::{self, Snippet};
 use crate::error::CommandError;
 use crate::settings::{self, SecretAction, Settings, SettingsInput, SettingsView};
-use crate::webdav::{self, SyncResult};
+use crate::webdav::SyncResult;
 use once_cell::sync::{Lazy, OnceCell};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
-use tauri::{command, AppHandle, Manager};
+use tauri::{
+    command, AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
+};
 
 #[derive(serde::Serialize)]
 pub struct ExportResult {
@@ -18,6 +21,7 @@ pub struct ExportResult {
 pub enum TrustedDirectory {
     Data,
     Export,
+    Snapshots,
 }
 
 const PROJECT_REPOSITORY_URL: &str = "https://github.com/rainerosion/snipvault";
@@ -25,6 +29,155 @@ const PROJECT_REPOSITORY_URL: &str = "https://github.com/rainerosion/snipvault";
 pub static BOOT_START: OnceCell<Instant> = OnceCell::new();
 pub static WINDOW_SHOWN: AtomicBool = AtomicBool::new(false);
 static SETTINGS_WRITE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+const MAIN_WINDOW_LABEL: &str = "main";
+const REVISION_HISTORY_WINDOW_LABEL: &str = "revision-history";
+const REVISION_HISTORY_TARGET_CHANGED_EVENT: &str = "revision-history-target-changed";
+const REVISION_HISTORY_RESTORE_REQUEST_EVENT: &str = "revision-history-restore-request";
+const REVISION_HISTORY_RESTORE_OUTCOME_EVENT: &str = "revision-history-restore-outcome";
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RevisionHistoryTarget {
+    pub snippet_id: String,
+    pub current_revision_id: String,
+    pub generation: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RevisionHistoryRestoreRequest {
+    pub generation: u64,
+    pub snippet_id: String,
+    pub target_revision_id: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RevisionHistoryRestoreOutcome {
+    pub generation: u64,
+    pub status: RevisionHistoryRestoreStatus,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RevisionHistoryRestoreStatus {
+    Succeeded,
+    Cancelled,
+    Failed,
+}
+
+#[derive(Default)]
+struct RevisionHistoryWindowInner {
+    target: Option<RevisionHistoryTarget>,
+    pending_restore: Option<RevisionHistoryRestoreRequest>,
+    outcome: Option<RevisionHistoryRestoreOutcome>,
+}
+
+pub struct RevisionHistoryWindowState {
+    inner: Mutex<RevisionHistoryWindowInner>,
+}
+
+impl Default for RevisionHistoryWindowState {
+    fn default() -> Self {
+        Self {
+            inner: Mutex::new(RevisionHistoryWindowInner::default()),
+        }
+    }
+}
+
+fn state_lock(
+    state: &RevisionHistoryWindowState,
+) -> std::sync::MutexGuard<'_, RevisionHistoryWindowInner> {
+    state
+        .inner
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
+fn require_window(window: &WebviewWindow, label: &str) -> Result<(), CommandError> {
+    if window.label() == label {
+        Ok(())
+    } else {
+        log::warn!("Rejected revision-history command from an unexpected window");
+        Err(CommandError::validation())
+    }
+}
+
+fn emit_history_event<T: serde::Serialize + Clone>(app: &AppHandle, name: &str, payload: T) {
+    if let Some(window) = app.get_webview_window(REVISION_HISTORY_WINDOW_LABEL) {
+        if window.emit(name, payload).is_err() {
+            log::warn!("Could not notify revision-history window");
+        }
+    }
+}
+
+fn create_or_reveal_revision_history_window(app: &AppHandle) -> Result<(), CommandError> {
+    if let Some(window) = app.get_webview_window(REVISION_HISTORY_WINDOW_LABEL) {
+        window.show().map_err(|error| {
+            log::error!("Could not show revision-history window: {error}");
+            CommandError::new(
+                crate::error::ErrorCode::Open,
+                "The history window could not be opened.",
+                true,
+            )
+        })?;
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        REVISION_HISTORY_WINDOW_LABEL,
+        WebviewUrl::App("index.html".into()),
+    )
+    .title("SnipVault — Revision History")
+    .inner_size(1460.0, 900.0)
+    .min_inner_size(1000.0, 620.0)
+    .center()
+    .decorations(false)
+    .visible(false)
+    .build()
+    .map_err(|error| {
+        log::error!("Could not create revision-history window: {error}");
+        CommandError::new(
+            crate::error::ErrorCode::Open,
+            "The history window could not be opened.",
+            true,
+        )
+    })?;
+
+    let app_handle = app.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            if let Some(history) = app_handle.get_webview_window(REVISION_HISTORY_WINDOW_LABEL) {
+                let _ = history.hide();
+            }
+        }
+    });
+
+    window.show().map_err(|error| {
+        log::error!("Could not reveal revision-history window: {error}");
+        CommandError::new(
+            crate::error::ErrorCode::Open,
+            "The history window could not be opened.",
+            true,
+        )
+    })?;
+    let _ = window.set_focus();
+    Ok(())
+}
+
+pub fn hide_revision_history_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(REVISION_HISTORY_WINDOW_LABEL) {
+        let _ = window.hide();
+    }
+}
+
+pub fn destroy_revision_history_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(REVISION_HISTORY_WINDOW_LABEL) {
+        let _ = window.destroy();
+    }
+}
 
 pub fn boot_log(stage: &str, meta: &str) {
     let elapsed_ms = BOOT_START
@@ -62,19 +215,32 @@ pub fn show_main_window_if_needed(app: &AppHandle, reason: &str) {
 }
 
 #[command]
-pub fn frontend_ready(app: AppHandle, phase: Option<String>) {
+pub fn frontend_ready(
+    window: WebviewWindow,
+    app: AppHandle,
+    phase: Option<String>,
+) -> Result<(), CommandError> {
+    require_window(&window, MAIN_WINDOW_LABEL)?;
     let phase = phase.unwrap_or_else(|| "from_web".to_string());
     boot_log("frontend_ready_received", &phase);
     show_main_window_if_needed(&app, &format!("frontend_ready:{phase}"));
+    Ok(())
 }
 
 #[command]
-pub fn boot_mark(stage: String, t_ms: f64, app: AppHandle) {
+pub fn boot_mark(
+    window: WebviewWindow,
+    stage: String,
+    t_ms: f64,
+    app: AppHandle,
+) -> Result<(), CommandError> {
+    require_window(&window, MAIN_WINDOW_LABEL)?;
     boot_log("web_mark", &format!("stage={} web_t_ms={:.2}", stage, t_ms));
 
     if stage == "main_eval_start" {
         show_main_window_if_needed(&app, "boot_mark:main_eval_start");
     }
+    Ok(())
 }
 
 #[command]
@@ -94,6 +260,157 @@ pub fn query_snippets(request: db::SnippetQuery) -> Result<db::SnippetQueryResul
 }
 
 #[command]
+pub async fn open_revision_history(
+    window: WebviewWindow,
+    app: AppHandle,
+    state: State<'_, RevisionHistoryWindowState>,
+    id: String,
+) -> Result<(), CommandError> {
+    require_window(&window, MAIN_WINDOW_LABEL)?;
+    let snippet = db::get_snippet(&id).map_err(|error| {
+        log::error!("open_revision_history target lookup failed");
+        CommandError::database(&error)
+    })?;
+
+    let target = {
+        let mut inner = state_lock(&state);
+        let generation = inner
+            .target
+            .as_ref()
+            .map(|target| target.generation.saturating_add(1))
+            .unwrap_or(1);
+        let target = RevisionHistoryTarget {
+            snippet_id: snippet.id,
+            current_revision_id: snippet.revision_id,
+            generation,
+        };
+        inner.target = Some(target.clone());
+        inner.pending_restore = None;
+        inner.outcome = None;
+        target
+    };
+
+    create_or_reveal_revision_history_window(&app)?;
+    emit_history_event(&app, REVISION_HISTORY_TARGET_CHANGED_EVENT, target);
+    Ok(())
+}
+
+#[command]
+pub fn get_revision_history_target(
+    window: WebviewWindow,
+    state: State<'_, RevisionHistoryWindowState>,
+) -> Result<Option<RevisionHistoryTarget>, CommandError> {
+    require_window(&window, REVISION_HISTORY_WINDOW_LABEL)?;
+    Ok(state_lock(&state).target.clone())
+}
+
+#[command]
+pub fn request_revision_history_restore(
+    window: WebviewWindow,
+    app: AppHandle,
+    state: State<'_, RevisionHistoryWindowState>,
+    generation: u64,
+    target_revision_id: String,
+) -> Result<(), CommandError> {
+    require_window(&window, REVISION_HISTORY_WINDOW_LABEL)?;
+    let should_notify = {
+        let mut inner = state_lock(&state);
+        let Some(target) = inner.target.as_ref() else {
+            return Err(CommandError::not_found());
+        };
+        if target.generation != generation || target_revision_id == target.current_revision_id {
+            return Err(CommandError::validation());
+        }
+
+        let revision =
+            db::get_snippet_revision(&target.snippet_id, &target_revision_id).map_err(|error| {
+                log::error!("request_revision_history_restore validation failed");
+                CommandError::database(&error)
+            })?;
+        if revision.revision.deleted || revision.revision.is_current_head {
+            return Err(CommandError::validation());
+        }
+
+        if inner.pending_restore.is_some() {
+            return Err(CommandError::validation());
+        }
+
+        let request = RevisionHistoryRestoreRequest {
+            generation,
+            snippet_id: target.snippet_id.clone(),
+            target_revision_id,
+        };
+        let should_notify = true;
+        inner.pending_restore = Some(request);
+        inner.outcome = None;
+        should_notify
+    };
+
+    if should_notify {
+        if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+            if main
+                .emit(REVISION_HISTORY_RESTORE_REQUEST_EVENT, ())
+                .is_err()
+            {
+                log::warn!("Could not notify main window about revision restore request");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[command]
+pub fn take_revision_history_restore_request(
+    window: WebviewWindow,
+    state: State<'_, RevisionHistoryWindowState>,
+) -> Result<Option<RevisionHistoryRestoreRequest>, CommandError> {
+    require_window(&window, MAIN_WINDOW_LABEL)?;
+    Ok(state_lock(&state).pending_restore.take())
+}
+
+#[command]
+pub fn complete_revision_history_restore(
+    window: WebviewWindow,
+    app: AppHandle,
+    state: State<'_, RevisionHistoryWindowState>,
+    generation: u64,
+    status: RevisionHistoryRestoreStatus,
+) -> Result<(), CommandError> {
+    require_window(&window, MAIN_WINDOW_LABEL)?;
+    let outcome = {
+        let mut inner = state_lock(&state);
+        let Some(target) = inner.target.as_ref() else {
+            return Err(CommandError::not_found());
+        };
+        if target.generation != generation {
+            return Err(CommandError::validation());
+        }
+        inner.pending_restore = None;
+        let outcome = RevisionHistoryRestoreOutcome { generation, status };
+        inner.outcome = Some(outcome.clone());
+        outcome
+    };
+
+    emit_history_event(
+        &app,
+        REVISION_HISTORY_RESTORE_OUTCOME_EVENT,
+        outcome.clone(),
+    );
+    if matches!(outcome.status, RevisionHistoryRestoreStatus::Succeeded) {
+        hide_revision_history_window(&app);
+    }
+    Ok(())
+}
+
+#[command]
+pub fn get_revision_history_restore_outcome(
+    window: WebviewWindow,
+    state: State<'_, RevisionHistoryWindowState>,
+) -> Result<Option<RevisionHistoryRestoreOutcome>, CommandError> {
+    require_window(&window, REVISION_HISTORY_WINDOW_LABEL)?;
+    Ok(state_lock(&state).outcome.clone())
+}
+#[command]
 pub fn get_snippet(id: String) -> Result<Snippet, CommandError> {
     db::get_snippet(&id).map_err(|error| {
         log::error!("get_snippet failed");
@@ -102,7 +419,58 @@ pub fn get_snippet(id: String) -> Result<Snippet, CommandError> {
 }
 
 #[command]
+pub fn get_snippet_revision(
+    id: String,
+    revision_id: String,
+) -> Result<db::RevisionContent, CommandError> {
+    db::get_snippet_revision(&id, &revision_id).map_err(|error| {
+        log::error!("get_snippet_revision failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn list_snippet_revisions(
+    id: String,
+    cursor: Option<String>,
+    limit: Option<usize>,
+) -> Result<db::RevisionPage, CommandError> {
+    db::list_snippet_revisions(&id, cursor.as_deref(), limit).map_err(|error| {
+        log::error!("list_snippet_revisions failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn compare_snippet_revisions(
+    id: String,
+    left_revision_id: String,
+    right_revision_id: String,
+) -> Result<db::RevisionComparison, CommandError> {
+    db::compare_snippet_revisions(&id, &left_revision_id, &right_revision_id).map_err(|error| {
+        log::error!("compare_snippet_revisions failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn restore_snippet_revision(
+    window: WebviewWindow,
+    id: String,
+    target_revision_id: String,
+    base_revision_id: String,
+) -> Result<Snippet, CommandError> {
+    require_window(&window, MAIN_WINDOW_LABEL)?;
+    let _mutation_guard = crate::snapshots::mutation_guard();
+    db::restore_snippet_revision(&id, &target_revision_id, &base_revision_id).map_err(|error| {
+        log::error!("restore_snippet_revision failed");
+        CommandError::mutation(&error)
+    })
+}
+
+#[command]
 pub fn record_snippet_usage(id: String) -> Result<(), CommandError> {
+    let _mutation_guard = crate::snapshots::mutation_guard();
     db::record_snippet_usage(&id).map_err(|error| {
         log::error!("record_snippet_usage failed");
         CommandError::database(&error)
@@ -149,6 +517,7 @@ pub fn create_snippet(
         log::warn!("create_snippet validation failed: {error}");
         CommandError::validation()
     })?;
+    let _mutation_guard = crate::snapshots::mutation_guard();
     db::create_snippet(&snippet).map_err(|error| {
         log::error!("create_snippet database write failed");
         CommandError::mutation(&error)
@@ -184,6 +553,7 @@ pub fn update_snippet(
         log::warn!("update_snippet validation failed: {error}");
         CommandError::validation()
     })?;
+    let _mutation_guard = crate::snapshots::mutation_guard();
     db::update_snippet(&snippet, &base_revision_id).map_err(|error| {
         log::error!("update_snippet database write failed");
         CommandError::mutation(&error)
@@ -192,6 +562,7 @@ pub fn update_snippet(
 
 #[command]
 pub fn delete_snippet(id: String) -> Result<db::RevisionHead, CommandError> {
+    let _mutation_guard = crate::snapshots::mutation_guard();
     db::delete_snippet(&id).map_err(|error| {
         log::error!("delete_snippet failed");
         CommandError::mutation(&error)
@@ -212,6 +583,7 @@ pub fn search_snippets(
 
 #[command]
 pub fn toggle_favorite(id: String) -> Result<Snippet, CommandError> {
+    let _mutation_guard = crate::snapshots::mutation_guard();
     db::toggle_favorite(&id).map_err(|error| {
         log::error!("toggle_favorite failed");
         CommandError::mutation(&error)
@@ -223,6 +595,7 @@ pub fn set_snippets_favorite(
     ids: Vec<String>,
     is_favorite: bool,
 ) -> Result<db::BulkMutationResult, CommandError> {
+    let _mutation_guard = crate::snapshots::mutation_guard();
     db::set_snippets_favorite(&ids, is_favorite).map_err(|error| {
         log::error!("set_snippets_favorite failed");
         CommandError::mutation(&error)
@@ -231,6 +604,7 @@ pub fn set_snippets_favorite(
 
 #[command]
 pub fn delete_snippets(ids: Vec<String>) -> Result<db::BulkMutationResult, CommandError> {
+    let _mutation_guard = crate::snapshots::mutation_guard();
     db::delete_snippets(&ids).map_err(|error| {
         log::error!("delete_snippets failed");
         CommandError::mutation(&error)
@@ -275,6 +649,7 @@ fn trusted_directory_path(directory: TrustedDirectory) -> std::path::PathBuf {
     match directory {
         TrustedDirectory::Data => crate::paths::get_data_dir(),
         TrustedDirectory::Export => crate::paths::get_export_dir().0,
+        TrustedDirectory::Snapshots => crate::paths::get_snapshots_dir(),
     }
 }
 
@@ -301,6 +676,7 @@ pub fn open_trusted_directory(directory: TrustedDirectory) -> Result<(), Command
 
 #[command]
 pub fn import_snippets(json_data: String) -> Result<db::ImportResult, CommandError> {
+    let _mutation_guard = crate::snapshots::mutation_guard();
     db::import_snippets(&json_data).map_err(|_error| {
         log::warn!("import_snippets failed");
         CommandError::import()
@@ -543,28 +919,103 @@ pub fn is_auto_start_enabled(app: AppHandle) -> Result<bool, CommandError> {
     })
 }
 
-// --- WebDAV Sync ---
-
 #[command]
-pub fn sync_upload() -> Result<SyncResult, CommandError> {
-    webdav::sync_to_webdav().map_err(|error| {
-        log::error!("sync_upload failed: {error}");
-        CommandError::sync(&error)
+pub fn get_snapshot_status() -> Result<crate::snapshots::SnapshotStatus, CommandError> {
+    crate::snapshots::get_status().map_err(|_| {
+        log::error!("get_snapshot_status failed");
+        CommandError::snapshot()
     })
 }
 
 #[command]
-pub fn sync_download() -> Result<SyncResult, CommandError> {
-    webdav::sync_from_webdav().map_err(|error| {
-        log::error!("sync_download failed: {error}");
-        CommandError::sync(&error)
+pub fn create_local_snapshot() -> Result<crate::snapshots::LocalSnapshot, CommandError> {
+    crate::snapshots::create_snapshot().map_err(|_| {
+        log::error!("create_local_snapshot failed");
+        CommandError::snapshot()
     })
+}
+
+#[command]
+pub fn restore_local_snapshot(
+    snapshot_id: String,
+) -> Result<crate::snapshots::RestoreResult, CommandError> {
+    crate::snapshots::restore_snapshot(&snapshot_id).map_err(|_| {
+        log::error!("restore_local_snapshot failed");
+        CommandError::snapshot()
+    })
+}
+
+#[command]
+pub fn update_snapshot_policy(
+    policy: crate::settings::SnapshotSettingsInput,
+) -> Result<crate::snapshots::SnapshotStatus, CommandError> {
+    crate::snapshots::update_policy(policy).map_err(|_| {
+        log::warn!("update_snapshot_policy failed");
+        CommandError::validation()
+    })
+}
+
+// --- WebDAV Sync ---
+
+#[command]
+pub fn sync_upload(source: Option<crate::sync::SyncSource>) -> Result<SyncResult, CommandError> {
+    let source = source.unwrap_or(crate::sync::SyncSource::Toolbar);
+    match source {
+        crate::sync::SyncSource::Toolbar | crate::sync::SyncSource::Settings => {
+            crate::sync::run_manual_sync(source)
+        }
+        crate::sync::SyncSource::Tray | crate::sync::SyncSource::Background => {
+            Err(CommandError::validation())
+        }
+    }
+}
+
+#[command]
+pub fn sync_download(source: Option<crate::sync::SyncSource>) -> Result<SyncResult, CommandError> {
+    sync_upload(source)
 }
 
 #[command]
 pub fn get_sync_versions() -> Result<Vec<db::SyncVersion>, CommandError> {
     db::get_sync_versions().map_err(|error| {
         log::error!("get_sync_versions failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn list_sync_notifications(
+    limit: Option<usize>,
+) -> Result<Vec<db::SyncNotification>, CommandError> {
+    db::list_sync_notifications(limit).map_err(|error| {
+        log::error!("list_sync_notifications failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn mark_sync_notification_read(id: String) -> Result<(), CommandError> {
+    let _mutation_guard = crate::snapshots::mutation_guard();
+    db::mark_sync_notification_read(&id).map_err(|error| {
+        log::error!("mark_sync_notification_read failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn dismiss_sync_notification(id: String) -> Result<(), CommandError> {
+    let _mutation_guard = crate::snapshots::mutation_guard();
+    db::dismiss_sync_notification(&id).map_err(|error| {
+        log::error!("dismiss_sync_notification failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn mark_all_sync_notifications_read() -> Result<(), CommandError> {
+    let _mutation_guard = crate::snapshots::mutation_guard();
+    db::mark_all_sync_notifications_read().map_err(|error| {
+        log::error!("mark_all_sync_notifications_read failed");
         CommandError::database(&error)
     })
 }
@@ -656,6 +1107,9 @@ mod tests {
             webdav_timeout_secs: current.webdav_timeout_secs,
             auto_sync: current.auto_sync,
             sync_interval_minutes: current.sync_interval_minutes,
+            local_snapshot_enabled: current.local_snapshot_enabled,
+            local_snapshot_frequency: current.local_snapshot_frequency.clone(),
+            local_snapshot_retention: current.local_snapshot_retention,
             editor_line_wrap: current.editor_line_wrap,
         }
         .apply_to(current)

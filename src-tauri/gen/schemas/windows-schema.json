@@ -177,6 +177,570 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the boot_mark command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-boot-mark",
+          "markdownDescription": "Enables the boot_mark command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the compare_snippet_revisions command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-compare-snippet-revisions",
+          "markdownDescription": "Enables the compare_snippet_revisions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the complete_revision_history_restore command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-complete-revision-history-restore",
+          "markdownDescription": "Enables the complete_revision_history_restore command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_local_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-create-local-snapshot",
+          "markdownDescription": "Enables the create_local_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_snippet command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-create-snippet",
+          "markdownDescription": "Enables the create_snippet command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_snippet command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-snippet",
+          "markdownDescription": "Enables the delete_snippet command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_snippets command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-snippets",
+          "markdownDescription": "Enables the delete_snippets command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the dismiss_sync_notification command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-dismiss-sync-notification",
+          "markdownDescription": "Enables the dismiss_sync_notification command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the export_snippets command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-export-snippets",
+          "markdownDescription": "Enables the export_snippets command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the export_snippets_to_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-export-snippets-to-file",
+          "markdownDescription": "Enables the export_snippets_to_file command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the frontend_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-frontend-ready",
+          "markdownDescription": "Enables the frontend_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_revision_history_restore_outcome command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-revision-history-restore-outcome",
+          "markdownDescription": "Enables the get_revision_history_restore_outcome command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_revision_history_target command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-revision-history-target",
+          "markdownDescription": "Enables the get_revision_history_target command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-settings",
+          "markdownDescription": "Enables the get_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_snapshot_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-snapshot-status",
+          "markdownDescription": "Enables the get_snapshot_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_snippet command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-snippet",
+          "markdownDescription": "Enables the get_snippet command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_snippet_revision command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-snippet-revision",
+          "markdownDescription": "Enables the get_snippet_revision command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_snippet_tags command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-snippet-tags",
+          "markdownDescription": "Enables the get_snippet_tags command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_snippets command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-snippets",
+          "markdownDescription": "Enables the get_snippets command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_sync_versions command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-sync-versions",
+          "markdownDescription": "Enables the get_sync_versions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_system_locale command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-system-locale",
+          "markdownDescription": "Enables the get_system_locale command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_system_theme command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-system-theme",
+          "markdownDescription": "Enables the get_system_theme command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the import_snippets command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-import-snippets",
+          "markdownDescription": "Enables the import_snippets command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the is_auto_start_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-is-auto-start-enabled",
+          "markdownDescription": "Enables the is_auto_start_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_snippet_revisions command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-snippet-revisions",
+          "markdownDescription": "Enables the list_snippet_revisions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_sync_notifications command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-sync-notifications",
+          "markdownDescription": "Enables the list_sync_notifications command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mark_all_sync_notifications_read command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mark-all-sync-notifications-read",
+          "markdownDescription": "Enables the mark_all_sync_notifications_read command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mark_sync_notification_read command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mark-sync-notification-read",
+          "markdownDescription": "Enables the mark_sync_notification_read command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_project_repository command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-project-repository",
+          "markdownDescription": "Enables the open_project_repository command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_revision_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-revision-history",
+          "markdownDescription": "Enables the open_revision_history command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_trusted_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-trusted-directory",
+          "markdownDescription": "Enables the open_trusted_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the query_snippets command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-query-snippets",
+          "markdownDescription": "Enables the query_snippets command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the record_snippet_usage command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-record-snippet-usage",
+          "markdownDescription": "Enables the record_snippet_usage command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the request_revision_history_restore command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-request-revision-history-restore",
+          "markdownDescription": "Enables the request_revision_history_restore command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the restore_local_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-restore-local-snapshot",
+          "markdownDescription": "Enables the restore_local_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the restore_snippet_revision command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-restore-snippet-revision",
+          "markdownDescription": "Enables the restore_snippet_revision command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-settings",
+          "markdownDescription": "Enables the save_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the search_snippets command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-search-snippets",
+          "markdownDescription": "Enables the search_snippets command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_auto_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-auto-start",
+          "markdownDescription": "Enables the set_auto_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_snippets_favorite command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-snippets-favorite",
+          "markdownDescription": "Enables the set_snippets_favorite command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sync_download command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sync-download",
+          "markdownDescription": "Enables the sync_download command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sync_upload command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sync-upload",
+          "markdownDescription": "Enables the sync_upload command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the take_quick_capture_completion command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-take-quick-capture-completion",
+          "markdownDescription": "Enables the take_quick_capture_completion command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the take_revision_history_restore_request command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-take-revision-history-restore-request",
+          "markdownDescription": "Enables the take_revision_history_restore_request command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the toggle_favorite command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-toggle-favorite",
+          "markdownDescription": "Enables the toggle_favorite command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_snapshot_policy command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-snapshot-policy",
+          "markdownDescription": "Enables the update_snapshot_policy command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_snippet command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-snippet",
+          "markdownDescription": "Enables the update_snippet command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the boot_mark command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-boot-mark",
+          "markdownDescription": "Denies the boot_mark command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the compare_snippet_revisions command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-compare-snippet-revisions",
+          "markdownDescription": "Denies the compare_snippet_revisions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the complete_revision_history_restore command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-complete-revision-history-restore",
+          "markdownDescription": "Denies the complete_revision_history_restore command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_local_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-create-local-snapshot",
+          "markdownDescription": "Denies the create_local_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_snippet command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-create-snippet",
+          "markdownDescription": "Denies the create_snippet command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_snippet command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-snippet",
+          "markdownDescription": "Denies the delete_snippet command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_snippets command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-snippets",
+          "markdownDescription": "Denies the delete_snippets command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the dismiss_sync_notification command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-dismiss-sync-notification",
+          "markdownDescription": "Denies the dismiss_sync_notification command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the export_snippets command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-export-snippets",
+          "markdownDescription": "Denies the export_snippets command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the export_snippets_to_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-export-snippets-to-file",
+          "markdownDescription": "Denies the export_snippets_to_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the frontend_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-frontend-ready",
+          "markdownDescription": "Denies the frontend_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_revision_history_restore_outcome command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-revision-history-restore-outcome",
+          "markdownDescription": "Denies the get_revision_history_restore_outcome command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_revision_history_target command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-revision-history-target",
+          "markdownDescription": "Denies the get_revision_history_target command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-settings",
+          "markdownDescription": "Denies the get_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_snapshot_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-snapshot-status",
+          "markdownDescription": "Denies the get_snapshot_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_snippet command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-snippet",
+          "markdownDescription": "Denies the get_snippet command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_snippet_revision command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-snippet-revision",
+          "markdownDescription": "Denies the get_snippet_revision command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_snippet_tags command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-snippet-tags",
+          "markdownDescription": "Denies the get_snippet_tags command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_snippets command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-snippets",
+          "markdownDescription": "Denies the get_snippets command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_sync_versions command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-sync-versions",
+          "markdownDescription": "Denies the get_sync_versions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_system_locale command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-system-locale",
+          "markdownDescription": "Denies the get_system_locale command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_system_theme command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-system-theme",
+          "markdownDescription": "Denies the get_system_theme command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the import_snippets command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-import-snippets",
+          "markdownDescription": "Denies the import_snippets command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the is_auto_start_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-is-auto-start-enabled",
+          "markdownDescription": "Denies the is_auto_start_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_snippet_revisions command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-snippet-revisions",
+          "markdownDescription": "Denies the list_snippet_revisions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_sync_notifications command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-sync-notifications",
+          "markdownDescription": "Denies the list_sync_notifications command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mark_all_sync_notifications_read command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mark-all-sync-notifications-read",
+          "markdownDescription": "Denies the mark_all_sync_notifications_read command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mark_sync_notification_read command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mark-sync-notification-read",
+          "markdownDescription": "Denies the mark_sync_notification_read command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_project_repository command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-project-repository",
+          "markdownDescription": "Denies the open_project_repository command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_revision_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-revision-history",
+          "markdownDescription": "Denies the open_revision_history command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_trusted_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-trusted-directory",
+          "markdownDescription": "Denies the open_trusted_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the query_snippets command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-query-snippets",
+          "markdownDescription": "Denies the query_snippets command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the record_snippet_usage command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-record-snippet-usage",
+          "markdownDescription": "Denies the record_snippet_usage command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the request_revision_history_restore command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-request-revision-history-restore",
+          "markdownDescription": "Denies the request_revision_history_restore command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the restore_local_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-restore-local-snapshot",
+          "markdownDescription": "Denies the restore_local_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the restore_snippet_revision command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-restore-snippet-revision",
+          "markdownDescription": "Denies the restore_snippet_revision command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-settings",
+          "markdownDescription": "Denies the save_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the search_snippets command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-search-snippets",
+          "markdownDescription": "Denies the search_snippets command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_auto_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-auto-start",
+          "markdownDescription": "Denies the set_auto_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_snippets_favorite command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-snippets-favorite",
+          "markdownDescription": "Denies the set_snippets_favorite command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sync_download command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sync-download",
+          "markdownDescription": "Denies the sync_download command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sync_upload command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sync-upload",
+          "markdownDescription": "Denies the sync_upload command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the take_quick_capture_completion command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-take-quick-capture-completion",
+          "markdownDescription": "Denies the take_quick_capture_completion command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the take_revision_history_restore_request command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-take-revision-history-restore-request",
+          "markdownDescription": "Denies the take_revision_history_restore_request command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the toggle_favorite command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-toggle-favorite",
+          "markdownDescription": "Denies the toggle_favorite command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_snapshot_policy command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-snapshot-policy",
+          "markdownDescription": "Denies the update_snapshot_policy command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_snippet command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-snippet",
+          "markdownDescription": "Denies the update_snippet command without any pre-configured scope."
+        },
+        {
           "description": "This permission set configures if your\napplication can enable or disable auto\nstarting the application on boot.\n\n#### Granted Permissions\n\nIt allows all to check, enable and\ndisable the automatic start on boot.\n\n\n#### This default permission set includes:\n\n- `allow-enable`\n- `allow-disable`\n- `allow-is-enabled`",
           "type": "string",
           "const": "autostart:default",

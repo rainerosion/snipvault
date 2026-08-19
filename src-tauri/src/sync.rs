@@ -9,13 +9,24 @@ pub const SYNC_EVENT_NAME: &str = "sync-complete";
 pub const AUTO_SYNC_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const AUTO_SYNC_FAILURE_BACKOFF_CAP: Duration = Duration::from_secs(15 * 60);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SyncSource {
     Toolbar,
     Settings,
     Tray,
     Background,
+}
+
+impl SyncSource {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Toolbar => "toolbar",
+            Self::Settings => "settings",
+            Self::Tray => "tray",
+            Self::Background => "background",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -74,6 +85,7 @@ struct AutoSyncConfig {
 impl AutoSyncConfig {
     fn from_settings(settings: &Settings) -> Option<Self> {
         if !settings.auto_sync
+            || settings.sync_confirmation_required
             || settings.sync_interval_minutes <= 0
             || settings.webdav_url.trim().is_empty()
         {
@@ -160,17 +172,91 @@ fn failure_backoff(consecutive_failures: u32) -> Duration {
     Duration::from_secs(seconds)
 }
 
-fn run_sync(source: SyncSource) -> SyncEventPayload {
-    match webdav::sync_merge() {
-        Ok(result) => {
-            log::info!("Sync completed for source={source:?}: {}", result.message);
-            SyncEventPayload::result(source, result)
+fn notification_category_for_result(result: &SyncResult) -> &'static str {
+    if !result.success {
+        "failure"
+    } else if result.conflict_count > 0 {
+        "conflict"
+    } else if result.pending_count > 0 {
+        "pending"
+    } else {
+        "success"
+    }
+}
+
+fn persist_terminal_notification(payload: &SyncEventPayload) {
+    let _mutation_guard = crate::snapshots::mutation_guard();
+    let result = payload.result.as_ref();
+    let error = payload.error.as_ref();
+    let category = match payload.status {
+        SyncStatus::Result => result
+            .map(notification_category_for_result)
+            .unwrap_or("failure"),
+        SyncStatus::Busy => "busy",
+        SyncStatus::Error => "failure",
+    };
+    if let Err(_db_error) = crate::db::record_sync_notification(
+        payload.source.as_str(),
+        match payload.status {
+            SyncStatus::Result => "result",
+            SyncStatus::Error => "error",
+            SyncStatus::Busy => "busy",
+        },
+        category,
+        error.map(|value| value.code.as_str()),
+        error.map(|value| value.retryable).unwrap_or(false),
+        result.map(|value| value.uploaded_count),
+        result.map(|value| value.downloaded_count),
+        result.map(|value| value.deleted_count),
+        result.map(|value| value.conflict_count),
+        result.map(|value| value.pending_count),
+        result.map(|value| value.total_count),
+        result.map(|value| value.protocol_version),
+        result.map(|value| value.manifest_generation),
+    ) {
+        log::error!("Persisting sync notification failed");
+    }
+}
+
+fn run_sync(source: SyncSource) -> Option<SyncEventPayload> {
+    let sync_result = if source == SyncSource::Background {
+        webdav::sync_scheduled_merge()
+    } else {
+        webdav::sync_merge().map(Some)
+    };
+    let payload = match sync_result {
+        Ok(None) => return None,
+        Ok(Some(result)) => {
+            if source != SyncSource::Background
+                && result.success
+                && crate::settings::get_settings().sync_confirmation_required
+            {
+                if let Err(error) = crate::settings::confirm_manual_sync() {
+                    log::error!("Manual sync completed but restore confirmation could not be cleared: {error}");
+                    SyncEventPayload::error(
+                        source,
+                        CommandError::new(
+                            ErrorCode::Settings,
+                            "The synchronization completed, but the restored-vault confirmation could not be saved.",
+                            true,
+                        ),
+                    )
+                } else {
+                    log::info!("Sync completed for source={source:?}: {}", result.message);
+                    SyncEventPayload::result(source, result)
+                }
+            } else {
+                log::info!("Sync completed for source={source:?}: {}", result.message);
+                SyncEventPayload::result(source, result)
+            }
         }
         Err(error) => {
             log::error!("Sync failed for source={source:?}: {error}");
             SyncEventPayload::error(source, CommandError::sync(&error))
         }
-    }
+    };
+    persist_terminal_notification(&payload);
+    Some(payload)
 }
 
 fn schedule_outcome(payload: &SyncEventPayload) -> SyncAttemptOutcome {
@@ -189,6 +275,26 @@ fn schedule_outcome(payload: &SyncEventPayload) -> SyncAttemptOutcome {
     }
 }
 
+pub fn run_manual_sync(source: SyncSource) -> Result<SyncResult, CommandError> {
+    let payload = run_sync(source).ok_or_else(|| {
+        CommandError::new(
+            ErrorCode::Unknown,
+            "The synchronization operation could not be completed.",
+            true,
+        )
+    })?;
+    if let Some(result) = payload.result {
+        return Ok(result);
+    }
+    Err(payload.error.unwrap_or_else(|| {
+        CommandError::new(
+            ErrorCode::Unknown,
+            "The synchronization operation could not be completed.",
+            true,
+        )
+    }))
+}
+
 pub fn emit_sync_event(app: &AppHandle, payload: &SyncEventPayload) {
     let Some(window) = app.get_webview_window("main") else {
         log::warn!("Could not emit sync event because the main window is unavailable");
@@ -200,8 +306,9 @@ pub fn emit_sync_event(app: &AppHandle, payload: &SyncEventPayload) {
 }
 
 pub fn run_and_emit(app: &AppHandle, source: SyncSource) {
-    let payload = run_sync(source);
-    emit_sync_event(app, &payload);
+    if let Some(payload) = run_sync(source) {
+        emit_sync_event(app, &payload);
+    }
 }
 
 pub fn start_auto_sync_worker(app: AppHandle) {
@@ -217,10 +324,13 @@ pub fn start_auto_sync_worker(app: AppHandle) {
                     "Running scheduled auto-sync (interval={} minutes)",
                     settings.sync_interval_minutes
                 );
-                let payload = run_sync(SyncSource::Background);
-                let outcome = schedule_outcome(&payload);
-                emit_sync_event(&app, &payload);
-                scheduler.record_outcome(Instant::now(), outcome);
+                if let Some(payload) = run_sync(SyncSource::Background) {
+                    let outcome = schedule_outcome(&payload);
+                    emit_sync_event(&app, &payload);
+                    scheduler.record_outcome(Instant::now(), outcome);
+                } else {
+                    scheduler.reset();
+                }
             }
 
             std::thread::sleep(AUTO_SYNC_POLL_INTERVAL);

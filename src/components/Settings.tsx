@@ -23,6 +23,8 @@ import { LANGUAGES } from "../i18n";
 import { localizeCommandError } from "../utils/commandErrors";
 import { ACCENT_PRESETS } from "../theme";
 import { Dialog, type DialogHandle } from "./Dialog";
+import { RestoreWizard } from "./RestoreWizard";
+import type { LocalSnapshot, SnapshotStatus } from "../types";
 import { ModalSurface } from "./ModalSurface";
 
 const APP_NAME = "灵藏 · SnipVault";
@@ -34,6 +36,7 @@ interface SettingsPanelProps {
   setTheme?: (theme: "dark" | "light") => void;
   onClose: () => void;
   onSync: () => Promise<SyncCompletionEvent>;
+  onRestoreSnapshot?: (snapshotId: string) => Promise<boolean>;
 }
 
 export interface SettingsPanelHandle {
@@ -66,7 +69,7 @@ function isWebDavDraftDirty(
 export const SettingsPanel = forwardRef<
   SettingsPanelHandle,
   SettingsPanelProps
->(function SettingsPanel({ onClose, onSync }, ref) {
+>(function SettingsPanel({ onClose, onSync, onRestoreSnapshot }, ref) {
   const { t } = useTranslation();
   const { setLanguage } = useContext(LanguageContext);
   const {
@@ -94,6 +97,9 @@ export const SettingsPanel = forwardRef<
   const [secretInput, setSecretInput] = useState("");
   const [secretAction, setSecretAction] = useState<SecretAction>({ action: "keep" });
   const [showHistory, setShowHistory] = useState(false);
+  const [snapshotStatus, setSnapshotStatus] = useState<SnapshotStatus | null>(null);
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false);
+  const [restoreWizardOpen, setRestoreWizardOpen] = useState(false);
   const dialogRef = useRef<DialogHandle>(null);
   const draftRef = useRef<SettingsDraft | null>(null);
   const baselineRef = useRef<SettingsDraft | null>(null);
@@ -138,6 +144,30 @@ export const SettingsPanel = forwardRef<
       void reloadHistory().catch(() => {});
     }
   }, [showHistory, reloadHistory]);
+
+  const loadSnapshots = useCallback(async () => {
+    setSnapshotsLoading(true);
+    try {
+      const status = await invoke<SnapshotStatus>("get_snapshot_status");
+      setSnapshotStatus(status);
+    } finally {
+      setSnapshotsLoading(false);
+    }
+  }, []);
+
+  const createSnapshot = useCallback(async () => {
+    await invoke<LocalSnapshot>("create_local_snapshot");
+  }, []);
+
+  const openSnapshotWizard = useCallback(() => {
+    setRestoreWizardOpen(true);
+    void loadSnapshots().catch(() => {});
+  }, [loadSnapshots]);
+
+  useEffect(() => {
+    if (!restoreWizardOpen) return;
+    void loadSnapshots().catch(() => {});
+  }, [loadSnapshots, restoreWizardOpen]);
 
   const currentLang = draft?.language || settings?.language || "zh";
   const syncHistoryDirectionLabels = useMemo(
@@ -672,6 +702,12 @@ export const SettingsPanel = forwardRef<
             </select>
           </label>
 
+          {settings?.sync_confirmation_required && (
+            <div className="settings-external-status" role="status">
+              {t("snapshots.scopeManualSync")}
+            </div>
+          )}
+
           <label className="settings-row">
             <div className="settings-row-info">
               <span className="settings-row-label">{t("settings.autoSync")}</span>
@@ -815,6 +851,104 @@ export const SettingsPanel = forwardRef<
           )}
         </section>
 
+        <section className="settings-section">
+          <h3 className="settings-section-title">{t("settings.localSnapshots")}</h3>
+          <p className="settings-section-desc">{t("settings.localSnapshotsDesc")}</p>
+
+          <label className="settings-row">
+            <div className="settings-row-info">
+              <span className="settings-row-label">{t("settings.localSnapshotsEnabled")}</span>
+              <span className="settings-row-desc">{t("settings.localSnapshotsEnabledDesc")}</span>
+            </div>
+            <input
+              type="checkbox"
+              className="settings-toggle"
+              checked={draft.local_snapshot_enabled}
+              onChange={(event) =>
+                updateDraft("local_snapshot_enabled", event.target.checked)
+              }
+            />
+          </label>
+
+          {draft.local_snapshot_enabled && (
+            <>
+              <label className="settings-row">
+                <div className="settings-row-info">
+                  <span className="settings-row-label">{t("settings.localSnapshotFrequency")}</span>
+                  <span className="settings-row-desc">{t("settings.localSnapshotFrequencyDesc")}</span>
+                </div>
+                <select
+                  className="settings-select"
+                  value={draft.local_snapshot_frequency}
+                  onChange={(event) =>
+                    updateDraft(
+                      "local_snapshot_frequency",
+                      event.target.value as SettingsDraft["local_snapshot_frequency"],
+                    )
+                  }
+                >
+                  <option value="daily">{t("settings.localSnapshotDaily")}</option>
+                  <option value="weekly">{t("settings.localSnapshotWeekly")}</option>
+                </select>
+              </label>
+
+              <label className="settings-row">
+                <div className="settings-row-info">
+                  <span className="settings-row-label">{t("settings.localSnapshotRetention")}</span>
+                  <span className="settings-row-desc">{t("settings.localSnapshotRetentionDesc")}</span>
+                </div>
+                <select
+                  className="settings-select"
+                  value={draft.local_snapshot_retention}
+                  onChange={(event) =>
+                    updateDraft(
+                      "local_snapshot_retention",
+                      Number(event.target.value) as SettingsDraft["local_snapshot_retention"],
+                    )
+                  }
+                >
+                  <option value={7}>{t("settings.localSnapshotRetentionValue", { count: 7 })}</option>
+                  <option value={30}>{t("settings.localSnapshotRetentionValue", { count: 30 })}</option>
+                  <option value={90}>{t("settings.localSnapshotRetentionValue", { count: 90 })}</option>
+                </select>
+              </label>
+            </>
+          )}
+          <div className="settings-snapshot-actions">
+            <button type="button" className="btn-sync-history" onClick={openSnapshotWizard}>
+              {t("settings.manageSnapshots")}
+            </button>
+            <button
+              type="button"
+              className="about-link"
+              onClick={() =>
+                void invoke("open_trusted_directory", { directory: "snapshots" }).catch(
+                  async (cause) => {
+                    await dialogRef.current?.alert(localizeCommandError(cause, t));
+                  },
+                )
+              }
+            >
+              {t("settings.openSnapshotsFolder")}
+            </button>
+          </div>
+        </section>
+
+        {restoreWizardOpen && (
+          <RestoreWizard
+            snapshots={snapshotStatus?.snapshots ?? []}
+            loading={snapshotsLoading}
+            onRefresh={loadSnapshots}
+            onCreateSnapshot={createSnapshot}
+            onRestore={async (snapshotId) => {
+              const restored = await (onRestoreSnapshot ?? (async () => false))(snapshotId);
+              if (restored) setRestoreWizardOpen(false);
+              return restored;
+            }}
+            onOpenFolder={() => invoke("open_trusted_directory", { directory: "snapshots" })}
+            onClose={() => setRestoreWizardOpen(false)}
+          />
+        )}
         <section className="settings-section">
           <h3 className="settings-section-title">{t("settings.about")}</h3>
           <div className="about-info">

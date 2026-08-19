@@ -22,6 +22,7 @@ fn main() {
     snipvault::commands::boot_log("builder_start", "tauri_builder_default");
 
     tauri::Builder::default()
+        .manage(snipvault::commands::RevisionHistoryWindowState::default())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             snipvault::tray::reveal_main_window(app);
         }))
@@ -80,14 +81,18 @@ fn main() {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     if snipvault::settings::get_settings().minimize_to_tray {
                         api.prevent_close();
+                        snipvault::commands::hide_revision_history_window(&app_handle);
                         if let Some(window) = app_handle.get_webview_window("main") {
                             let _ = window.hide();
                         }
+                    } else {
+                        snipvault::commands::destroy_revision_history_window(&app_handle);
                     }
                 }
             });
 
             snipvault::sync::start_auto_sync_worker(app.handle().clone());
+            snipvault::snapshots::start_snapshot_worker();
 
             snipvault::commands::boot_log("setup_exit", "done");
             Ok(())
@@ -96,6 +101,16 @@ fn main() {
             snipvault::commands::get_snippets,
             snipvault::commands::query_snippets,
             snipvault::commands::get_snippet,
+            snipvault::commands::open_revision_history,
+            snipvault::commands::get_revision_history_target,
+            snipvault::commands::request_revision_history_restore,
+            snipvault::commands::take_revision_history_restore_request,
+            snipvault::commands::complete_revision_history_restore,
+            snipvault::commands::get_revision_history_restore_outcome,
+            snipvault::commands::get_snippet_revision,
+            snipvault::commands::list_snippet_revisions,
+            snipvault::commands::compare_snippet_revisions,
+            snipvault::commands::restore_snippet_revision,
             snipvault::commands::record_snippet_usage,
             snipvault::commands::take_quick_capture_completion,
             snipvault::commands::get_snippet_tags,
@@ -118,6 +133,14 @@ fn main() {
             snipvault::commands::sync_upload,
             snipvault::commands::sync_download,
             snipvault::commands::get_sync_versions,
+            snipvault::commands::list_sync_notifications,
+            snipvault::commands::mark_sync_notification_read,
+            snipvault::commands::dismiss_sync_notification,
+            snipvault::commands::mark_all_sync_notifications_read,
+            snipvault::commands::get_snapshot_status,
+            snipvault::commands::create_local_snapshot,
+            snipvault::commands::restore_local_snapshot,
+            snipvault::commands::update_snapshot_policy,
             snipvault::commands::get_system_theme,
             snipvault::commands::get_system_locale,
             snipvault::commands::frontend_ready,

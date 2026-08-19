@@ -33,7 +33,7 @@ Snippet data is stored locally in SQLite and remains available offline. Optional
 
 ### Features
 
-> **Release status:** v2.3.0 is the current release. It includes phase-one productivity capabilities: Recently Used ordering, batch organization, quick capture, and the command palette.
+> **Release status:** v2.3.0 is the current release baseline. The working tree also implements phase-one productivity workflows and phase-two recovery, local snapshot, and synchronization-inbox capabilities described below.
 
 - **Local snippet management** — Create, edit, delete, favorite, tag, browse, and select up to 200 currently loaded snippets for one all-or-nothing favorite, unfavorite, or delete action.
 - **Scalable local search** — Backend-composed substring-compatible search over title, content, description, and tags, with language/favorites filters, selectable Recently Updated/Recently Used ordering, bounded summary pages, Load More, CJK support, and lazy full-detail loading.
@@ -49,13 +49,17 @@ Snippet data is stored locally in SQLite and remains available offline. Optional
 - **Chinese/English UI** — Includes synchronized document language metadata.
 - **WebDAV synchronization** — Auto, Basic, Digest, Bearer, and no-auth modes; revision ancestry, cross-device deletion tombstones, deterministic conflict copies, manifest CAS, HTTPS for remote servers, and OS credential-store protection for passwords/tokens.
 - **Desktop integration** — Custom titlebar, system tray with quick capture, single-instance behavior, minimize-to-tray, autostart, a native quick-capture shortcut, and backend-controlled trusted-folder/repository opening.
-- **Sync history** — The latest 20 successful synchronization records.
+- **Revision history and safe recovery** — Open or reuse a dedicated native workspace for a saved snippet’s compact immutable revision timeline; inspect syntax-highlighted live/tombstone states; and review two live revisions in a Git/Beyond Compare-style, line-aligned diff with original line numbers. The selected revision keeps an editor-like surface with restrained change markers. Source never wraps to preserve alignment, but normal layouts do not force an outer horizontal scrollbar: only intrinsically long source lines scroll inside their own pane, and detailed live panes synchronize vertically only. Restore a historic live revision only as a new local descendant of the current head. The local diff is bounded and clearly falls back to complete side-by-side source for oversized or highly divergent pairs; historical objects are never rewritten, tombstones are not restorable, and restoration does not start a sync.
+- **Verified local snapshots and full-vault restore** — Create a full local SQLite checkpoint now or enable daily/weekly snapshots with 7/30/90 retained checkpoints. Every candidate is verified before publication and restore first creates an emergency checkpoint, leaves Settings and OS credentials untouched, then pauses scheduled WebDAV synchronization until a later successful manual sync from the toolbar, Settings, or system tray.
+- **Sync notification center** — A toolbar unread badge opens a persistent, de-identified local inbox for terminal synchronization outcomes. Entries can be marked read or dismissed, and retryable entries offer Sync Now; no server address, credential, snippet content, revision identifier, path, remote response, or free-form sync message is stored.
+- **Sync history** — The latest 20 successful technical synchronization records, kept separately from the notification inbox.
 
 > WebDAV v2 requires server support for strong ETags and conditional PUT. Its one-way cutover, immutable-object retention, conflict UI, and verification boundaries are documented in [Known limitations](docs/known-limitations.md). Keep an independent backup before activating a v1 directory and do not use old clients against it afterward.
 
 ### What's New in v2.3.0
 
 - Added phase-one productivity workflows: native shortcut/tray clipboard quick capture, a keyboard command palette, batch favorite/unfavorite/delete for up to 200 loaded snippets, and local-only Recently Used ordering.
+- Added phase-two recovery capabilities: immutable per-snippet history with syntax-highlighted, line-aligned comparison and descendant restore; verified local SQLite snapshots with daily/weekly 7/30/90 policy, emergency full-vault restore, and manual-sync confirmation; and a persistent de-identified sync notification center.
 - Added a focused command-palette action that returns keyboard focus to the snippet search field after the modal closes.
 - Kept the editor lazy-loaded while containing an unavailable editor module or render failure to the editor pane, with explicit retry after Vite development recovery.
 - Split the production CodeMirror graph into editor-runtime, service, UI, and language-family chunks without increasing Vite's chunk warning threshold.
@@ -138,12 +142,13 @@ The authoritative behavior is implemented in [`paths.rs`](src-tauri/src/paths.rs
 
 Files:
 
-- `snippets.db` — SQLite data and sync history.
+- `snippets.db` — SQLite snippets, FTS, immutable revisions/outbox, synchronization state/history, de-identified notification inbox, and local snapshot catalog.
+- `snapshots/snapshot-<opaque-uuid>.sqlite` — Backend-created and verified full-vault local SQLite checkpoints; the WebView receives only safe catalog metadata and opaque IDs.
 - `settings.json` — non-secret settings only. WebDAV passwords/API keys/tokens are stored through the operating system credential service (Windows Credential Manager, macOS Keychain, or Linux Secret Service).
 
 Older `settings.json` files containing `webdav_password` are migrated once. SnipVault removes that legacy field only after the credential is written securely; if migration cannot complete, it preserves the legacy file, does not use or expose its secret, and asks you to replace or clear the credential in Settings. Invalid settings files are quarantined, then SnipVault restores a valid backup or safe defaults and offers a controlled action to open the data folder.
 
-Exports prefer `Downloads/SnipVault` and fall back to `<data_dir>/exports`. Export files use a versioned JSON envelope and collision-safe numeric suffixes, so repeated same-second exports are not overwritten. Before an existing schema-v0/v1/v2/v3/v4 database is automatically upgraded to schema v5, SnipVault creates and verifies one unique sibling `pre-v5` backup; the backup is retained for recovery. Schema v5 retains v4 revision heads, deletion tombstones, durable immutable revision objects, a bounded pending outbox, remote state, and conflict indexing used by active WebDAV v2 synchronization, and adds local-only `snippet_usage` metadata for Recently Used ordering. Usage metadata is not serialized in JSON export/import, revision objects, the outbox, or WebDAV, and existing snippets start without usage history after migration.
+Exports prefer `Downloads/SnipVault` and fall back to `<data_dir>/exports`. Export files use a versioned JSON envelope and collision-safe numeric suffixes, so repeated same-second exports are not overwritten. Before an existing schema-v0/v1/v2/v3/v4/v5/v6 database is automatically upgraded to schema v7, SnipVault creates and verifies one unique sibling `pre-v7` backup; the backup is retained for recovery. Schema v5 adds local-only `snippet_usage` metadata for Recently Used ordering; v6 adds the de-identified `sync_notifications` inbox; v7 adds the `local_snapshots` catalog. Usage metadata is not serialized in JSON export/import, revision objects, the outbox, or WebDAV, and existing snippets start without usage history after migration. A full local SQLite snapshot includes the database state—including history, inbox, catalog, device identity, and synchronization state—but never `settings.json` or operating-system credential-store secrets; snapshots are not JSON exports and are never sent to WebDAV.
 
 ### WebDAV Configuration
 
@@ -217,7 +222,7 @@ Feature design and development changes must update the relevant development docu
 
 ### 功能特性
 
-> **发布状态：**v2.3.0 是当前发布版本，包含第一阶段效率能力：最近使用排序、批量整理、快速捕获和命令面板。
+> **发布状态：**v2.3.0 是当前发布基线；当前工作树还实现了下文所述的第一阶段效率工作流，以及第二阶段的恢复、本地快照和同步收件箱能力。
 
 - **本地片段管理** — 新建、编辑、删除、收藏、标签和 SQLite 持久化；可在当前已加载结果中选择最多 200 项，执行全有或全无的批量收藏、取消收藏或删除。
 - **可扩展本地搜索** — 后端组合标题、代码、描述和标签的子串兼容搜索与语言/收藏筛选；工具栏将筛选与排序分开显示，默认按“最近更新”排序，也可切换“最近使用”，并提供有界摘要页、加载更多、CJK 支持和完整详情懒加载。
@@ -232,13 +237,17 @@ Feature design and development changes must update the relevant development docu
 - **主题与语言** — 暗色、亮色、跟随系统的深浅模式，与可持久化的天空蓝、紫罗兰、翡翠绿、琥珀金、玫瑰红、简约白精选界面配色独立配置；简约白会恢复最初版本的中性深浅界面。每种配色会改变完整应用的背景、面板、文字层级、边框、标题栏、弹窗、控件、编辑器 chrome 和 codeglance，语法和语言颜色保持稳定。中文和英文界面同步文档语言元数据。
 - **WebDAV 同步** — Auto、Basic、Digest、Bearer、无认证；基于 revision ancestry 合并、跨设备删除 tombstone、确定性冲突副本、manifest CAS，远端服务器要求 HTTPS，并通过操作系统凭据库保护密码/token。
 - **桌面集成** — 自定义标题栏、含快速捕获入口的系统托盘、单实例、最小化到托盘、开机自启、原生快速捕获快捷键，以及后端受控打开可信目录/仓库。
-- **同步历史** — 保留最近 20 条成功同步记录。
+- **版本历史与安全恢复** — 从主编辑器打开或复用独立原生工作区，浏览已保存片段紧凑的 immutable revision 时间线、检视带语法高亮的 live/tombstone 状态，并以 Git/Beyond Compare 风格的原始行号逐行对齐方式比较两个 live 版本；所选版本保持编辑器式中性 surface，以克制 marker 标识变化。代码不自动换行以保持对齐，但正常布局不强制产生外层横向滚动，只有真正超出其 source pane 的长行可在该 pane 内横向滚动，详细双栏只同步纵向滚动。只能把历史 live revision 恢复为当前 head 的新本地 descendant。超出本地大小或差异计算上限时会明确退回完整并排源码；历史对象不被改写，tombstone 不可恢复，恢复也不会自动同步。
+- **已验证本地快照与完整恢复** — 可立即创建完整本地 SQLite checkpoint，或启用 daily/weekly 与 7/30/90 保留策略。候选在发布前均需验证；恢复会先创建 emergency checkpoint，保持设置和 OS 凭据不变，并暂停计划 WebDAV 同步，直到之后从工具栏、设置或系统托盘成功完成一次手动同步。
+- **同步通知中心** — 工具栏未读徽标打开持久、去标识化的本地同步收件箱，可标为已读、关闭，且 retryable 条目支持 Sync Now；不会保存服务器地址、凭据、片段内容、revision 标识、路径、远端响应或自由文本同步消息。
+- **同步历史** — 仍单独保留最近 20 条成功同步技术记录，与通知收件箱分离。
 
 > WebDAV v2 要求服务器支持 strong ETag 和 conditional PUT。单向升级、不可变对象保留、冲突 UI 与验证边界见[已知限制](docs/known-limitations.md)。激活 v1 目录前请保留独立备份，激活后不要再让旧客户端访问该目录。
 
 ### v2.3.0 更新内容
 
 - 新增第一阶段效率工作流：原生快捷键/托盘剪贴板快速捕获、键盘命令面板、当前已加载最多 200 项的批量收藏/取消收藏/删除，以及仅本机的“最近使用”排序。
+- 新增第二阶段恢复能力：片段 immutable 历史、带语法高亮的逐行对齐比较与 descendant 恢复；支持 daily/weekly、7/30/90 的已验证本地 SQLite 快照、emergency 完整 vault 恢复和手动同步确认；并提供持久、去标识化的同步通知中心。
 - 命令面板新增聚焦搜索动作，会在模态层关闭后将键盘焦点放回代码片段搜索框。
 - 编辑器继续按需加载；若开发期编辑器模块不可用或渲染失败，错误被限制在编辑器 pane 内，并在 Vite 恢复后提供显式重试。
 - 将生产 CodeMirror 依赖拆分为 editor runtime、服务、UI 与语言族 chunks，未提高 Vite chunk 警告阈值。
@@ -321,12 +330,13 @@ Tag 发布会附带 `SHA256SUMS` 和 GitHub artifact attestations。手动 relea
 
 文件：
 
-- `snippets.db`：片段和同步历史。
+- `snippets.db`：SQLite 片段、FTS、不可变 revisions/outbox、同步状态/历史、去标识化通知收件箱和本地快照 catalog。
+- `snapshots/snapshot-<opaque-uuid>.sqlite`：后端创建并验证的完整 vault 本地 SQLite checkpoint；WebView 仅接收安全 catalog metadata 和 opaque ID。
 - `settings.json`：只保存非敏感设置。WebDAV 密码/API Key/token 通过操作系统凭据服务保存（Windows Credential Manager、macOS Keychain 或 Linux Secret Service）。
 
 旧 `settings.json` 中若含 `webdav_password`，应用会执行一次迁移：只有凭据安全写入成功后才移除旧字段；迁移失败时保留旧文件，但不使用或暴露其中 secret，并要求用户在设置中替换或清除凭据。损坏设置会先隔离，再恢复有效备份或安全默认值，设置页可通过受控命令打开数据目录。
 
-导出优先写入 `Downloads/SnipVault`，不可写时回退到 `<data_dir>/exports`。导出文件使用版本化 JSON envelope 和防冲突数字后缀，同一秒重复导出不会覆盖。既有 schema v0/v1/v2/v3/v4 数据库自动升级到 schema v5 前会创建并验证一个唯一同级 `pre-v5` 备份，并保留用于恢复。Schema v5 保留 v4 的 revision head、删除 tombstone、持久不可变 revision objects、有界 pending outbox、remote state 和 conflict index，供当前 WebDAV v2 同步使用；并增加只在本机保存的 `snippet_usage` 元数据用于“最近使用”排序。该使用元数据不进入 JSON 导入导出、revision objects、outbox 或 WebDAV；迁移后的既有片段没有使用历史。
+导出优先写入 `Downloads/SnipVault`，不可写时回退到 `<data_dir>/exports`。导出文件使用版本化 JSON envelope 和防冲突数字后缀，同一秒重复导出不会覆盖。既有 schema v0/v1/v2/v3/v4/v5/v6 数据库自动升级到 schema v7 前会创建并验证一个唯一同级 `pre-v7` 备份，并保留用于恢复。Schema v5 增加只在本机保存的 `snippet_usage` 元数据用于“最近使用”；v6 增加去标识化 `sync_notifications` inbox；v7 增加 `local_snapshots` catalog。使用元数据不进入 JSON 导入导出、revision objects、outbox 或 WebDAV；迁移后的既有片段没有使用历史。完整本地 SQLite snapshot 覆盖数据库状态（包括历史、inbox、catalog、device identity 和同步状态），但绝不包括 `settings.json` 或操作系统凭据库的 secret；快照不是 JSON export，也不会发送到 WebDAV。
 
 ### WebDAV 配置
 
