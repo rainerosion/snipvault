@@ -57,21 +57,6 @@ function revisionOptionLabel(
   return `${formatRevisionTime(revision.revision_time)} · ${state}${revision.deleted ? ` · ${labels.deleted}` : ""}`;
 }
 
-function renderMetadata(
-  content: RevisionContent | null,
-  labels: { language: string; tags: string; favorite: string; yes: string; no: string },
-) {
-  if (!content || content.revision.deleted) return null;
-  const snippet = content.snippet;
-  if (!snippet) return null;
-  return (
-    <dl className="revision-history-meta">
-      <div><dt>{labels.language}</dt><dd>{snippet.language}</dd></div>
-      <div><dt>{labels.tags}</dt><dd>{snippet.tags.length ? snippet.tags.join(", ") : "—"}</dd></div>
-      <div><dt>{labels.favorite}</dt><dd>{snippet.is_favorite ? labels.yes : labels.no}</dd></div>
-    </dl>
-  );
-}
 
 /** Native-window content for immutable revision inspection, comparison, and restore requests. */
 export function RevisionHistory({
@@ -100,14 +85,6 @@ export function RevisionHistory({
   const [comparisonError, setComparisonError] = useState<unknown>(null);
   const previewRequestRef = useRef(0);
   const comparisonRequestRef = useRef(0);
-
-  const metadataLabels = {
-    language: t("snippet.revisionLanguage"),
-    tags: t("snippet.revisionTags"),
-    favorite: t("snippet.revisionFavorite"),
-    yes: t("snippet.revisionYes"),
-    no: t("snippet.revisionNo"),
-  };
 
   const loadInitial = useCallback(async () => {
     setLoading(true);
@@ -354,10 +331,49 @@ export function RevisionHistory({
                   </div>
                 ) : preview.snippet ? (
                   <div className="revision-history-preview">
-                    <div className="revision-history-preview-header">
-                      <span>{preview.snippet.title || t("snippet.revisionPreview")}</span>
-                    </div>
-                    {renderMetadata(preview, metadataLabels)}
+                    <header className="revision-history-preview-chrome">
+                      <h2
+                        className="revision-history-preview-title"
+                        title={preview.snippet.title || t("snippet.revisionPreview")}
+                      >
+                        {preview.snippet.title || t("snippet.revisionPreview")}
+                      </h2>
+                      <div className="revision-history-preview-context">
+                        <span
+                          className="revision-history-language"
+                          aria-label={`${t("snippet.revisionLanguage")}: ${preview.snippet.language}`}
+                        >
+                          {preview.snippet.language}
+                        </span>
+                        {preview.snippet.tags.length > 0 && (
+                          <ul
+                            className="revision-history-tags"
+                            aria-label={`${t("snippet.revisionTags")}: ${preview.snippet.tags.join(", ")}`}
+                          >
+                            {preview.snippet.tags.slice(0, 2).map((tag) => (
+                              <li key={tag} className="revision-history-tag" title={tag}>{tag}</li>
+                            ))}
+                            {preview.snippet.tags.length > 2 && (
+                              <li
+                                className="revision-history-tag-count"
+                                title={preview.snippet.tags.slice(2).join(", ")}
+                              >
+                                +{preview.snippet.tags.length - 2}
+                              </li>
+                            )}
+                          </ul>
+                        )}
+                        <span
+                          className={`revision-history-favorite ${preview.snippet.is_favorite ? "active" : ""}`}
+                          aria-label={`${t("snippet.revisionFavorite")}: ${preview.snippet.is_favorite ? t("snippet.revisionYes") : t("snippet.revisionNo")}`}
+                        >
+                          <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill={preview.snippet.is_favorite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+                            <path d="m12 2 3.1 6.3 7 1-5 4.9 1.2 6.9-6.3-3.3-6.3 3.3 1.2-6.9-5-4.9 7-1L12 2Z" />
+                          </svg>
+                          <span>{preview.snippet.is_favorite ? t("snippet.revisionFavoriteActive") : t("snippet.revisionFavoriteInactive")}</span>
+                        </span>
+                      </div>
+                    </header>
                     <LazyRevisionCodePreview
                       content={preview.snippet.content}
                       language={preview.snippet.language}

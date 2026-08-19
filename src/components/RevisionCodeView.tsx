@@ -1,4 +1,5 @@
 import { useEffect, useMemo, type ReactNode, type RefObject, type UIEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { getCodeHighlightStyle, mountCodeHighlightStyle } from "./codeHighlightTheme";
 import type { DiffRow, DiffRowKind, DiffSourceLine } from "./lineDiff";
 import { sourceLines } from "./lineDiff";
@@ -75,6 +76,8 @@ export function RevisionCodeView({
   scrollRef,
   onScroll,
 }: RevisionCodeViewProps) {
+  const { t } = useTranslation();
+
   useEffect(() => {
     mountCodeHighlightStyle(theme);
   }, [theme]);
@@ -121,6 +124,12 @@ export function RevisionCodeView({
                 {line?.lineNumber ?? ""}
               </span>
               <code className="revision-code-line">
+                {sideKind === "delete" && (
+                  <span className="sr-only">{t("snippet.compareRemovedLine")} </span>
+                )}
+                {sideKind === "insert" && (
+                  <span className="sr-only">{t("snippet.compareAddedLine")} </span>
+                )}
                 {line ? renderHighlightedLine(line, ranges) : <span aria-hidden="true"> </span>}
               </code>
             </div>

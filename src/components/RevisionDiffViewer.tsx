@@ -104,7 +104,6 @@ export function RevisionDiffViewer({ comparison, theme }: RevisionDiffViewerProp
     <div className="revision-diff-workbench">
       <div className="revision-diff-toolbar">
         <div>
-          <h2>{t("snippet.comparison")}</h2>
           {summary && <p className="revision-diff-summary" role="status">{summary}</p>}
         </div>
         <div className="revision-diff-pane-switch" role="group" aria-label={t("snippet.comparison")}>

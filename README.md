@@ -33,7 +33,7 @@ Snippet data is stored locally in SQLite and remains available offline. Optional
 
 ### Features
 
-> **Release status:** v2.3.0 is the current release baseline. The working tree also implements phase-one productivity workflows and phase-two recovery, local snapshot, and synchronization-inbox capabilities described below.
+> **Release status:** v2.4.0 is the current release. It includes phase-one productivity workflows, phase-two recovery, local snapshots, the synchronization inbox, and the dedicated revision-history workspace described below.
 
 - **Local snippet management** — Create, edit, delete, favorite, tag, browse, and select up to 200 currently loaded snippets for one all-or-nothing favorite, unfavorite, or delete action.
 - **Scalable local search** — Backend-composed substring-compatible search over title, content, description, and tags, with language/favorites filters, selectable Recently Updated/Recently Used ordering, bounded summary pages, Load More, CJK support, and lazy full-detail loading.
@@ -49,12 +49,19 @@ Snippet data is stored locally in SQLite and remains available offline. Optional
 - **Chinese/English UI** — Includes synchronized document language metadata.
 - **WebDAV synchronization** — Auto, Basic, Digest, Bearer, and no-auth modes; revision ancestry, cross-device deletion tombstones, deterministic conflict copies, manifest CAS, HTTPS for remote servers, and OS credential-store protection for passwords/tokens.
 - **Desktop integration** — Custom titlebar, system tray with quick capture, single-instance behavior, minimize-to-tray, autostart, a native quick-capture shortcut, and backend-controlled trusted-folder/repository opening.
-- **Revision history and safe recovery** — Open or reuse a dedicated native workspace for a saved snippet’s compact immutable revision timeline; inspect syntax-highlighted live/tombstone states; and review two live revisions in a Git/Beyond Compare-style, line-aligned diff with original line numbers. The selected revision keeps an editor-like surface with restrained change markers. Source never wraps to preserve alignment, but normal layouts do not force an outer horizontal scrollbar: only intrinsically long source lines scroll inside their own pane, and detailed live panes synchronize vertically only. Restore a historic live revision only as a new local descendant of the current head. The local diff is bounded and clearly falls back to complete side-by-side source for oversized or highly divergent pairs; historical objects are never rewritten, tombstones are not restorable, and restoration does not start a sync.
+- **Revision history and safe recovery** — Open or reuse a dedicated native workspace for a saved snippet’s compact immutable revision timeline; inspect syntax-highlighted live/tombstone states in a compact, read-only editor-chrome header with title, language, bounded tag summary, and historical favorite state; and review two live revisions in a Git/Beyond Compare-style, line-aligned diff with original line numbers. The selected revision keeps an editor-like surface with restrained change markers. Source never wraps to preserve alignment, but normal layouts do not force an outer horizontal scrollbar: only intrinsically long source lines scroll inside their own pane, and detailed live panes synchronize vertically only. Restore a historic live revision only as a new local descendant of the current head. The local diff is bounded and clearly falls back to complete side-by-side source for oversized or highly divergent pairs; historical objects are never rewritten, tombstones are not restorable, and restoration does not start a sync.
 - **Verified local snapshots and full-vault restore** — Create a full local SQLite checkpoint now or enable daily/weekly snapshots with 7/30/90 retained checkpoints. Every candidate is verified before publication and restore first creates an emergency checkpoint, leaves Settings and OS credentials untouched, then pauses scheduled WebDAV synchronization until a later successful manual sync from the toolbar, Settings, or system tray.
 - **Sync notification center** — A toolbar unread badge opens a persistent, de-identified local inbox for terminal synchronization outcomes. Entries can be marked read or dismissed, and retryable entries offer Sync Now; no server address, credential, snippet content, revision identifier, path, remote response, or free-form sync message is stored.
 - **Sync history** — The latest 20 successful technical synchronization records, kept separately from the notification inbox.
 
 > WebDAV v2 requires server support for strong ETags and conditional PUT. Its one-way cutover, immutable-object retention, conflict UI, and verification boundaries are documented in [Known limitations](docs/known-limitations.md). Keep an independent backup before activating a v1 directory and do not use old clients against it afterward.
+
+### What's New in v2.4.0
+
+- Added a dedicated native revision-history review desk with a compact immutable timeline, compact read-only editor chrome, syntax-highlighted preview, aligned two-pane comparison, responsive one-pane comparison at narrow history-window widths, and safe descendant restore requests handled by the main window.
+- Added verified local SQLite snapshots with manual or daily/weekly 7/30/90 retention, emergency checkpoints before full-vault restore, and a manual-sync confirmation latch after recovery.
+- Added a persistent de-identified synchronization notification inbox with unread state, dismissal, and retryable Sync Now actions.
+- Refined the history review hierarchy with neutral selection rails, restrained diff change rails/gutters, localized added/removed-line semantics for assistive technology, and source-pane-only horizontal scrolling.
 
 ### What's New in v2.3.0
 
@@ -222,7 +229,7 @@ Feature design and development changes must update the relevant development docu
 
 ### 功能特性
 
-> **发布状态：**v2.3.0 是当前发布基线；当前工作树还实现了下文所述的第一阶段效率工作流，以及第二阶段的恢复、本地快照和同步收件箱能力。
+> **发布状态：**v2.4.0 是当前正式版本，包含下文所述的第一阶段效率工作流、第二阶段恢复、本地快照、同步收件箱，以及独立版本历史工作区。
 
 - **本地片段管理** — 新建、编辑、删除、收藏、标签和 SQLite 持久化；可在当前已加载结果中选择最多 200 项，执行全有或全无的批量收藏、取消收藏或删除。
 - **可扩展本地搜索** — 后端组合标题、代码、描述和标签的子串兼容搜索与语言/收藏筛选；工具栏将筛选与排序分开显示，默认按“最近更新”排序，也可切换“最近使用”，并提供有界摘要页、加载更多、CJK 支持和完整详情懒加载。
@@ -237,12 +244,19 @@ Feature design and development changes must update the relevant development docu
 - **主题与语言** — 暗色、亮色、跟随系统的深浅模式，与可持久化的天空蓝、紫罗兰、翡翠绿、琥珀金、玫瑰红、简约白精选界面配色独立配置；简约白会恢复最初版本的中性深浅界面。每种配色会改变完整应用的背景、面板、文字层级、边框、标题栏、弹窗、控件、编辑器 chrome 和 codeglance，语法和语言颜色保持稳定。中文和英文界面同步文档语言元数据。
 - **WebDAV 同步** — Auto、Basic、Digest、Bearer、无认证；基于 revision ancestry 合并、跨设备删除 tombstone、确定性冲突副本、manifest CAS，远端服务器要求 HTTPS，并通过操作系统凭据库保护密码/token。
 - **桌面集成** — 自定义标题栏、含快速捕获入口的系统托盘、单实例、最小化到托盘、开机自启、原生快速捕获快捷键，以及后端受控打开可信目录/仓库。
-- **版本历史与安全恢复** — 从主编辑器打开或复用独立原生工作区，浏览已保存片段紧凑的 immutable revision 时间线、检视带语法高亮的 live/tombstone 状态，并以 Git/Beyond Compare 风格的原始行号逐行对齐方式比较两个 live 版本；所选版本保持编辑器式中性 surface，以克制 marker 标识变化。代码不自动换行以保持对齐，但正常布局不强制产生外层横向滚动，只有真正超出其 source pane 的长行可在该 pane 内横向滚动，详细双栏只同步纵向滚动。只能把历史 live revision 恢复为当前 head 的新本地 descendant。超出本地大小或差异计算上限时会明确退回完整并排源码；历史对象不被改写，tombstone 不可恢复，恢复也不会自动同步。
+- **版本历史与安全恢复** — 从主编辑器打开或复用独立原生工作区，浏览已保存片段紧凑的 immutable revision 时间线、在包含标题、language、受限 tag 摘要和历史 favorite 状态的紧凑只读 editor chrome 中检视带语法高亮的 live/tombstone 状态，并以 Git/Beyond Compare 风格的原始行号逐行对齐方式比较两个 live 版本；所选版本保持编辑器式中性 surface，以克制 marker 标识变化。代码不自动换行以保持对齐，但正常布局不强制产生外层横向滚动，只有真正超出其 source pane 的长行可在该 pane 内横向滚动，详细双栏只同步纵向滚动。只能把历史 live revision 恢复为当前 head 的新本地 descendant。超出本地大小或差异计算上限时会明确退回完整并排源码；历史对象不被改写，tombstone 不可恢复，恢复也不会自动同步。
 - **已验证本地快照与完整恢复** — 可立即创建完整本地 SQLite checkpoint，或启用 daily/weekly 与 7/30/90 保留策略。候选在发布前均需验证；恢复会先创建 emergency checkpoint，保持设置和 OS 凭据不变，并暂停计划 WebDAV 同步，直到之后从工具栏、设置或系统托盘成功完成一次手动同步。
 - **同步通知中心** — 工具栏未读徽标打开持久、去标识化的本地同步收件箱，可标为已读、关闭，且 retryable 条目支持 Sync Now；不会保存服务器地址、凭据、片段内容、revision 标识、路径、远端响应或自由文本同步消息。
 - **同步历史** — 仍单独保留最近 20 条成功同步技术记录，与通知收件箱分离。
 
 > WebDAV v2 要求服务器支持 strong ETag 和 conditional PUT。单向升级、不可变对象保留、冲突 UI 与验证边界见[已知限制](docs/known-limitations.md)。激活 v1 目录前请保留独立备份，激活后不要再让旧客户端访问该目录。
+
+### v2.4.0 更新内容
+
+- 新增独立原生版本历史 review desk：包含紧凑 immutable 时间线、紧凑只读 editor chrome、语法高亮预览、逐行对齐的双 pane 对比、窄历史窗口下的单 pane 对比，以及始终由主窗口处理的安全 descendant 恢复请求。
+- 新增已验证本地 SQLite 快照：支持手动或 daily/weekly、7/30/90 保留；完整 vault 恢复前创建 emergency checkpoint，并在恢复后要求一次成功手动同步确认。
+- 新增持久、去标识化的同步通知收件箱：支持未读状态、关闭和可重试的 Sync Now 操作。
+- 优化历史审阅层级：使用中性选中 rail、克制的 diff 变更 rail/gutter、面向辅助技术的本地化新增/删除行语义，并将横向滚动限制在 source pane 内。
 
 ### v2.3.0 更新内容
 

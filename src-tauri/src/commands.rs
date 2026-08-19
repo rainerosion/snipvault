@@ -130,7 +130,7 @@ fn create_or_reveal_revision_history_window(app: &AppHandle) -> Result<(), Comma
         WebviewUrl::App("index.html".into()),
     )
     .title("SnipVault — Revision History")
-    .inner_size(1460.0, 900.0)
+    .inner_size(1280.0, 760.0)
     .min_inner_size(1000.0, 620.0)
     .center()
     .decorations(false)

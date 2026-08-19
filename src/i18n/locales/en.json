@@ -115,6 +115,8 @@
     "compareIdentical": "The revisions have identical source ({{count}} line(s)).",
     "compareScrollHint": "Scroll horizontally to compare code",
     "comparePaneLabel": "{{side}} source pane",
+    "compareAddedLine": "Added line:",
+    "compareRemovedLine": "Removed line:",
     "compareLimited": {
       "size": "Detailed line comparison is unavailable for this revision pair because it exceeds the local size limit. The full source remains available side by side.",
       "complexity": "Detailed line comparison is unavailable for this highly divergent revision pair. The full source remains available side by side.",
@@ -125,6 +127,8 @@
     "revisionLanguage": "Language",
     "revisionTags": "Tags",
     "revisionFavorite": "Favorite",
+    "revisionFavoriteActive": "Favorite",
+    "revisionFavoriteInactive": "Not favorite",
     "revisionYes": "Yes",
     "revisionNo": "No",
     "revisionOrigin": {

@@ -1,6 +1,6 @@
 # SnipVault 架构设计
 
-> 本文描述当前开发中的 v2.3.0 架构，截至 2026-08-17。已发现但尚未修复的问题集中记录在 [已知限制](known-limitations.md)。
+> 本文描述当前 v2.4.0 架构，截至 2026-08-19。已发现但尚未修复的问题集中记录在 [已知限制](known-limitations.md)。
 
 ## 1. 系统定位与边界
 
@@ -217,7 +217,7 @@ flowchart LR
 | [RevisionHistoryWindow.tsx](../src/components/RevisionHistoryWindow.tsx) | 独立原生历史窗口的 target pull / event refresh、direct revision IPC 与 restore-request 状态协调；不挂载 App 主流程 |
 | [RevisionHistory.tsx](../src/components/RevisionHistory.tsx) | 已保存片段 immutable revision 时间线、只读 live/tombstone 检视、对比与仅请求式的安全恢复 UI |
 | [LazyRevisionCodePreview.tsx](../src/components/LazyRevisionCodePreview.tsx)、[LazyRevisionDiffViewer.tsx](../src/components/LazyRevisionDiffViewer.tsx) | 仅在用户检视 live 版本或实际启动比较时加载 syntax/diff renderer，避免将 parser/highlighter 提前纳入 App 初始依赖图 |
-| [RevisionCodeView.tsx](../src/components/RevisionCodeView.tsx)、[RevisionDiffViewer.tsx](../src/components/RevisionDiffViewer.tsx)、[lineDiff.ts](../src/components/lineDiff.ts) | 只读 DOM token 渲染、双版本 gutter/滚动工作区和本地受限的两路逐行对齐；tombstone 保持无正文状态 |
+| [RevisionCodeView.tsx](../src/components/RevisionCodeView.tsx)、[RevisionDiffViewer.tsx](../src/components/RevisionDiffViewer.tsx)、[lineDiff.ts](../src/components/lineDiff.ts) | 安全的只读 DOM token 渲染、本地化的真实新增/删除行语义提示（装饰 marker/行号保持隐藏）、双版本 gutter/滚动工作区和本地受限的两路逐行对齐；tombstone 保持无正文状态 |
 | [codeHighlightTheme.ts](../src/components/codeHighlightTheme.ts) | 编辑器/历史检视共享 dark/light `HighlightStyle`、token 色和 plain-DOM 的 `StyleModule` 注册 |
 | [RestoreWizard.tsx](../src/components/RestoreWizard.tsx) | 已验证本地 SQLite 快照列表、手动创建、受控目录打开、完整 vault 范围说明与确认恢复 |
 | [SyncNotificationCenter.tsx](../src/components/SyncNotificationCenter.tsx) | 脱敏同步结果收件箱、未读/已读/关闭、可重试手动同步入口 |
@@ -246,7 +246,7 @@ flowchart LR
 
 CodeMirror 的语言扩展由 [languageExtensions.ts](../src/components/languageExtensions.ts) 隔离：它从轻量 [languages.ts](../src/utils/languages.ts) 的 `LanguageId` 建立 exhaustively typed 分类和 factory；元数据文件不导入编辑器包。`buildMainExtensions()` 继续负责换行、GitHub 主题、`EditorView.theme()` 和来自 [codeHighlightTheme.ts](../src/components/codeHighlightTheme.ts) 的共享 `HighlightStyle`，并先注册项目复合 highlighter、后注册 UIW GitHub 主题，以确保项目复合样式是编辑器中实际生效的 token 色彩来源。编辑器 surface、gutter、光标、选区和匹配括号使用 [index.css](../src/index.css) 的完整界面配色语义 token，而不改变 syntax token palette。[syntaxHighlight.ts](../src/components/syntaxHighlight.ts) 使用同一语言 factory、受限 `ensureSyntaxTree()` 和共享 `HighlightStyle` 导出有序 token 范围；[SnippetEditor.tsx](../src/components/SnippetEditor.tsx) 的 `MiniMap` 再读取编辑区实际计算的 class 前景色绘制 Canvas，并从 minimap pane 读取计算后的 surface token 作为 Canvas 背景。因此编辑区和 codeglance 共用语法语义与最终颜色，解析未完成、无 token 与 plaintext 区域统一使用编辑器默认前景色；MiniMap viewport 同样使用语义 token，仍只负责 Canvas 几何、主滚动同步和 viewport 拖拽。
 
-历史 live preview 与 revision comparison 不挂载第二个可编辑 CodeMirror view。它们经 `LazyRevisionCodePreview` / `LazyRevisionDiffViewer` 才请求 parser/highlighter chunk；`RevisionCodeView` 在 plain DOM 中以 React text/span 安全渲染 token，先通过 `StyleModule.mount()` 注册共享 `HighlightStyle.module`。`lineDiff.ts` 仅消费 already-validated 的两份 `RevisionComparison` 内容，不增加 IPC：在字符、行数、matrix、渲染行数和短工作时间上限内生成二路逐行对齐；超限时明确退回为有行号、语法高亮、无自动换行的并排完整源代码，而不是无限计算或伪造 partial diff。历史窗口是由 chronology rail、固定 review command/context band 和剩余高度唯一 code stage 组成的 owned-height workspace；时间线和 source panes 各自承担正常纵向滚动，不再有右侧外层 document scroll。紧凑时间线使用与主列表一致的中性 active surface/边框与左侧 accent rail；宽度至少 1200px 的比较使用弹性双 pane，1000–1199px 的最小窗口区间改用不重新 fetch/recompute 的 Baseline / Selected 单 pane 呈现，inactive pane 以 `display: none` 离开交互和辅助技术树。代码本身从不自动换行，只有单个真实长行在其所属 source pane 内可以横向滚动；双 pane 详细对齐模式只同步两侧的垂直滚动。
+历史 live preview 与 revision comparison 不挂载第二个可编辑 CodeMirror view。它们经 `LazyRevisionCodePreview` / `LazyRevisionDiffViewer` 才请求 parser/highlighter chunk；`RevisionCodeView` 在 plain DOM 中以 React text/span 安全渲染 token，先通过 `StyleModule.mount()` 注册共享 `HighlightStyle.module`。`lineDiff.ts` 仅消费 already-validated 的两份 `RevisionComparison` 内容，不增加 IPC：在字符、行数、matrix、渲染行数和短工作时间上限内生成二路逐行对齐；超限时明确退回为有行号、语法高亮、无自动换行的并排完整源代码，而不是无限计算或伪造 partial diff。历史窗口是由 chronology rail、固定 review command/context band 和剩余高度唯一 code stage 组成的 owned-height workspace；live preview 以只读 editor-chrome header 显示标题、language badge、受限 passive tag summary 和不可变 favorite state，不提供该处 mutation，时间线和 source panes 各自承担正常纵向滚动，不再有右侧外层 document scroll。紧凑时间线使用与主列表一致的中性 active surface/边框与左侧 accent rail；宽度至少 1200px 的比较使用弹性双 pane，1000–1199px 的最小窗口区间改用不重新 fetch/recompute 的 Baseline / Selected 单 pane 呈现，inactive pane 以 `display: none` 离开交互和辅助技术树。代码本身从不自动换行，只有单个真实长行在其所属 source pane 内可以横向滚动；双 pane 详细对齐模式只同步两侧的垂直滚动。
 
 语言 factory 分三类：官方/维护包提供的 parser-backed 扩展；基于 `@codemirror/legacy-modes` 的 `StreamLanguage` 语法着色；以及 plaintext 的显式空扩展。Stream mode 只提供 token stream 高亮，不是完整 Lezer parser，不能假定具备 parser-backed 折叠、结构选择或语言服务语义。
 
@@ -335,7 +335,7 @@ sequenceDiagram
 
 ### 5.2 独立版本历史窗口
 
-编辑器的 History 入口通过 `open_revision_history` 动态创建或复用 label 为 `revision-history` 的无边框原生窗口；它不在 [tauri.conf.json](../src-tauri/tauri.conf.json) 静态声明，因此不会在启动时创建第二个 WebView。Rust 先在受 Mutex 保护的 state 写入 opaque target 和递增 generation，再异步构造/显示窗口并发送刷新事件，避免 Windows 同步 command 创建 WebView 的死锁边界。窗口默认约 1460×900、最小 1000×620：默认宽度使用时间线、review command/context band 和双代码 pane 的 review desk；1000–1199px 则用同一已加载比较的显式 Baseline / Selected 单 pane 模式，避免压缩非换行源代码。
+编辑器的 History 入口通过 `open_revision_history` 动态创建或复用 label 为 `revision-history` 的无边框原生窗口；它不在 [tauri.conf.json](../src-tauri/tauri.conf.json) 静态声明，因此不会在启动时创建第二个 WebView。Rust 先在受 Mutex 保护的 state 写入 opaque target 和递增 generation，再异步构造/显示窗口并发送刷新事件，避免 Windows 同步 command 创建 WebView 的死锁边界。窗口默认约 1280×760、最小 1000×620：默认宽度使用时间线、review command/context band 和双代码 pane 的 review desk；1000–1199px 则用同一已加载比较的显式 Baseline / Selected 单 pane 模式，避免压缩非换行源代码。
 
 关闭历史窗口会被拦截并隐藏，以便下一次 History 快速复用；普通最小化保持原生行为。主窗口因 `minimize_to_tray` 隐藏时也隐藏历史窗口；主窗口实际关闭前销毁它，避免残留独立 WebView。托盘/第二实例只唤醒主窗口，不会意外重新显示历史窗口。历史窗口使用单独的 [revision-history capability](../src-tauri/capabilities/revision-history.json)，只允许其标题栏实际所需的 core/window 控制（含 `start_dragging`）；主窗口 capability 另显式允许 show、unminimize 和 focus 以承接恢复确认。不含 clipboard、show/hide 或 main-only scope。
 

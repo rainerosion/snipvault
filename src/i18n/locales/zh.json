@@ -115,6 +115,8 @@
     "compareIdentical": "两个版本的源代码相同（{{count}} 行）。",
     "compareScrollHint": "可横向滚动以比较代码",
     "comparePaneLabel": "{{side}} 源代码窗格",
+    "compareAddedLine": "新增行：",
+    "compareRemovedLine": "删除行：",
     "compareLimited": {
       "size": "此版本对超出本地大小限制，无法生成详细逐行比较。仍可并排查看完整源代码。",
       "complexity": "此版本对差异过大，无法生成详细逐行比较。仍可并排查看完整源代码。",
@@ -125,6 +127,8 @@
     "revisionLanguage": "语言",
     "revisionTags": "标签",
     "revisionFavorite": "收藏",
+    "revisionFavoriteActive": "已收藏",
+    "revisionFavoriteInactive": "未收藏",
     "revisionYes": "是",
     "revisionNo": "否",
     "revisionOrigin": {
