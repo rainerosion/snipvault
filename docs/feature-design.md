@@ -43,7 +43,7 @@ flowchart TB
 | 语言筛选 | 工具栏下拉框 | 精确匹配 `snippet.language` | [Toolbar.tsx](../src/components/Toolbar.tsx)、[App.tsx](../src/App.tsx) |
 | 收藏筛选 | 工具栏星标 | 在“全部”和“只看收藏”之间切换 | [Toolbar.tsx](../src/components/Toolbar.tsx) |
 | 新建 | 新建按钮、空状态、`Ctrl/Meta+N` | 创建本地草稿，保存时前端生成 UUID | [App.tsx](../src/App.tsx)、[useSnippets.ts](../src/hooks/useSnippets.ts) |
-| 编辑与保存 | 编辑器、`Ctrl/Meta+S` | 保存标题、代码、语言、描述、标签、收藏 | [SnippetEditor.tsx](../src/components/SnippetEditor.tsx)、[commands.rs](../src-tauri/src/commands.rs) |
+| 编辑与保存 | 编辑器、`Ctrl/Meta+S` | 保存标题、代码、语言、描述、标签、收藏；已有片段仅在表单有修改时可保存，干净表单不发起持久化或产生新 revision，新草稿仍可创建 | [SnippetEditor.tsx](../src/components/SnippetEditor.tsx)、[App.tsx](../src/App.tsx)、[commands.rs](../src-tauri/src/commands.rs) |
 | 版本历史与恢复 | 已保存片段编辑器的 History | 打开或复用独立原生窗口，分页检查 immutable revision、以紧凑时间线/语法预览/并排比较审阅两个版本；只可将历史 live 内容恢复为新的 descendant revision，tombstone 不可恢复、不会自动同步 | [RevisionHistoryWindow.tsx](../src/components/RevisionHistoryWindow.tsx)、[RevisionHistory.tsx](../src/components/RevisionHistory.tsx)、[commands.rs](../src-tauri/src/commands.rs) |
 | 未保存保护 | 切换、新建、取消 | 显示“保存 / 不保存 / 取消”三选一 Dialog | [Dialog.tsx](../src/components/Dialog.tsx)、[App.tsx](../src/App.tsx) |
 | 删除 | 列表卡片删除按钮 | 确认后按 ID 删除，并在必要时清空编辑区 | [App.tsx](../src/App.tsx)、[db.rs](../src-tauri/src/db.rs) |
@@ -232,6 +232,7 @@ CodeMirror 是受控输入：`form.content → CodeMirror value → onChange →
 脏状态用于：
 
 - 编辑器未保存圆点和文本。
+- 已有干净片段的编辑器 Save 按钮和命令面板 Save 动作禁用；`Ctrl/Meta+S` 仍拦截 WebView 默认行为，但经 `handleSave()` 成功 no-op，不触发 IPC、时间戳、revision 或 outbox 写入。新草稿不受此 no-op 规则限制。
 - 切换片段前提示。
 - 新建前提示。
 - 取消编辑前提示。
@@ -250,7 +251,7 @@ App.handleSave
 → 返回最终 Snippet 并刷新列表
 ```
 
-`Snippet` 与列表 `SnippetSummary` 都携带 SQLite head 的 `revision_id`。正常保存以所选详情的 revision 作为 base；若数据库 head 已变化，Rust 返回结构化 `stale_revision` 和安全的当前 revision ID，不写入任何 partial row/outbox。前端保持当前 form/formRef（包括保存等待期间的新编辑），尝试读取最新权威详情只更新 selected base，不覆盖草稿，并显示“有新数据、已保留编辑”；用户需要再次明确保存。保存请求期间如果用户继续编辑或切换，完成回调仍不会用已提交的旧表单覆盖较新的 UI 状态。
+`Snippet` 与列表 `SnippetSummary` 都携带 SQLite head 的 `revision_id`。已有片段只有当前表单与 `originalFormRef` 存在实际差异时才会进入更新调用链；干净表单的 Save 是成功 no-op，不校验标题、不生成时间戳/revision/outbox，也不刷新列表。正常保存以所选详情的 revision 作为 base；若数据库 head 已变化，Rust 返回结构化 `stale_revision` 和安全的当前 revision ID，不写入任何 partial row/outbox。前端保持当前 form/formRef（包括保存等待期间的新编辑），尝试读取最新权威详情只更新 selected base，不覆盖草稿，并显示“有新数据、已保留编辑”；用户需要再次明确保存。保存请求期间如果用户继续编辑或切换，完成回调仍不会用已提交的旧表单覆盖较新的 UI 状态。
 
 本地 revision/head/outbox 是当前 WebDAV v2 的持久同步基础。待处理 outbox 超过 10,000 条、64 MiB 或单 revision payload 上限时，mutation 以 `outbox_full` 整体拒绝；同步成功只按精确 revision ID 确认已经发布且仍 pending 的条目。
 
@@ -258,7 +259,7 @@ App.handleSave
 
 已保存片段的编辑器头部提供“历史”入口。它调用主窗口专用 `open_revision_history`，动态创建或复用 [RevisionHistoryWindow.tsx](../src/components/RevisionHistoryWindow.tsx) 的独立原生工作区；该窗口只通过 Rust state pull opaque target 和 generation，不把 ID 放进 URL、标题或浏览器存储，也不持有正文、路径、WebDAV URL、凭据或诊断。时间线以有界 cursor page 读取该片段已有的 immutable `revision_objects`，而不建立第二份 history 表；选择一项后才请求经过 hash/payload/片段归属验证的只读 live preview 或 tombstone 元数据。
 
-- 历史按 revision time/id 倒序分页；当前 head 与 local/import/remote origin 在 UI 中可辨认。紧凑时间线使用主列表一致的中性 active surface、边框和左侧 accent rail，而非完整 accent-dim diff 卡片。
+- 历史按 revision time/id 倒序分页；当前 head 与 local/import/remote origin 在 UI 中可辨认。紧凑时间线使用主列表一致的中性 active surface、边框和左侧 accent rail，而非完整 accent-dim diff 卡片；可见时间使用运行时 locale 并精确到秒，受限宽度中截断时可通过悬停 title 取得完整本地化时间。
 - 两个同片段 revision 可在紧凑的 review desk 中比较：左侧时间线轨道，右侧固定的已选 revision 上下文/比较/恢复命令带，以及占据剩余高度的唯一代码 stage。时间线选中态保持中性 active surface，以清晰的 accent rail 和边框标示，不使用整行 accent 填充；命令带保持低权重 utility chrome，使代码 stage 成为视觉焦点。live revision 预览使用一个紧凑、只读的 editor-chrome header：标题为主信息，language badge、最多两个 passive tag chip 与 `+N` 溢出摘要、以及不可交互的历史收藏状态为低权重上下文；没有标签时不显示占位行，长标题和 tag 在各自边界内截断，完整值可通过辅助标签或悬停访问。左侧是可任意选择的“比较基线”，右侧是所选版本；live 内容按原始行号对齐，显示新增/删除/替换 marker 及编辑器同款语法颜色。所选版本保持中性编辑器 surface；新增和删除都以等宽的绿色/红色窄 rail 与低强度 gutter 提示，不使用整行 Git 红绿填充。视觉 `+`/`−` marker 和行号不向辅助技术重复朗读；真实的新增/删除源代码行会在代码前提供本地化的新增/删除方向提示。代码 review 一律不自动换行；窗口宽度至少 1200px 时采用弹性双栏，不产生外层横向滚动，只有单个真实长行会在其所属 source pane 内横向滚动。历史窗口最小宽度的 1000–1199px 范围会显示明确的“比较基线 / 所选版本”单 pane 切换按钮，默认所选版本；切换只改变已加载比较的呈现，不重新请求或重新计算，也会用 `display: none` 移除未显示 pane 的键盘与辅助技术焦点。每一侧按该历史 revision 自身的 language 着色，语言变更不会错误继承当前编辑器语言；双栏详细对齐时仅同步两侧垂直滚动。Comparison 只在 stage 中显示一次并保留一个 `h2`；内部工具栏仅显示比较摘要和窄宽度 pane 切换控件。
 - 比较是前端本地、受限的两路逐行 diff：只在总字符/行数、matrix/渲染行数和短计算预算内执行；超限或高度差异时明确退回为有行号、语法高亮、无自动换行的完整并排源代码，绝不冻结界面、生成部分结果或伪造差异。它不是 word-level/semantic diff、三方 merge 或冲突解决 UI。
 - tombstone 仍明确显示为“无源代码”的删除状态；与 live revision 对比时不会把 tombstone 伪装为空文件，两个 tombstone 不绘制伪造代码 diff。

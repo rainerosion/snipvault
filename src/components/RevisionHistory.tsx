@@ -44,6 +44,7 @@ function formatTimelineTime(value: string): string {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
   }).format(date);
 }
 
@@ -228,7 +229,12 @@ export function RevisionHistory({
                       aria-current={isSelected ? "true" : undefined}
                       onClick={() => handleSelect(revision.revision_id)}
                     >
-                      <span className="revision-history-item-time">{formatTimelineTime(revision.revision_time)}</span>
+                      <span
+                        className="revision-history-item-time"
+                        title={formatRevisionTime(revision.revision_time)}
+                      >
+                        {formatTimelineTime(revision.revision_time)}
+                      </span>
                       <span className="revision-history-item-detail">
                         {revision.is_current_head ? t("snippet.currentRevision") : t(`snippet.revisionOrigin.${revision.origin}`)}
                         {revision.deleted ? ` · ${t("snippet.deletedRevision")}` : ""}

@@ -549,6 +549,9 @@ export default function App() {
 
   const handleSave = useCallback(async (): Promise<boolean> => {
     if (saving) return false;
+    if (!isNew && selected && !isFormDirty(formRef.current, originalFormRef.current)) {
+      return true;
+    }
     if (!form.title.trim()) {
       await dialogRef.current?.alert(t("snippet.titleRequired"));
       return false;
@@ -1130,7 +1133,7 @@ export default function App() {
       label: t("commandPalette.commands.save"),
       keywords: [t("snippet.save"), "save"],
       shortcut: "Ctrl/Cmd+S",
-      disabled: !isDirty || saving,
+      disabled: saving || (!isNew && !isDirty),
       execute: handleSave,
     },
     {
@@ -1178,7 +1181,7 @@ export default function App() {
         if (selected) await handleToggleFav(selected.id);
       },
     },
-  ], [handleExport, handleNew, handleSave, handleSync, handleThemeToggle, handleToggleFav, handleOpenSettings, isDirty, saving, selected, syncing, t]);
+  ], [handleExport, handleNew, handleSave, handleSync, handleThemeToggle, handleToggleFav, handleOpenSettings, isDirty, isNew, saving, selected, syncing, t]);
 
   const focusTextTarget = useCallback(() => {
     const target = textMenuTargetRef.current;

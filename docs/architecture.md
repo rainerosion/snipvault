@@ -170,7 +170,7 @@ flowchart LR
 [App.tsx](../src/App.tsx) 是当前前端的应用控制器，集中管理：
 
 - 当前选中片段、是否新建、表单和原始表单快照。
-- 保存状态与脏数据检测。
+- 保存状态与脏数据检测；已有干净表单在 `App` 保存协调器中成功 no-op，不触发更新 IPC、revision 或 outbox。
 - 搜索词、语言筛选、收藏筛选、排序、分页请求和当前已加载项的批量选择。
 - 设置模态层、快照恢复、通知中心、命令面板、同步状态和全局 Dialog。
 - 以 `open_revision_history` 打开或复用原生 `revision-history` 子窗口；从该窗口 pull restore request 并在主窗口复用 dirty guard、确认 Dialog 与权威 reconcile。

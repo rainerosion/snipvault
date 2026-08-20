@@ -905,7 +905,7 @@ export function SnippetEditor({
               {isNew ? t("snippet.cancel") : t("snippet.cancelEdit")}
             </button>
           )}
-          <button type="button" className="btn-save" onClick={onSave} disabled={saving} aria-busy={saving}>
+          <button type="button" className="btn-save" onClick={onSave} disabled={saving || (!isNew && !isDirty)} aria-busy={saving}>
             {saving ? t("snippet.saveInProgress") : isNew ? t("snippet.create") : t("snippet.save")}
           </button>
         </div>
