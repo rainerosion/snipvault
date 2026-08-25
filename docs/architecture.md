@@ -217,7 +217,7 @@ flowchart LR
 | [RevisionHistoryWindow.tsx](../src/components/RevisionHistoryWindow.tsx) | 独立原生历史窗口的 target pull / event refresh、direct revision IPC 与 restore-request 状态协调；不挂载 App 主流程 |
 | [RevisionHistory.tsx](../src/components/RevisionHistory.tsx) | 已保存片段 immutable revision 时间线、只读 live/tombstone 检视、对比与仅请求式的安全恢复 UI |
 | [LazyRevisionCodePreview.tsx](../src/components/LazyRevisionCodePreview.tsx)、[LazyRevisionDiffViewer.tsx](../src/components/LazyRevisionDiffViewer.tsx) | 仅在用户检视 live 版本或实际启动比较时加载 syntax/diff renderer，避免将 parser/highlighter 提前纳入 App 初始依赖图 |
-| [RevisionCodeView.tsx](../src/components/RevisionCodeView.tsx)、[RevisionDiffViewer.tsx](../src/components/RevisionDiffViewer.tsx)、[lineDiff.ts](../src/components/lineDiff.ts) | 安全的只读 DOM token 渲染、本地化的真实新增/删除行语义提示（装饰 marker/行号保持隐藏）、双版本 gutter/滚动工作区和本地受限的两路逐行对齐；tombstone 保持无正文状态 |
+| [RevisionCodeView.tsx](../src/components/RevisionCodeView.tsx)、[RevisionDiffViewer.tsx](../src/components/RevisionDiffViewer.tsx)、[lineDiff.ts](../src/components/lineDiff.ts) | 安全的只读 DOM token 渲染；受限本地两路逐行对齐将配对 `replace` 行作为独占的修改计数、未配对行作为新增/删除；两侧保留 replace 身份并提供本地化的之前版本/所选版本修改语义提示，新增/删除提示只用于未配对行（装饰 marker/行号保持隐藏）；双版本 gutter/滚动工作区和 tombstone 无正文状态 |
 | [codeHighlightTheme.ts](../src/components/codeHighlightTheme.ts) | 编辑器/历史检视共享 dark/light `HighlightStyle`、token 色和 plain-DOM 的 `StyleModule` 注册 |
 | [RestoreWizard.tsx](../src/components/RestoreWizard.tsx) | 已验证本地 SQLite 快照列表、手动创建、受控目录打开、完整 vault 范围说明与确认恢复 |
 | [SyncNotificationCenter.tsx](../src/components/SyncNotificationCenter.tsx) | 脱敏同步结果收件箱、未读/已读/关闭、可重试手动同步入口 |

@@ -111,10 +111,12 @@
     "compareDeleted": "已删除版本 — 无源代码",
     "compareDeletedDescription": "这是一个 tombstone，不包含可比较或可恢复的源代码内容。",
     "compareBothDeleted": "所选的两个版本都不包含源代码内容。",
-    "compareSummary": "+{{additions}} 行新增 · −{{deletions}} 行删除",
+    "compareSummary": "{{modifications}} 行修改 · +{{additions}} 行新增 · −{{deletions}} 行删除",
     "compareIdentical": "两个版本的源代码相同（{{count}} 行）。",
     "compareScrollHint": "可横向滚动以比较代码",
     "comparePaneLabel": "{{side}} 源代码窗格",
+    "compareModifiedBeforeLine": "修改行，之前版本：",
+    "compareModifiedAfterLine": "修改行，所选版本：",
     "compareAddedLine": "新增行：",
     "compareRemovedLine": "删除行：",
     "compareLimited": {

@@ -60,9 +60,11 @@ function renderHighlightedLine(
   return parts.length ? parts : line.text;
 }
 
-function kindForSide(kind: DiffRowKind, side: "left" | "right") {
-  if (kind === "replace") return side === "left" ? "delete" : "insert";
-  return kind;
+function markerForKind(kind: DiffRowKind) {
+  if (kind === "replace") return "~";
+  if (kind === "delete") return "−";
+  if (kind === "insert") return "+";
+  return "";
 }
 
 /** Read-only, non-wrapping source renderer for revision preview and diff panes. */
@@ -110,24 +112,30 @@ export function RevisionCodeView({
       <div className="revision-code-table" role="presentation">
         {displayRows.map((row, index) => {
           const line = row.line ? sourceByLine.get(row.line.lineNumber) : undefined;
-          const sideKind = line ? kindForSide(row.kind, side) : "placeholder";
+          const rowKind = line ? row.kind : "placeholder";
+          const modificationLabel = side === "left"
+            ? "snippet.compareModifiedBeforeLine"
+            : "snippet.compareModifiedAfterLine";
           return (
             <div
               key={`${row.line?.lineNumber ?? "blank"}-${index}`}
-              className={`revision-code-row revision-code-row-${sideKind}`}
+              className={`revision-code-row revision-code-row-${rowKind}`}
               aria-label={line ? undefined : ""}
             >
               <span className="revision-code-change" aria-hidden="true">
-                {sideKind === "delete" ? "−" : sideKind === "insert" ? "+" : ""}
+                {rowKind === "placeholder" ? "" : markerForKind(row.kind)}
               </span>
               <span className="revision-code-line-number" aria-hidden="true">
                 {line?.lineNumber ?? ""}
               </span>
               <code className="revision-code-line">
-                {sideKind === "delete" && (
+                {line && row.kind === "replace" && (
+                  <span className="sr-only">{t(modificationLabel)} </span>
+                )}
+                {line && row.kind === "delete" && (
                   <span className="sr-only">{t("snippet.compareRemovedLine")} </span>
                 )}
-                {sideKind === "insert" && (
+                {line && row.kind === "insert" && (
                   <span className="sr-only">{t("snippet.compareAddedLine")} </span>
                 )}
                 {line ? renderHighlightedLine(line, ranges) : <span aria-hidden="true"> </span>}

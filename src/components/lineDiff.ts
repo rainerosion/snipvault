@@ -12,7 +12,13 @@ export interface DiffRow {
 }
 
 export type DiffResult =
-  | { status: "ready"; rows: DiffRow[]; additions: number; deletions: number }
+  | {
+      status: "ready";
+      rows: DiffRow[];
+      modifications: number;
+      additions: number;
+      deletions: number;
+    }
   | { status: "identical"; lineCount: number }
   | { status: "limited"; reason: "size" | "complexity" | "time" };
 
@@ -38,7 +44,8 @@ function appendRun(
   rows: DiffRow[],
   deleted: DiffSourceLine[],
   inserted: DiffSourceLine[],
-): { additions: number; deletions: number } {
+): { modifications: number; additions: number; deletions: number } {
+  let modifications = 0;
   let additions = 0;
   let deletions = 0;
   const paired = Math.max(deleted.length, inserted.length);
@@ -47,8 +54,7 @@ function appendRun(
     const right = inserted[index];
     if (left && right) {
       rows.push({ kind: "replace", left, right });
-      additions += 1;
-      deletions += 1;
+      modifications += 1;
     } else if (left) {
       rows.push({ kind: "delete", left });
       deletions += 1;
@@ -57,7 +63,7 @@ function appendRun(
       additions += 1;
     }
   }
-  return { additions, deletions };
+  return { modifications, additions, deletions };
 }
 
 /**
@@ -105,6 +111,7 @@ export function buildLineDiff(leftContent: string, rightContent: string): DiffRe
   }
 
   const rows: DiffRow[] = [];
+  let modifications = 0;
   let additions = 0;
   let deletions = 0;
   let leftIndex = 0;
@@ -115,6 +122,7 @@ export function buildLineDiff(leftContent: string, rightContent: string): DiffRe
   const flushPending = () => {
     if (!pendingDeleted.length && !pendingInserted.length) return;
     const counts = appendRun(rows, pendingDeleted, pendingInserted);
+    modifications += counts.modifications;
     additions += counts.additions;
     deletions += counts.deletions;
     pendingDeleted = [];
@@ -157,7 +165,7 @@ export function buildLineDiff(leftContent: string, rightContent: string): DiffRe
   flushPending();
   return rows.length > MAX_RENDERED_ROWS
     ? limited("complexity")
-    : { status: "ready", rows, additions, deletions };
+    : { status: "ready", rows, modifications, additions, deletions };
 }
 
 export function sourceLines(content: string): DiffSourceLine[] {

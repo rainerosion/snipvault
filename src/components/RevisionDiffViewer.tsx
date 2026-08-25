@@ -93,7 +93,11 @@ export function RevisionDiffViewer({ comparison, theme }: RevisionDiffViewerProp
   const leftLabel = revisionLabel(left, t("snippet.currentRevision"), t("snippet.compareDeleted"));
   const rightLabel = revisionLabel(right, t("snippet.currentRevision"), t("snippet.compareDeleted"));
   const summary = diff?.status === "ready"
-    ? t("snippet.compareSummary", { additions: diff.additions, deletions: diff.deletions })
+    ? t("snippet.compareSummary", {
+        modifications: diff.modifications,
+        additions: diff.additions,
+        deletions: diff.deletions,
+      })
     : diff?.status === "identical"
       ? t("snippet.compareIdentical", { count: diff.lineCount })
       : diff?.status === "limited"

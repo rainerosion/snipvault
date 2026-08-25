@@ -111,10 +111,12 @@
     "compareDeleted": "Deleted revision — no source",
     "compareDeletedDescription": "This revision is a tombstone. It has no source content to compare or restore.",
     "compareBothDeleted": "Neither selected revision contains source content.",
-    "compareSummary": "+{{additions}} added · −{{deletions}} removed",
+    "compareSummary": "{{modifications}} modified · +{{additions}} added · −{{deletions}} removed",
     "compareIdentical": "The revisions have identical source ({{count}} line(s)).",
     "compareScrollHint": "Scroll horizontally to compare code",
     "comparePaneLabel": "{{side}} source pane",
+    "compareModifiedBeforeLine": "Modified line, previous version:",
+    "compareModifiedAfterLine": "Modified line, selected version:",
     "compareAddedLine": "Added line:",
     "compareRemovedLine": "Removed line:",
     "compareLimited": {

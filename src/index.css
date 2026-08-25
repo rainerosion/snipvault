@@ -3618,9 +3618,11 @@ body {
 .revision-code-row:last-child { border-bottom: 0; }
 .revision-code-row-placeholder { background: color-mix(in srgb, var(--editor-gutter-surface) 58%, transparent); }
 .revision-code-row-delete,
-.revision-code-row-insert { background: var(--editor-surface); }
+.revision-code-row-insert,
+.revision-code-row-replace { background: var(--editor-surface); }
 .revision-code-row-delete { box-shadow: inset 4px 0 0 var(--status-danger-border); }
 .revision-code-row-insert { box-shadow: inset 4px 0 0 var(--status-success-border); }
+.revision-code-row-replace { box-shadow: inset 4px 0 0 var(--accent-border); }
 
 .revision-code-change,
 .revision-code-line-number {
@@ -3635,8 +3637,10 @@ body {
 .revision-code-change { padding-right: 2px; text-align: center; }
 .revision-code-row-delete :is(.revision-code-change, .revision-code-line-number) { background: var(--status-danger-bg); color: var(--status-danger-fg); }
 .revision-code-row-insert :is(.revision-code-change, .revision-code-line-number) { background: var(--status-success-bg); color: var(--status-success-fg); }
+.revision-code-row-replace :is(.revision-code-change, .revision-code-line-number) { background: var(--accent-dim); color: var(--accent); }
 .revision-code-row-delete .revision-code-change,
-.revision-code-row-insert .revision-code-change { font-weight: 700; }
+.revision-code-row-insert .revision-code-change,
+.revision-code-row-replace .revision-code-change { font-weight: 700; }
 .revision-code-line {
   display: block;
   min-width: max-content;
