@@ -33,7 +33,7 @@ Snippet data is stored locally in SQLite and remains available offline. Optional
 
 ### Features
 
-> **Release status:** v2.5.0 is the current release. It includes phase-one productivity workflows, phase-two recovery, local snapshots, the synchronization inbox, and the dedicated revision-history workspace described below.
+> **Release status:** v2.5.1 is the current release. It includes phase-one productivity workflows, phase-two recovery, local snapshots, the synchronization inbox, and the dedicated revision-history workspace described below.
 
 - **Local snippet management** — Create, edit, delete, favorite, tag, browse, and select up to 200 currently loaded snippets for one all-or-nothing favorite, unfavorite, or delete action.
 - **Scalable local search** — Backend-composed substring-compatible search over title, content, description, and tags, with language/favorites filters, selectable Recently Updated/Recently Used ordering, bounded summary pages, Load More, CJK support, and lazy full-detail loading.
@@ -55,6 +55,10 @@ Snippet data is stored locally in SQLite and remains available offline. Optional
 - **Sync history** — The latest 20 successful technical synchronization records, kept separately from the notification inbox.
 
 > WebDAV v2 requires server support for strong ETags and conditional PUT. Its one-way cutover, immutable-object retention, conflict UI, and verification boundaries are documented in [Known limitations](docs/known-limitations.md). Keep an independent backup before activating a v1 directory and do not use old clients against it afterward.
+
+### What's New in v2.5.1
+
+- Restored compatibility with the current Rust stable Clippy gate by using its fixed-size SHA-1 block API; digest and UUID behavior remain unchanged.
 
 ### What's New in v2.5.0
 
@@ -235,7 +239,7 @@ Feature design and development changes must update the relevant development docu
 
 ### 功能特性
 
-> **发布状态：**v2.5.0 是当前正式版本，包含下文所述的第一阶段效率工作流、第二阶段恢复、本地快照、同步收件箱，以及独立版本历史工作区。
+> **发布状态：**v2.5.1 是当前正式版本，包含下文所述的第一阶段效率工作流、第二阶段恢复、本地快照、同步收件箱，以及独立版本历史工作区。
 
 - **本地片段管理** — 新建、编辑、删除、收藏、标签和 SQLite 持久化；可在当前已加载结果中选择最多 200 项，执行全有或全无的批量收藏、取消收藏或删除。
 - **可扩展本地搜索** — 后端组合标题、代码、描述和标签的子串兼容搜索与语言/收藏筛选；工具栏将筛选与排序分开显示，默认按“最近更新”排序，也可切换“最近使用”，并提供有界摘要页、加载更多、CJK 支持和完整详情懒加载。
@@ -256,6 +260,10 @@ Feature design and development changes must update the relevant development docu
 - **同步历史** — 仍单独保留最近 20 条成功同步技术记录，与通知收件箱分离。
 
 > WebDAV v2 要求服务器支持 strong ETag 和 conditional PUT。单向升级、不可变对象保留、冲突 UI 与验证边界见[已知限制](docs/known-limitations.md)。激活 v1 目录前请保留独立备份，激活后不要再让旧客户端访问该目录。
+
+### v2.5.1 更新内容
+
+- 使用当前 Rust stable Clippy 要求的固定长度 SHA-1 分块 API，恢复 CI 兼容性；摘要与 UUID 行为保持不变。
 
 ### v2.5.0 更新内容
 

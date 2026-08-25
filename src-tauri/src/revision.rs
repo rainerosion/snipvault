@@ -118,7 +118,7 @@ fn sha1_digest(bytes: &[u8]) -> [u8; 20] {
         0x1032_5476,
         0xc3d2_e1f0,
     ];
-    for block in message.chunks_exact(64) {
+    for block in message.as_chunks::<64>().0 {
         let mut words = [0_u32; 80];
         for (index, word) in words.iter_mut().take(16).enumerate() {
             let offset = index * 4;
