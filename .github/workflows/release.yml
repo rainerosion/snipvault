@@ -151,6 +151,99 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
+  build-windows-arm64:
+    name: Windows ARM64 bundles
+    needs: validate
+    runs-on: windows-11-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Check version/tag consistency
+        env:
+          SNIPVAULT_RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: npm run versions:check
+
+      - name: Check icons
+        run: npm run icons:check
+
+      - name: Setup WiX Toolset
+        shell: pwsh
+        run: |
+          choco install wixtoolset --version=3.14.1 -y --allow-downgrade
+          $wixPath = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
+          if (!(Test-Path $wixPath)) {
+            throw "WiX path not found: $wixPath"
+          }
+          "TAURI_BUNDLER_WIX_PATH=$wixPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build Tauri ARM64
+        run: npm run tauri:build -- --target aarch64-pc-windows-msvc
+
+      - name: Verify and stage Windows ARM64 artifacts
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          $root = "src-tauri/target/aarch64-pc-windows-msvc/release/bundle"
+          $stage = "arm64-artifacts/windows"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          $msi = @(Get-ChildItem "$root/msi/*.msi" -File)
+          $nsis = @(Get-ChildItem "$root/nsis/*.exe" -File)
+          $binaries = @(Get-ChildItem "src-tauri/target/aarch64-pc-windows-msvc/release/*.exe" -File)
+          if ($msi.Count -eq 0 -or $nsis.Count -eq 0 -or $binaries.Count -eq 0) {
+            throw "Missing Windows ARM64 MSI, NSIS, or application executable"
+          }
+
+          function Assert-Arm64Pe([string] $path) {
+            $bytes = [System.IO.File]::ReadAllBytes($path)
+            if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) {
+              throw "Not a PE executable: $path"
+            }
+            $offset = [BitConverter]::ToInt32($bytes, 0x3c)
+            if ($offset -lt 0 -or $offset + 6 -gt $bytes.Length -or
+                $bytes[$offset] -ne 0x50 -or $bytes[$offset + 1] -ne 0x45) {
+              throw "Missing PE signature: $path"
+            }
+            $machine = [BitConverter]::ToUInt16($bytes, $offset + 4)
+            if ($machine -ne 0xaa64) {
+              throw "Expected ARM64 PE (0xAA64), got 0x$('{0:X4}' -f $machine): $path"
+            }
+          }
+
+          foreach ($file in $binaries) {
+            Assert-Arm64Pe $file.FullName
+          }
+          foreach ($file in $msi) {
+            Copy-Item $file.FullName "$stage/SnipVault-$env:RELEASE_TAG-windows-arm64-msi-$($file.Name)"
+          }
+          foreach ($file in $nsis) {
+            Copy-Item $file.FullName "$stage/SnipVault-$env:RELEASE_TAG-windows-arm64-nsis-$($file.Name)"
+          }
+          Copy-Item $binaries[0].FullName "$stage/SnipVault-$env:RELEASE_TAG-windows-arm64-portable.exe"
+
+      - name: Upload Windows ARM64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64-bundles
+          path: arm64-artifacts/windows/*
+          if-no-files-found: error
+          retention-days: 5
+
   build-macos:
     name: macOS universal bundle
     needs: validate
@@ -287,9 +380,97 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
+  build-linux-arm64:
+    name: Linux ARM64 bundles
+    needs: validate
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Check version/tag consistency
+        env:
+          SNIPVAULT_RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: npm run versions:check
+
+      - name: Check icons
+        run: npm run icons:check
+
+      - name: Build Tauri ARM64
+        run: npm run tauri:build -- --target aarch64-unknown-linux-gnu
+
+      - name: Verify and stage Linux ARM64 artifacts
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+          root="src-tauri/target/aarch64-unknown-linux-gnu/release/bundle"
+          stage="arm64-artifacts/linux"
+          mkdir -p "$stage"
+          deb=("$root"/deb/**/*.deb)
+          appimage=("$root"/appimage/*.AppImage)
+          if [ ${#deb[@]} -eq 0 ] || [ ${#appimage[@]} -eq 0 ]; then
+            echo "Missing Linux ARM64 DEB or AppImage artifact"
+            exit 1
+          fi
+          for file in "${deb[@]}"; do
+            architecture=$(dpkg-deb -f "$file" Architecture)
+            [ "$architecture" = "arm64" ] || { echo "Expected arm64 DEB, got $architecture: $file"; exit 1; }
+            cp "$file" "$stage/SnipVault-${RELEASE_TAG}-linux-arm64-deb-$(basename "$file")"
+          done
+          for file in "${appimage[@]}"; do
+            machine=$(readelf -h "$file" | awk -F: '/Machine:/ {gsub(/^[[:space:]]+/, "", $2); print $2}')
+            [[ "$machine" == *"AArch64"* ]] || { echo "Expected AArch64 AppImage, got $machine: $file"; exit 1; }
+            cp "$file" "$stage/SnipVault-${RELEASE_TAG}-linux-arm64-appimage-$(basename "$file")"
+          done
+
+      - name: Upload Linux ARM64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-bundles
+          path: arm64-artifacts/linux/*
+          if-no-files-found: error
+          retention-days: 5
+
   release:
     name: Checksums, attestations, and release
-    needs: [validate, build-windows, build-macos, build-linux]
+    needs:
+      [
+        validate,
+        build-windows,
+        build-windows-arm64,
+        build-macos,
+        build-linux,
+        build-linux-arm64,
+      ]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -315,7 +496,10 @@ jobs:
             echo "No artifacts downloaded"
             exit 1
           fi
-          required=("*.msi" "*.exe" "*.dmg" "*.deb" "*.AppImage")
+          required=("*.msi" "*.exe" "*.dmg" "*.deb" "*.AppImage" \
+            "*-windows-arm64-msi-*.msi" "*-windows-arm64-nsis-*.exe" \
+            "*-windows-arm64-portable.exe" "*-linux-arm64-deb-*.deb" \
+            "*-linux-arm64-appimage-*.AppImage")
           for pattern in "${required[@]}"; do
             matches=(artifacts/**/$pattern)
             if [ ${#matches[@]} -eq 0 ]; then

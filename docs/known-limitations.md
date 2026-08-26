@@ -1,6 +1,6 @@
 # SnipVault 已知限制与技术债
 
-> 本文记录 v2.5.1 中仍可验证的限制。已解决问题及方案见 [第一轮问题修复记录](remediation-2026-07-31.md) 与 [第二轮修复记录](remediation-round-2.md)。本文不是修复承诺。
+> 本文记录 v2.5.2 中仍可验证的限制。已解决问题及方案见 [第一轮问题修复记录](remediation-2026-07-31.md) 与 [第二轮修复记录](remediation-round-2.md)。本文不是修复承诺。
 
 ## 优先级概览
 
@@ -205,9 +205,9 @@ Tauri command 边界统一为 `CommandError { code, message, retryable, details?
 
 ### 8.1 Release workflow 尚未实跑验证
 
-Release workflow 已配置 Windows MSI/NSIS/portable、Linux DEB/AppImage、macOS `universal-apple-darwin` DMG、完整 artifact set 检查、`SHA256SUMS` 和 GitHub artifact attestations。手动 dispatch 现在只执行 dry-run，不创建 Release；tag 发布要求 tag 与内部版本一致。
+Release workflow 已配置 Windows x64/ARM64 MSI/NSIS/portable、Linux amd64/ARM64 DEB/AppImage、macOS `universal-apple-darwin` DMG、完整 artifact set 检查、`SHA256SUMS` 和 GitHub artifact attestations。Windows ARM64 使用 `windows-11-arm` 与 `aarch64-pc-windows-msvc`，Linux ARM64 使用原生 `ubuntu-22.04-arm` 与 `aarch64-unknown-linux-gnu`；手动 dispatch 只执行 dry-run，不创建 Release；tag 发布要求 tag 与内部版本一致。
 
-剩余边界：这些 release 路径尚未在 GitHub Actions 的真实 tag 或 dry-run 中完成一次端到端验证；本地 Windows 环境也没有执行 macOS/Linux 打包或 attestation。若 workflow 依赖的 Tauri bundle 路径、GitHub attestation 权限或平台工具链变化，仍可能在远端失败。
+剩余边界：这些 release 路径尚未在 GitHub Actions 的真实 tag 或 dry-run 中完成一次端到端验证；ARM runner label 受仓库/账户计划和区域可用性影响，需维护等价 ARM64 self-hosted runner 作为运营替代。Linux ARM64 AppImage 依赖原生 ARM 构建环境，不能由未配置 sysroot 的 x64 job 静默交叉生成。本地 Windows 环境也没有执行 macOS/Linux 打包或 attestation；打包检查不替代真实 ARM 设备的安装、WebView、桌面服务、凭据库或快捷键 smoke。若 workflow 依赖的 Tauri bundle 路径、GitHub attestation 权限或平台工具链变化，仍可能在远端失败。
 
 ### 8.2 没有应用内更新
 

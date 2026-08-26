@@ -492,10 +492,15 @@ WebDAV automated tests 必须只绑定 loopback、使用专用远端路径、fak
 
 [release.yml](../.github/workflows/release.yml) 当前由 `v*` tag 负责正式发布，手动触发只做 dry-run build/校验并上传临时 artifact；普通 push/PR 验证由 [ci.yml](../.github/workflows/ci.yml) 负责：
 
-- Windows：MSI、NSIS、portable EXE。
+- Windows x64：`windows-latest` 构建 MSI、NSIS、portable EXE。
+- Windows ARM64：原生 `windows-11-arm` runner 使用 `aarch64-pc-windows-msvc` 构建 MSI、NSIS、portable EXE；产物在 staging 阶段加入 `windows-arm64` 文件名标记。
 - macOS：`universal-apple-darwin` DMG，安装 x86_64/aarch64 targets 并用 `lipo -info` 校验 app executable。
-- Linux：DEB、AppImage。
-- 所有平台 job 必须成功，release job 才会生成 `SHA256SUMS`、检查完整 artifact set、拒绝 `.app` 目录 asset，并在 tag 发布时生成 artifact attestations 和 GitHub Release。手动 dry-run 不创建 tag 或 Release。
+- Linux amd64：`ubuntu-22.04` 构建 DEB、AppImage。
+- Linux ARM64：原生 `ubuntu-22.04-arm` runner 使用 `aarch64-unknown-linux-gnu` 构建 DEB、AppImage；产物在 staging 阶段加入 `linux-arm64` 文件名标记。
+- ARM job 使用 target-qualified `src-tauri/target/<triple>/release/bundle` 路径，并在上传前检查 Windows PE `0xAA64`、Linux DEB `Architecture=arm64` 和 AppImage AArch64 ELF。Linux ARM64 不使用未配置 sysroot 的 x64 交叉构建。
+- 所有平台 job 必须成功，release job 才会生成 `SHA256SUMS`、检查完整 x64/ARM64 artifact set、拒绝 `.app` 目录 asset，并在 tag 发布时生成 artifact attestations 和 GitHub Release。手动 dry-run 不创建 tag 或 Release。
+
+ARM hosted runner label 受 GitHub 账户/仓库计划和可用性影响；若不可用，应提供维护好的等价 ARM64 self-hosted runner，而不是静默回退到 x64 产物。打包成功不等于实际 ARM 设备上的安装、WebView、托盘、凭据库或快捷键运行 smoke 已完成。
 
 发布能力变更时需同步核对：
 

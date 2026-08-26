@@ -1,6 +1,6 @@
 # SnipVault 架构设计
 
-> 本文描述当前 v2.5.1 架构，截至 2026-08-20。已发现但尚未修复的问题集中记录在 [已知限制](known-limitations.md)。
+> 本文描述当前 v2.5.2 架构，截至 2026-08-26。已发现但尚未修复的问题集中记录在 [已知限制](known-limitations.md)。
 
 ## 1. 系统定位与边界
 
@@ -16,7 +16,7 @@ SnipVault 是一个本地优先的桌面代码片段管理器。应用的主要�
 | 设置 | Rust 内存缓存 + 校验、临时文件/备份替换的无 secret `settings.json`；含本地快照策略与恢复后同步确认锁 |
 | 凭据 | `keyring` 抽象；生产环境使用平台凭据库，测试使用内存/失败 fake |
 | 远端同步 | `reqwest::blocking` + WebDAV；进程级互斥、v2 marker/manifest、不可变 revision objects 与条件发布 |
-| 发布 | GitHub Actions 构建 Windows、macOS、Linux 产物并创建 GitHub Release |
+| 发布 | GitHub Actions 并行构建 Windows/Linux 的 x64 与 ARM64 产物、macOS Universal，并集中创建 GitHub Release |
 
 主要配置来源：
 
@@ -955,13 +955,15 @@ flowchart LR
 
 [release.yml](../.github/workflows/release.yml) 在 `v*` tag 上发布，在手动触发时只执行 dry-run artifact build/校验并上传临时 artifact，不创建 GitHub Release。发布前的 validate job 要求 tag 与内部版本一致，并复用版本和图标门禁。
 
-| 平台 | 当前产物 |
+| 平台/架构 | 当前产物 |
 |---|---|
-| Windows | MSI、NSIS EXE、复制的 portable EXE |
+| Windows x64 | MSI、NSIS EXE、portable EXE |
+| Windows ARM64 | ARM64 MSI、NSIS EXE、portable EXE；`aarch64-pc-windows-msvc` |
 | macOS | Universal `x86_64` + `arm64` DMG；workflow 用 `lipo -info` 校验 app executable |
-| Linux | DEB、AppImage |
+| Linux amd64 | DEB、AppImage |
+| Linux ARM64 | ARM64 DEB、AppImage；`aarch64-unknown-linux-gnu` |
 
-Release job 只有在所有平台构建成功后才继续；下载完整 artifact set 后生成 `SHA256SUMS`，拒绝缺失平台产物和 `.app` 目录 asset。Tag 发布会用 GitHub artifact attestations 生成 provenance，再通过 `softprops/action-gh-release` 发布 MSI/EXE/DMG/DEB/AppImage 和 checksum。手动 workflow dispatch 不发布，只保留 dry-run artifact set。
+Release job 只有在所有平台构建成功后才继续：Windows x64/ARM64、macOS Universal、Linux amd64/ARM64 jobs 先将架构专属文件名的产物合并下载，再生成 `SHA256SUMS`，检查完整 artifact set（包括 ARM64 MSI/NSIS/portable、DEB/AppImage），拒绝 `.app` 目录 asset。Tag 发布会用 GitHub artifact attestations 生成 provenance，再通过 `softprops/action-gh-release` 发布 MSI/EXE/DMG/DEB/AppImage 和 checksum。手动 workflow dispatch 不发布，只保留 dry-run artifact set。
 
 图标链路以 [assets/app-icon.png](../assets/app-icon.png) 为唯一 canonical source；`npm run icons` 调用 Tauri icon generator 输出 [src-tauri/icons/](../src-tauri/icons/)，`npm run icons:check` 校验 PNG/ICO/ICNS magic、关键尺寸、`tauri.conf.json` 引用和旧重复生成器/输出是否已清理。前端标题栏也从同一 canonical source 通过 Vite asset import 获取图标。
 

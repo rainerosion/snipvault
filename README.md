@@ -33,7 +33,7 @@ Snippet data is stored locally in SQLite and remains available offline. Optional
 
 ### Features
 
-> **Release status:** v2.5.1 is the current release. It includes phase-one productivity workflows, phase-two recovery, local snapshots, the synchronization inbox, and the dedicated revision-history workspace described below.
+> **Release status:** v2.5.2 is the current release. It adds Windows ARM64 and Linux ARM64 release packaging while retaining the existing productivity, recovery, synchronization, and revision-history workflows described below.
 
 - **Local snippet management** — Create, edit, delete, favorite, tag, browse, and select up to 200 currently loaded snippets for one all-or-nothing favorite, unfavorite, or delete action.
 - **Scalable local search** — Backend-composed substring-compatible search over title, content, description, and tags, with language/favorites filters, selectable Recently Updated/Recently Used ordering, bounded summary pages, Load More, CJK support, and lazy full-detail loading.
@@ -56,6 +56,10 @@ Snippet data is stored locally in SQLite and remains available offline. Optional
 - **Sync history** — The latest 20 successful technical synchronization records, kept separately from the notification inbox.
 
 > WebDAV v2 requires server support for strong ETags and conditional PUT. Its one-way cutover, immutable-object retention, conflict UI, and verification boundaries are documented in [Known limitations](docs/known-limitations.md). Keep an independent backup before activating a v1 directory and do not use old clients against it afterward.
+
+### What's New in v2.5.2
+
+- Added Windows ARM64 MSI/NSIS/portable and Linux ARM64 DEB/AppImage release jobs with architecture validation and distinct release asset names.
 
 ### What's New in v2.5.1
 
@@ -141,9 +145,11 @@ Download artifacts from [GitHub Releases](https://github.com/rainerosion/snipvau
 
 | Platform | Current workflow artifacts | Notes |
 |---|---|---|
-| Windows | `.msi`, NSIS `.exe`, portable `.exe` | Windows x64 workflow |
+| Windows x64 | `.msi`, NSIS `.exe`, portable `.exe` | Windows x64 workflow |
+| Windows ARM64 | ARM64 `.msi`, NSIS `.exe`, portable `.exe` | Select assets containing `windows-arm64` |
 | macOS | Universal `.dmg` | Release workflow builds `universal-apple-darwin` and verifies `x86_64` + `arm64` with `lipo` |
-| Linux | `.deb`, `.AppImage` | Ubuntu x64 workflow |
+| Linux amd64 | `.deb`, `.AppImage` | Ubuntu amd64 workflow |
+| Linux ARM64 | ARM64 `.deb`, `.AppImage` | Select assets containing `linux-arm64` |
 
 Tag releases attach `SHA256SUMS` and GitHub artifact attestations for published bundles. Manual release workflow runs are dry-run only and do not create a GitHub Release. SnipVault does not currently include an in-app updater; upgrades are downloaded manually from Releases.
 
@@ -240,7 +246,7 @@ Feature design and development changes must update the relevant development docu
 
 ### 功能特性
 
-> **发布状态：**v2.5.1 是当前正式版本，包含下文所述的第一阶段效率工作流、第二阶段恢复、本地快照、同步收件箱，以及独立版本历史工作区。
+> **发布状态：**v2.5.2 是当前正式版本，新增 Windows ARM64 与 Linux ARM64 发布打包，同时保留下文所述的效率工作流、恢复、同步和版本历史能力。
 
 - **本地片段管理** — 新建、编辑、删除、收藏、标签和 SQLite 持久化；可在当前已加载结果中选择最多 200 项，执行全有或全无的批量收藏、取消收藏或删除。
 - **可扩展本地搜索** — 后端组合标题、代码、描述和标签的子串兼容搜索与语言/收藏筛选；工具栏将筛选与排序分开显示，默认按“最近更新”排序，也可切换“最近使用”，并提供有界摘要页、加载更多、CJK 支持和完整详情懒加载。
@@ -262,6 +268,10 @@ Feature design and development changes must update the relevant development docu
 - **同步历史** — 仍单独保留最近 20 条成功同步技术记录，与通知收件箱分离。
 
 > WebDAV v2 要求服务器支持 strong ETag 和 conditional PUT。单向升级、不可变对象保留、冲突 UI 与验证边界见[已知限制](docs/known-limitations.md)。激活 v1 目录前请保留独立备份，激活后不要再让旧客户端访问该目录。
+
+### v2.5.2 更新内容
+
+- 新增 Windows ARM64 MSI/NSIS/portable 与 Linux ARM64 DEB/AppImage 发布任务，加入架构校验并使用独立的 Release 产物名称。
 
 ### v2.5.1 更新内容
 
@@ -347,9 +357,11 @@ npm run tauri:build
 
 | 平台 | 当前工作流产物 | 说明 |
 |---|---|---|
-| Windows | `.msi`、NSIS `.exe`、portable `.exe` | Windows x64 工作流 |
+| Windows x64 | `.msi`、NSIS `.exe`、portable `.exe` | Windows x64 工作流 |
+| Windows ARM64 | ARM64 `.msi`、NSIS `.exe`、portable `.exe` | 选择文件名包含 `windows-arm64` 的产物 |
 | macOS | Universal `.dmg` | Release workflow 构建 `universal-apple-darwin`，并用 `lipo` 校验 `x86_64` + `arm64` |
-| Linux | `.deb`、`.AppImage` | Ubuntu x64 工作流 |
+| Linux amd64 | `.deb`、`.AppImage` | Ubuntu amd64 工作流 |
+| Linux ARM64 | ARM64 `.deb`、`.AppImage` | 选择文件名包含 `linux-arm64` 的产物 |
 
 Tag 发布会附带 `SHA256SUMS` 和 GitHub artifact attestations。手动 release workflow 只做 dry-run，不创建 GitHub Release。当前没有应用内更新器，升级需手动从 Releases 下载。
 
