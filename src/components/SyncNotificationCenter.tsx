@@ -11,6 +11,7 @@ import { ModalSurface } from "./ModalSurface";
 interface SyncNotificationCenterProps {
   onClose: () => void;
   onSync: () => Promise<void>;
+  onOpenConflicts: () => void;
 }
 
 function formatDate(value: string): string {
@@ -61,6 +62,7 @@ function summary(notification: SyncNotification, t: ReturnType<typeof useTransla
 export function SyncNotificationCenter({
   onClose,
   onSync,
+  onOpenConflicts,
 }: SyncNotificationCenterProps) {
   const { t } = useTranslation();
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -160,6 +162,11 @@ export function SyncNotificationCenter({
                   )}
                 </div>
                 <div className="sync-notification-item-actions">
+                  {notification.category === "conflict" && (
+                    <button type="button" className="about-link" onClick={onOpenConflicts}>
+                      {t("conflicts.open")}
+                    </button>
+                  )}
                   {notification.retryable && (
                     <button type="button" className="about-link" onClick={() => void onSync()}>
                       {t("syncNotifications.syncNow")}

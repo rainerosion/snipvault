@@ -18,8 +18,9 @@ import { SnippetEditorLoadBoundary } from "./components/SnippetEditorLoadBoundar
 import { LazySnippetEditor } from "./components/LazySnippetEditor";
 import { SettingsPanel, type SettingsPanelHandle } from "./components/Settings";
 import { SyncNotificationCenter } from "./components/SyncNotificationCenter";
+import { ConflictCenter } from "./components/ConflictCenter";
 import { Dialog, DialogHandle } from "./components/Dialog";
-import { Snippet, SnippetForm, SnippetSummary, type QuickCaptureCompletion, type SnippetSort } from "./types";
+import { Snippet, SnippetForm, SnippetSummary, type QuickCaptureCompletion, type SnippetSort, type SyncConflictResolution, type SyncConflictReview } from "./types";
 import { localizeCommandError, normalizeCommandError } from "./utils/commandErrors";
 import { ThemeContext } from "./main";
 
@@ -115,6 +116,7 @@ export default function App() {
   const [sort, setSort] = useState<SnippetSort>("updated");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [conflictCenterOpen, setConflictCenterOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [focusSearchAfterPaletteClose, setFocusSearchAfterPaletteClose] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -642,6 +644,66 @@ export default function App() {
       }
     }
   }, [saving, isNew, form, selected, create, update, get, reloadSnippets, t]);
+
+  const handleConflictResolution = useCallback(async (
+    review: SyncConflictReview,
+    action: SyncConflictResolution,
+  ): Promise<boolean> => {
+    const affectsOpenDraft = selected?.id === review.conflict.source_snippet_id && !isNew && isDirty;
+    let effectiveAction = action;
+    let expectedSourceRevisionId = review.source_current_revision_id;
+
+    if (affectsOpenDraft) {
+      const draftAction = await dialogRef.current?.ask(t("dialog.unsavedChanges"));
+      if (draftAction === "save") {
+        if (!await handleSave()) return false;
+
+        // Saving creates a later local descendant, so the reviewed conflict must
+        // be closed as superseded rather than applying an older candidate over it.
+        const latest = await get(review.conflict.source_snippet_id);
+        effectiveAction = "review_superseded";
+        expectedSourceRevisionId = latest.revision_id;
+      } else if (draftAction === "discard") {
+        // Replacing both refs before resolution makes this an actual discard.
+        // It affects only the current source form, never unrelated dirty drafts.
+        try {
+          loadSnippet(await get(review.conflict.source_snippet_id));
+        } catch (cause) {
+          if (normalizeCommandError(cause).code === "not_found") {
+            resetToEmpty();
+          } else {
+            await dialogRef.current?.alert(localizeCommandError(cause, t));
+            return false;
+          }
+        }
+      } else {
+        return false;
+      }
+    }
+
+    const confirmationKey = effectiveAction === "apply_preserved"
+      ? "conflicts.confirmApply"
+      : effectiveAction === "recreate_preserved"
+        ? "conflicts.confirmCreate"
+        : effectiveAction === "keep_incoming"
+          ? "conflicts.confirmKeep"
+          : "conflicts.confirmReview";
+    if (await dialogRef.current?.confirm(t(confirmationKey)) !== true) return false;
+
+    try {
+      await invoke("resolve_sync_conflict", {
+        conflictId: review.conflict.conflict_id,
+        expectedSourceRevisionId,
+        action: effectiveAction,
+      });
+      await Promise.all([reloadSnippets(), reloadNotifications()]);
+      await reconcileAuthoritative();
+      return true;
+    } catch (cause) {
+      await dialogRef.current?.alert(localizeCommandError(cause, t));
+      return false;
+    }
+  }, [get, handleSave, isDirty, isNew, loadSnippet, reconcileAuthoritative, reloadNotifications, reloadSnippets, resetToEmpty, selected?.id, t]);
 
   const completeHistoryRestore = useCallback(async (
     generation: number,
@@ -1302,9 +1364,20 @@ export default function App() {
         commands={commandDefinitions}
         onClose={() => setCommandPaletteOpen(false)}
       />
+      {conflictCenterOpen && (
+        <ConflictCenter
+          theme={theme}
+          onClose={() => setConflictCenterOpen(false)}
+          onResolve={handleConflictResolution}
+        />
+      )}
       {notificationsOpen && (
         <SyncNotificationCenter
           onClose={() => setNotificationsOpen(false)}
+          onOpenConflicts={() => {
+            setNotificationsOpen(false);
+            setConflictCenterOpen(true);
+          }}
           onSync={async () => {
             await handleSync();
           }}
@@ -1324,6 +1397,7 @@ export default function App() {
             onClose={() => setSettingsOpen(false)}
             onSync={() => runManualSync("settings")}
             onRestoreSnapshot={handleSnapshotRestore}
+            onOpenConflicts={() => setConflictCenterOpen(true)}
           />
         </div>
       )}

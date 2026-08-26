@@ -6,7 +6,7 @@
 
 | 优先级 | 主要未解决问题 |
 |---|---|
-| P0 同步协议 | WebDAV v2 的 HTTP/SQLite 操作仍不是跨系统原子事务；strong ETag/conditional PUT 是硬服务器要求；immutable revisions/tombstones 没有 GC；冲突没有完整解决 UI |
+| P0 同步协议 | WebDAV v2 的 HTTP/SQLite 操作仍不是跨系统原子事务；strong ETag/conditional PUT 是硬服务器要求；immutable revisions/tombstones 没有 GC；冲突中心仅支持候选选择，不提供语义合并 |
 | P1 安全与隐私 | 平台凭据库可用性/授权与补偿恢复仍有平台和崩溃边界；loopback 测试例外允许 HTTP；CSP inline style 例外仍存在 |
 | P2 产品与工程 | WebDAV v2 已有 transport wire 与 fresh engine bootstrap 的 dedicated loopback coverage，但更宽的 cutover/hard-stop/CAS/crash/concurrency engine-loopback 矩阵及真实服务 compatibility、production Tauri smoke 仍缺；版本历史比较不是语义/三方 diff，tombstone 不可恢复且没有 revision GC；本地快照只在运行中的应用内按有限策略执行；搜索 fallback 在无 trigram 时退化为 LIKE；StreamLanguage 语言不是完整 Lezer parser；还缺桌面端 E2E 与真实跨平台凭据库测试；普通 CI 仅有 Linux full gate |
 | P3 发布 | 无应用内更新、无完整 Windows/macOS 签名/公证与真实签名产物验证；release dry-run/tag workflow 仍未在 GitHub Actions 中实跑验证 |
@@ -37,15 +37,17 @@ Ready v2 同步会从每个 manifest head 沿 parent links GET immutable objects
 
 影响：合法但很深的历史可能超时；当前没有 batch multi-get、packfile、增量 ancestry cache 或 compaction。deadline/CAS rounds 有界只保证停机，不是性能 SLA。
 
-### 1.5 Conflict copy 不是完整冲突解决流程
+### 1.5 Conflict Center 不是语义合并
 
-并发分支先按 ancestry；无祖先关系时，已经发布的远端 original 确定性胜出。远端覆盖 live 本地分支时，SQLite 会创建幂等 conflict copy/index；没有属性级或正文 semantic merge。
+并发分支先按 ancestry；无祖先关系时，已经发布的远端 original 确定性胜出。远端覆盖 live 本地分支时，SQLite 会创建幂等 conflict copy/index。Conflict Center 可本机分页审阅保留副本、规范 incoming 和可用共同祖先，并可明确保留规范结果、将保留内容作为正常 local descendant 应用，或在规范 head 是 tombstone 时另建 snippet；它不会改写 immutable objects，也不会修改远端 manifest。
 
-剩余边界：应用没有冲突列表、用于冲突解决的双方/祖先 diff、选择赢家、合并、标记已解决或归档 UI；副本标题目前使用固定英文 suffix。已实现的同片段历史并排比较不等于冲突解决流程或 semantic merge。若本地 tombstone 是落败分支，没有正文可生成 conflict copy。确定性排序保证收敛，不表达用户业务优先级。
+剩余边界：不存在属性级、正文 semantic merge、自由编辑的三方 merge 或跨设备同步的 resolved/reviewed 状态。共同祖先缺失、损坏、循环或超过有界遍历限制时不猜测 merge base。source 在审阅后已前进时只可标记本机 reviewed，不能覆盖后续内容；本地 tombstone 是落败分支时没有正文可生成 conflict copy。确定性排序保证收敛，不表达用户业务优先级；冲突副本标题仍使用固定英文 suffix。
 
 ### 1.6 数据库复制会复制 device ID
 
-`sync_identity` 是数据库级稳定 singleton。直接复制整个 `snippets.db` 到另一台设备会复制相同 device ID，v2 revision metadata 因而无法仅凭该字段区分克隆来源。当前没有“重新生成此设备身份”命令或 clone detection；恢复/克隆数据库后在两处继续独立编辑前，应先保留备份并理解该审计边界。
+`sync_identity` 是数据库级稳定 singleton。直接复制整个 `snippets.db` 到另一台设备会复制相同 device ID，v2 revision metadata 因而无法仅凭该字段区分克隆来源。设置中的 Device Identity Recovery 向导可以在用户明确确认后生成未来本地 revision 使用的新 identity，且不会显示 raw UUID、自动检测 clone、改写既有 history/head/outbox 或执行 remote repair/revocation。
+
+影响：用户仍需自行判断复制/恢复发生与哪台设备原始，并在两处独立写入前保留备份并手动轮换副本身份。既有 pending revision 与历史 attribution 有意保持不变；WebDAV v2 没有 device membership、retirement、fencing 或远端身份撤销协议。
 
 ### 1.7 Bootstrap 与旧客户端兼容边界
 
@@ -119,13 +121,13 @@ CSP 已启用本地 script、精确 IPC scheme，并禁用 `unsafe-eval`、远�
 
 ### 5.1 数据库升级备份是保留的恢复工件
 
-任何既有磁盘 v0/v1/v2/v3/v4/v5/v6 数据库升级到当前 schema v7 前都会创建并验证唯一 `pre-v7` online backup；迁移链任一步失败时恢复并重新验证原来源版本，同时保留失败数据库副本供人工诊断。成功升级后 preflight backup 也有意保留，不会由应用自动轮转或删除。
+任何既有磁盘 v0/v1/v2/v3/v4/v5/v6/v7 数据库升级到当前 schema v8 前都会创建并验证唯一 `pre-v8` online backup；迁移链任一步失败时恢复并重新验证原来源版本，同时保留失败数据库副本供人工诊断。成功升级后 preflight backup 也有意保留，不会由应用自动轮转或删除。
 
 影响：多次历史升级可能留下额外同级备份文件，需要用户在确认新版本数据正常且另有备份后人工归档。公开 IPC/错误不会返回这些绝对路径。
 
 ### 5.2 没有通用 migrations 目录
 
-当前已有 temp-DB 覆盖的 v0→v1→v2→v3→v4→v5→v6→v7 顺序路径、未来版本拒绝、重复初始化、transaction rollback，以及历史版本 preflight restore，但迁移代码仍集中在 [db.rs](../src-tauri/src/db.rs)，不是可声明式扩展的 migration framework。v5 的 `snippet_usage` 是有意本地化的 usage 元数据：它不进入 JSON、revision、outbox 或 WebDAV，既有片段升级后没有虚构 usage。v6 新建脱敏 `sync_notifications` 收件箱；v7 新建 `local_snapshots` catalog，实际 snapshot 文件由受控目录中的 [snapshots.rs](../src-tauri/src/snapshots.rs) 管理。每个未来 schema 版本仍必须新增专门步骤、全部历史 fixture、来源版本 backup/restore 和 import/WebDAV compatibility 测试。
+当前已有 temp-DB 覆盖的 v0→v1→v2→v3→v4→v5→v6→v7→v8 顺序路径、未来版本拒绝、重复初始化、transaction rollback，以及历史版本 preflight restore，但迁移代码仍集中在 [db.rs](../src-tauri/src/db.rs)，不是可声明式扩展的 migration framework。v5 的 `snippet_usage` 是有意本地化的 usage 元数据：它不进入 JSON、revision、outbox 或 WebDAV，既有片段升级后没有虚构 usage。v6 新建脱敏 `sync_notifications` 收件箱；v7 新建 `local_snapshots` catalog，实际 snapshot 文件由受控目录中的 [snapshots.rs](../src-tauri/src/snapshots.rs) 管理；v8 为 `sync_conflicts` 增加 local-only lifecycle/resolution 字段，并为 `sync_identity` 增加轮换时间。当前应用可把经过验证的紧邻 schema-v7 snapshot 恢复到 v8 活动连接，再受控执行 v7→v8 migration；更旧或未来 snapshot 仍不被当作可恢复输入。每个未来 schema 版本仍必须新增专门步骤、全部历史 fixture、来源版本 backup/restore 和 import/WebDAV compatibility 测试。
 
 ### 5.3 版本历史已产品化，但没有合并或保留治理
 

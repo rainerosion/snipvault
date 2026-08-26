@@ -243,6 +243,12 @@
           "markdownDescription": "Enables the frontend_ready command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_device_identity_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-device-identity-status",
+          "markdownDescription": "Enables the get_device_identity_status command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_revision_history_restore_outcome command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-revision-history-restore-outcome",
@@ -291,6 +297,12 @@
           "markdownDescription": "Enables the get_snippets command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_sync_conflict_review command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-sync-conflict-review",
+          "markdownDescription": "Enables the get_sync_conflict_review command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_sync_versions command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-sync-versions",
@@ -325,6 +337,12 @@
           "type": "string",
           "const": "allow-list-snippet-revisions",
           "markdownDescription": "Enables the list_snippet_revisions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_sync_conflicts command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-sync-conflicts",
+          "markdownDescription": "Enables the list_sync_conflicts command without any pre-configured scope."
         },
         {
           "description": "Enables the list_sync_notifications command without any pre-configured scope.",
@@ -381,6 +399,12 @@
           "markdownDescription": "Enables the request_revision_history_restore command without any pre-configured scope."
         },
         {
+          "description": "Enables the resolve_sync_conflict command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-resolve-sync-conflict",
+          "markdownDescription": "Enables the resolve_sync_conflict command without any pre-configured scope."
+        },
+        {
           "description": "Enables the restore_local_snapshot command without any pre-configured scope.",
           "type": "string",
           "const": "allow-restore-local-snapshot",
@@ -391,6 +415,12 @@
           "type": "string",
           "const": "allow-restore-snippet-revision",
           "markdownDescription": "Enables the restore_snippet_revision command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the rotate_device_identity command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-rotate-device-identity",
+          "markdownDescription": "Enables the rotate_device_identity command without any pre-configured scope."
         },
         {
           "description": "Enables the save_settings command without any pre-configured scope.",
@@ -525,6 +555,12 @@
           "markdownDescription": "Denies the frontend_ready command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_device_identity_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-device-identity-status",
+          "markdownDescription": "Denies the get_device_identity_status command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_revision_history_restore_outcome command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-revision-history-restore-outcome",
@@ -573,6 +609,12 @@
           "markdownDescription": "Denies the get_snippets command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_sync_conflict_review command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-sync-conflict-review",
+          "markdownDescription": "Denies the get_sync_conflict_review command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_sync_versions command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-sync-versions",
@@ -607,6 +649,12 @@
           "type": "string",
           "const": "deny-list-snippet-revisions",
           "markdownDescription": "Denies the list_snippet_revisions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_sync_conflicts command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-sync-conflicts",
+          "markdownDescription": "Denies the list_sync_conflicts command without any pre-configured scope."
         },
         {
           "description": "Denies the list_sync_notifications command without any pre-configured scope.",
@@ -663,6 +711,12 @@
           "markdownDescription": "Denies the request_revision_history_restore command without any pre-configured scope."
         },
         {
+          "description": "Denies the resolve_sync_conflict command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-resolve-sync-conflict",
+          "markdownDescription": "Denies the resolve_sync_conflict command without any pre-configured scope."
+        },
+        {
           "description": "Denies the restore_local_snapshot command without any pre-configured scope.",
           "type": "string",
           "const": "deny-restore-local-snapshot",
@@ -673,6 +727,12 @@
           "type": "string",
           "const": "deny-restore-snippet-revision",
           "markdownDescription": "Denies the restore_snippet_revision command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the rotate_device_identity command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-rotate-device-identity",
+          "markdownDescription": "Denies the rotate_device_identity command without any pre-configured scope."
         },
         {
           "description": "Denies the save_settings command without any pre-configured scope.",

@@ -78,10 +78,9 @@ pub(crate) fn try_exclusive_operation_guard() -> Result<MutexGuard<'static, ()>,
     try_sync_guard().map_err(SyncFailure::from)
 }
 
-fn sync_merge_internal(
+fn sync_merge_locked(
     skip_when_confirmation_required: bool,
 ) -> Result<Option<SyncResult>, SyncError> {
-    let _guard = try_sync_guard()?;
     let current_settings = crate::settings::get_settings();
     if skip_when_confirmation_required && current_settings.sync_confirmation_required {
         return Ok(None);
@@ -227,14 +226,20 @@ pub(crate) fn test_try_sync_lock() -> Result<(), SyncFailure> {
     Ok(())
 }
 
-pub fn sync_merge() -> Result<SyncResult, SyncFailure> {
-    sync_merge_internal(false)
+pub(crate) fn sync_scheduled_merge_while_exclusive_guarded(
+) -> Result<Option<SyncResult>, SyncFailure> {
+    sync_merge_locked(true).map_err(SyncFailure::from)
+}
+
+pub(crate) fn sync_merge_while_exclusive_guarded() -> Result<SyncResult, SyncFailure> {
+    sync_merge_locked(false)
         .map_err(SyncFailure::from)?
         .ok_or_else(|| SyncFailure::from(SyncError::busy()))
 }
 
-pub(crate) fn sync_scheduled_merge() -> Result<Option<SyncResult>, SyncFailure> {
-    sync_merge_internal(true).map_err(SyncFailure::from)
+pub fn sync_merge() -> Result<SyncResult, SyncFailure> {
+    let _guard = try_sync_guard().map_err(SyncFailure::from)?;
+    sync_merge_while_exclusive_guarded()
 }
 
 pub fn sync_to_webdav() -> Result<SyncResult, SyncFailure> {

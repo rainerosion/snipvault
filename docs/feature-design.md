@@ -19,6 +19,8 @@ flowchart TB
     SETTINGS[设置模态层] -. 覆盖 .-> MAIN
     HISTORY[独立版本历史窗口] -. 原生工作区 .-> EDITOR
     RESTORE[快照恢复向导] -. 嵌套设置 .-> SETTINGS
+    CONFLICT[冲突解决中心] -. 嵌套主窗口 .-> MAIN
+    IDENTITY[设备身份恢复向导] -. 嵌套设置 .-> SETTINGS
     INBOX[同步通知中心] -. 覆盖 .-> MAIN
     PALETTE[命令面板模态层] -. 覆盖 .-> MAIN
     DIALOG[全局对话框] -. 覆盖 .-> MAIN
@@ -29,7 +31,7 @@ flowchart TB
 - 左栏固定显示当前过滤结果；结果使用语义 list/listitem，每个片段有独立打开详情按钮、复选框以及同级收藏和删除按钮，不产生嵌套交互元素。复选框不打开详情；批量操作只针对当前已加载的至多 200 项。
 - 右栏在无选择时显示空状态；选择片段或新建草稿时懒加载编辑器。
 - 设置在同一个 WebView 中以 overlay 方式显示，不创建第二个系统窗口。
-- 设置、快照恢复、通知中心与全局 Dialog 共享模态栈，提供 dialog/alertdialog 语义、确定性初始焦点、焦点约束、背景隔离和关闭后焦点恢复；嵌套时只有最上层响应 Tab/Escape。版本历史是独立原生窗口，不属于该 DOM 模态栈：关闭会隐藏窗口以便复用，恢复确认和 Save/Discard/Cancel 始终回到主窗口处理。
+- 设置、快照恢复、设备身份恢复、冲突中心、通知中心与全局 Dialog 共享模态栈，提供 dialog/alertdialog 语义、确定性初始焦点、焦点约束、背景隔离和关闭后焦点恢复；嵌套时只有最上层响应 Tab/Escape。版本历史是独立原生窗口，不属于该 DOM 模态栈：关闭会隐藏窗口以便复用，恢复确认和 Save/Discard/Cancel 始终回到主窗口处理。
 
 主要编排位于 [App.tsx](../src/App.tsx)，视觉样式位于 [index.css](../src/index.css)。
 
@@ -60,7 +62,9 @@ flowchart TB
 | 设置 | 工具栏或托盘 | 使用共享权威脱敏设置、可编辑非敏感 draft、显式凭据操作、恢复状态、local SQLite snapshot 策略/管理、外部更新提示和未保存关闭保护 | [Settings.tsx](../src/components/Settings.tsx)、[useSettings.ts](../src/hooks/useSettings.ts) |
 | 本地快照与完整恢复 | 设置的 Manage snapshots | 创建/列出后端验证的本地 SQLite checkpoint；恢复前创建 emergency checkpoint，完整恢复活动 vault，设置/OS 凭据不变并暂停自动同步 | [RestoreWizard.tsx](../src/components/RestoreWizard.tsx)、[snapshots.rs](../src-tauri/src/snapshots.rs) |
 | 手动同步 | 工具栏、设置、托盘 | 三个入口执行同一个 WebDAV 合并；每个终态写一条脱敏通知，成功时统一刷新片段、设置、成功历史和 inbox | [App.tsx](../src/App.tsx)、[sync.rs](../src-tauri/src/sync.rs) |
-| 同步通知 | 工具栏铃铛 | 持久、去标识化的终态 inbox，显示未读、已读、关闭和可重试的 Sync now；background 不弹 modal | [SyncNotificationCenter.tsx](../src/components/SyncNotificationCenter.tsx)、[db.rs](../src-tauri/src/db.rs) |
+| 同步通知 | 工具栏铃铛 | 持久、去标识化的终态 inbox，显示未读、已读、关闭和可重试的 Sync now；冲突类记录可打开本机 Conflict Center，background 不弹 modal | [SyncNotificationCenter.tsx](../src/components/SyncNotificationCenter.tsx)、[ConflictCenter.tsx](../src/components/ConflictCenter.tsx)、[db.rs](../src-tauri/src/db.rs) |
+| 冲突解决中心 | 设置恢复区、冲突通知 | 分页查看本机 open conflict，按需比较保留本地副本、已发布的规范结果及可用共同祖先；只可明确选择保留规范结果、将保留内容作为当前规范 head 的新 descendant 应用，或在规范结果为 tombstone 时从保留副本新建独立片段。resolved/reviewed 管理状态仅存本机，不同步；不提供自由编辑、语义合并或远端清理 | [ConflictCenter.tsx](../src/components/ConflictCenter.tsx)、[App.tsx](../src/App.tsx)、[db.rs](../src-tauri/src/db.rs) |
+| 设备身份恢复 | 设置恢复区 | 针对用户确认的完整 vault 复制/迁移，显示不含 UUID 的创建/上次轮换时间并二次确认后仅生成未来本地 revision 的新 author identity；不探测克隆、不改写历史/head/outbox、不同步也不访问 WebDAV | [DeviceIdentityRecoveryWizard.tsx](../src/components/DeviceIdentityRecoveryWizard.tsx)、[commands.rs](../src-tauri/src/commands.rs)、[db.rs](../src-tauri/src/db.rs) |
 | 同步历史 | 设置页展开项 | 显示后端最近 20 条成功技术记录；与通知 inbox 分离 | [Settings.tsx](../src/components/Settings.tsx)、[db.rs](../src-tauri/src/db.rs) |
 | 托盘 | 系统托盘 | 显示窗口、从剪贴板快速捕获、同步、设置、自启、退出 | [tray.rs](../src-tauri/src/tray.rs) |
 | 单实例 | 再次启动程序 | 唤醒并聚焦已有窗口 | [main.rs](../src-tauri/src/main.rs) |
@@ -291,6 +295,34 @@ flowchart TD
     Q --> R[刷新摘要；回传 succeeded；隐藏 history；不自动同步]
 ```
 
+## 6.2 冲突解决与设备身份恢复
+
+### 冲突解决中心
+
+WebDAV v2 在发现无共同 ancestry 的 live 分支时，仍以已经发布的远端 original 作为规范结果，并把落败的本地 live 分支保留为独立 conflict copy。冲突中心不改变这个同步规则；它只审阅本地 `sync_conflicts` 索引指向的 immutable objects。列表初始读取最多 50 条 open 记录，选择后才读取正文和可用共同祖先。比较沿用版本历史的懒加载、受限、语法高亮、非换行的两路 viewer；缺少、损坏、循环或超出 ancestry 上限的共同祖先会如实显示为不可用，而不猜测合并基础。
+
+每次动作只向前端接收 conflict ID、加载时的 source head 和枚举 action；Rust 从 conflict record 派生 source、incoming 和 conflict-copy references，并在短 SQLite transaction 中再次校验。原始 revision object、conflict copy、manifest 和远端 object 均不会被改写。选择会产生以下结果：
+
+| source 当前状态 | 可选结果 | 持久化效果 |
+|---|---|---|
+| 仍为 incoming 的 live head | 保留规范版本 | 仅将本机 record 标为 resolved；不创建 no-op revision |
+| 仍为 incoming 的 live head | 应用保留版本 | 以 incoming 为 parent，在原 snippet 上创建普通 local descendant、object 和 outbox |
+| 仍为 incoming tombstone | 保留删除 | 仅将本机 record 标为 resolved；绝不复活原 snippet |
+| 仍为 incoming tombstone | 从保留副本新建片段 | 创建 fresh snippet ID 与普通 local revision；原 tombstone 保持不变 |
+| 已在检测后前进 | 标记已查看 | 仅将本机 record 标为 reviewed；不覆盖后续内容 |
+
+如果正在编辑的正是该 source，主窗口在最终确认前使用既有 Save / Discard / Cancel guard。Save 会先产生正常后续 revision，并把冲突作为 superseded 标记查看；Discard 会真正重新读取 source（若 source 已删除则清空该表单）后再执行选中的动作；Cancel 不执行任何改变。其他片段的 dirty draft 始终保留。`resolved`/`reviewed`、时间和 resolution kind 是本机管理元数据，不进入 revision payload、outbox 或 WebDAV；真正应用/新建产生的普通 revision 仍按既有同步流发布。这里没有三方自由编辑、word-level 或 semantic merge，也没有远端对象删除。
+
+### 设备身份恢复
+
+完整复制或迁移 `snippets.db` 会连同数据库单例 `sync_identity` 一起复制。设置恢复区的向导不会显示 raw UUID，也不能自动检测哪份数据库为原始副本；用户必须理解范围并通过第二个 Dialog 明确确认。成功后 Rust 自己生成 UUID，只更新 singleton 的 `device_id` 和 `last_rotated_at`：既有 head、immutable object、outbox、revision ID、parent、时间、remote manifest/marker/vault identity 都不改写，也不会生成虚构 revision。
+
+轮换按 `WebDAV exclusive operation guard → snapshot mutation guard → short SQLite transaction` 顺序进行；运行中的同步安全返回 busy。操作不发 HTTP、不启动同步、不改变 Settings 或 OS 凭据。之后第一次真实 local create/update/delete/import/restore 才会读取新 identity，因此当前草稿保持不变、已有 pending work 和历史归属保持原样。WebDAV v2 没有 remote identity repair、revocation 或 clone-detection 协议。
+
+设置还会明确提示 WebDAV v2 不能安全执行远端 compaction：immutable objects 与 tombstones 无限期保留，用户不得手工删除它们。详见[已知限制](known-limitations.md#13-remote-revisions-与-tombstones-无限期保留)。
+
+## 7. 删除和收藏
+
 ## 7. 删除和收藏
 
 ### 7.1 删除
@@ -302,7 +334,7 @@ flowchart TD
 3. 只有 IPC 成功后，如果删除的是当前片段才清空编辑状态；失败时保留 selection、form 和 dirty snapshot，并显示本地化错误。
 4. 成功后重新加载列表；若删除已完成但权威 reload 失败，明确提示“更改已保存但刷新失败”，不会把它表述为删除失败。
 
-SQLite v5 的 tombstone 由 production WebDAV v2 作为不可变 deletion revision 上传，并同时保存在本地 durable `revision_objects` 中。其他设备把该 tombstone 作为 head 时会删除对应 live row/FTS 并保留删除 ancestry；本地和远端 tombstone 当前无限期保留。历史时间线会将 tombstone 明确标为已删除并允许只读检视/比较，但第一版不允许恢复 tombstone，也不提供自动 GC 或完整冲突解决 UI。
+SQLite v5 的 tombstone 由 production WebDAV v2 作为不可变 deletion revision 上传，并同时保存在本地 durable `revision_objects` 中。其他设备把该 tombstone 作为 head 时会删除对应 live row/FTS 并保留删除 ancestry；本地和远端 tombstone 当前无限期保留。历史时间线会将 tombstone 明确标为已删除并允许只读检视/比较，但第一版不允许恢复 tombstone，也不提供自动 GC；冲突场景只能按第 6.2 节在保留副本上新建独立 snippet，绝不恢复原 ID。
 
 ### 7.2 批量整理
 

@@ -219,10 +219,15 @@ fn persist_terminal_notification(payload: &SyncEventPayload) {
 }
 
 fn run_sync(source: SyncSource) -> Option<SyncEventPayload> {
+    let _restore_guard = crate::snapshots::restore_guard();
+    let _webdav_guard = match webdav::try_exclusive_operation_guard() {
+        Ok(guard) => guard,
+        Err(error) => return Some(SyncEventPayload::error(source, CommandError::sync(&error))),
+    };
     let sync_result = if source == SyncSource::Background {
-        webdav::sync_scheduled_merge()
+        webdav::sync_scheduled_merge_while_exclusive_guarded()
     } else {
-        webdav::sync_merge().map(Some)
+        webdav::sync_merge_while_exclusive_guarded().map(Some)
     };
     let payload = match sync_result {
         Ok(None) => return None,

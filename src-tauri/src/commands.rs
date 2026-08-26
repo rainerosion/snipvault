@@ -454,6 +454,76 @@ pub fn compare_snippet_revisions(
 }
 
 #[command]
+pub fn list_sync_conflicts(
+    window: WebviewWindow,
+    state: Option<String>,
+    cursor: Option<String>,
+    limit: Option<usize>,
+) -> Result<db::ConflictPage, CommandError> {
+    require_window(&window, MAIN_WINDOW_LABEL)?;
+    db::list_sync_conflicts(state.as_deref(), cursor.as_deref(), limit).map_err(|error| {
+        log::error!("list_sync_conflicts failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn get_sync_conflict_review(
+    window: WebviewWindow,
+    conflict_id: String,
+) -> Result<db::SyncConflictReview, CommandError> {
+    require_window(&window, MAIN_WINDOW_LABEL)?;
+    db::get_sync_conflict_review(&conflict_id).map_err(|error| {
+        log::error!("get_sync_conflict_review failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn resolve_sync_conflict(
+    window: WebviewWindow,
+    conflict_id: String,
+    expected_source_revision_id: Option<String>,
+    action: db::SyncConflictResolution,
+) -> Result<db::SyncConflictResolutionResult, CommandError> {
+    require_window(&window, MAIN_WINDOW_LABEL)?;
+    let _mutation_guard = crate::snapshots::mutation_guard();
+    db::resolve_sync_conflict(&conflict_id, expected_source_revision_id.as_deref(), action).map_err(
+        |error| {
+            log::error!("resolve_sync_conflict failed");
+            CommandError::mutation(&error)
+        },
+    )
+}
+
+#[command]
+pub fn get_device_identity_status(
+    window: WebviewWindow,
+) -> Result<db::DeviceIdentityStatus, CommandError> {
+    require_window(&window, MAIN_WINDOW_LABEL)?;
+    db::get_device_identity_status().map_err(|error| {
+        log::error!("get_device_identity_status failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
+pub fn rotate_device_identity(
+    window: WebviewWindow,
+) -> Result<db::DeviceIdentityRotation, CommandError> {
+    require_window(&window, MAIN_WINDOW_LABEL)?;
+    let _sync_guard = crate::webdav::try_exclusive_operation_guard().map_err(|error| {
+        log::warn!("rotate_device_identity blocked by sync operation");
+        CommandError::sync(&error)
+    })?;
+    let _mutation_guard = crate::snapshots::mutation_guard();
+    db::rotate_device_identity().map_err(|error| {
+        log::error!("rotate_device_identity failed");
+        CommandError::database(&error)
+    })
+}
+
+#[command]
 pub fn restore_snippet_revision(
     window: WebviewWindow,
     id: String,
@@ -879,6 +949,7 @@ pub fn save_settings(
     secret_action: SecretAction,
     app: AppHandle,
 ) -> Result<SettingsView, CommandError> {
+    let _restore_guard = crate::snapshots::restore_guard();
     let _write_guard = settings_write_guard();
     let current = settings::get_settings();
     let candidate = new_settings.apply_to(&current);

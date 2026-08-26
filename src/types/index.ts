@@ -86,6 +86,59 @@ export interface RevisionPage {
   next_cursor: string | null;
 }
 
+export interface ConflictPage {
+  items: SyncConflictSummary[];
+  next_cursor: string | null;
+}
+
+export type SyncConflictState = "open" | "resolved" | "reviewed";
+export type SyncConflictResolution =
+  | "keep_incoming"
+  | "apply_preserved"
+  | "recreate_preserved"
+  | "review_superseded";
+
+export interface SyncConflictSummary {
+  conflict_id: string;
+  source_snippet_id: string;
+  conflict_snippet_id: string;
+  detected_at: string;
+  state: SyncConflictState;
+  resolution_kind:
+    | "kept_incoming"
+    | "applied_preserved"
+    | "recreated_preserved"
+    | "reviewed_superseded"
+    | null;
+  resolved_at: string | null;
+  source_deleted: boolean;
+  source_current_revision_id: string | null;
+}
+
+export interface SyncConflictReview {
+  conflict: SyncConflictSummary;
+  incoming: RevisionContent;
+  preserved_local: RevisionContent;
+  common_ancestor: RevisionContent | null;
+  source_current_revision_id: string | null;
+  source_deleted: boolean;
+}
+
+export interface SyncConflictResolutionResult {
+  state: SyncConflictState;
+  resolution_kind: NonNullable<SyncConflictSummary["resolution_kind"]>;
+  resolution_revision_id: string | null;
+}
+
+export interface DeviceIdentityStatus {
+  created_at: string;
+  last_rotated_at: string | null;
+}
+
+export interface DeviceIdentityRotation {
+  rotated_at: string;
+}
+
 export interface LocalSnapshot {
   id: string;
   created_at: string;

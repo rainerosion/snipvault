@@ -13,7 +13,7 @@ use std::sync::Mutex;
 
 static DB: OnceCell<Mutex<Connection>> = OnceCell::new();
 
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 const EXPORT_FORMAT_ID: &str = "snipvault.snippets";
 const EXPORT_SCHEMA_VERSION: u32 = 1;
 const OUTBOX_KIND_UPSERT: &str = "upsert";
@@ -182,6 +182,10 @@ fn restore_preflight_backup(
     Ok(())
 }
 
+pub fn migrate_connection_to_current(conn: &mut Connection) -> SqliteResult<()> {
+    initialize_connection(conn)
+}
+
 fn initialize_connection(conn: &mut Connection) -> SqliteResult<()> {
     let mut version = schema_version(conn)?;
     if version > SCHEMA_VERSION {
@@ -214,6 +218,10 @@ fn initialize_connection(conn: &mut Connection) -> SqliteResult<()> {
     }
     if version == 6 {
         migrate_to_v7(conn)?;
+        version = 7;
+    }
+    if version == 7 {
+        migrate_to_v8(conn)?;
     }
 
     Ok(())
@@ -758,7 +766,57 @@ impl std::fmt::Display for MutationError {
 
 impl std::error::Error for MutationError {}
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct DeviceIdentityStatus {
+    pub created_at: String,
+    pub last_rotated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct DeviceIdentityRotation {
+    pub rotated_at: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct SyncConflictSummary {
+    pub conflict_id: String,
+    pub source_snippet_id: String,
+    pub conflict_snippet_id: String,
+    pub detected_at: String,
+    pub state: String,
+    pub resolution_kind: Option<String>,
+    pub resolved_at: Option<String>,
+    pub source_deleted: bool,
+    pub source_current_revision_id: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct SyncConflictReview {
+    pub conflict: SyncConflictSummary,
+    pub incoming: RevisionContent,
+    pub preserved_local: RevisionContent,
+    pub common_ancestor: Option<RevisionContent>,
+    pub source_current_revision_id: Option<String>,
+    pub source_deleted: bool,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncConflictResolution {
+    KeepIncoming,
+    ApplyPreserved,
+    RecreatePreserved,
+    ReviewSuperseded,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct SyncConflictResolutionResult {
+    pub state: String,
+    pub resolution_kind: String,
+    pub resolution_revision_id: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct RevisionHead {
     pub snippet_id: String,
     pub revision_id: String,
@@ -1160,6 +1218,54 @@ fn local_device_id(conn: &Connection) -> SqliteResult<String> {
     )
 }
 
+pub fn get_device_identity_status() -> SqliteResult<DeviceIdentityStatus> {
+    with_db(|conn| {
+        conn.query_row(
+            "SELECT created_at, last_rotated_at FROM sync_identity WHERE singleton=1",
+            [],
+            |row| {
+                let status = DeviceIdentityStatus {
+                    created_at: row.get(0)?,
+                    last_rotated_at: row.get(1)?,
+                };
+                require_rfc3339(&status.created_at, 0, "identity created_at")?;
+                if let Some(rotated_at) = &status.last_rotated_at {
+                    require_rfc3339(rotated_at, 1, "identity last_rotated_at")?;
+                }
+                Ok(status)
+            },
+        )
+    })
+}
+
+pub fn rotate_device_identity() -> SqliteResult<DeviceIdentityRotation> {
+    with_db_mut(|conn| {
+        let tx = conn.transaction()?;
+        let singleton_count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM sync_identity WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )?;
+        if singleton_count != 1 {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "sync identity singleton is invalid".into(),
+            ));
+        }
+        let rotated_at = chrono::Utc::now().to_rfc3339();
+        let affected = tx.execute(
+            "UPDATE sync_identity SET device_id=?1, last_rotated_at=?2 WHERE singleton=1",
+            rusqlite::params![uuid::Uuid::new_v4().to_string(), rotated_at],
+        )?;
+        if affected != 1 {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "sync identity rotation did not update exactly one row".into(),
+            ));
+        }
+        tx.commit()?;
+        Ok(DeviceIdentityRotation { rotated_at })
+    })
+}
+
 fn pending_usage(conn: &Connection) -> SqliteResult<(usize, usize)> {
     let (count, bytes): (i64, i64) = conn.query_row(
         "SELECT COUNT(*), COALESCE(SUM(payload_bytes), 0) FROM revision_outbox",
@@ -1235,6 +1341,29 @@ fn migrate_to_v7(conn: &mut Connection) -> SqliteResult<()> {
              ON local_snapshots(created_at DESC, id DESC);",
     )?;
     tx.pragma_update(None, "user_version", 7)?;
+    tx.commit()
+}
+
+fn migrate_to_v8(conn: &mut Connection) -> SqliteResult<()> {
+    let tx = conn.transaction()?;
+    tx.execute_batch(
+        "ALTER TABLE sync_identity ADD COLUMN last_rotated_at TEXT;
+
+         ALTER TABLE sync_conflicts ADD COLUMN state TEXT NOT NULL DEFAULT 'open'
+             CHECK(state IN ('open', 'resolved', 'reviewed'));
+         ALTER TABLE sync_conflicts ADD COLUMN resolved_at TEXT;
+         ALTER TABLE sync_conflicts ADD COLUMN resolution_kind TEXT
+             CHECK(resolution_kind IN (
+                 'kept_incoming',
+                 'applied_preserved',
+                 'recreated_preserved',
+                 'reviewed_superseded'
+             ));
+         ALTER TABLE sync_conflicts ADD COLUMN resolution_revision_id TEXT;
+         CREATE INDEX sync_conflicts_state_detected_idx
+             ON sync_conflicts(state, detected_at DESC, conflict_id DESC);",
+    )?;
+    tx.pragma_update(None, "user_version", 8)?;
     tx.commit()
 }
 
@@ -1471,6 +1600,228 @@ fn revision_content_from_object(
     })
 }
 
+fn conflict_summary_from_row(row: &Row<'_>) -> SqliteResult<SyncConflictSummary> {
+    let summary = SyncConflictSummary {
+        conflict_id: row.get(0)?,
+        source_snippet_id: row.get(1)?,
+        conflict_snippet_id: row.get(2)?,
+        detected_at: row.get(3)?,
+        state: row.get(4)?,
+        resolution_kind: row.get(5)?,
+        resolved_at: row.get(6)?,
+        source_deleted: decode_bool(row, 7)?,
+        source_current_revision_id: row.get(8)?,
+    };
+    if !validate_revision_token(&summary.conflict_id)
+        || validate_history_snippet_id(&summary.source_snippet_id).is_err()
+        || validate_history_snippet_id(&summary.conflict_snippet_id).is_err()
+        || !matches!(summary.state.as_str(), "open" | "resolved" | "reviewed")
+        || summary.resolution_kind.as_deref().is_some_and(|kind| {
+            !matches!(
+                kind,
+                "kept_incoming"
+                    | "applied_preserved"
+                    | "recreated_preserved"
+                    | "reviewed_superseded"
+            )
+        })
+        || summary
+            .source_current_revision_id
+            .as_deref()
+            .is_some_and(|value| !validate_revision_token(value))
+    {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "stored sync conflict is invalid".into(),
+        ));
+    }
+    require_rfc3339(&summary.detected_at, 3, "conflict detected_at")?;
+    if let Some(resolved_at) = &summary.resolved_at {
+        require_rfc3339(resolved_at, 6, "conflict resolved_at")?;
+    }
+    Ok(summary)
+}
+
+pub fn list_sync_conflicts(
+    state: Option<&str>,
+    cursor: Option<&str>,
+    limit: Option<usize>,
+) -> SqliteResult<ConflictPage> {
+    let state = state
+        .map(|value| match value {
+            "open" | "resolved" | "reviewed" => Ok(value),
+            _ => Err(rusqlite::Error::InvalidParameterName(
+                "invalid conflict state".into(),
+            )),
+        })
+        .transpose()?;
+    let limit = limit.unwrap_or(30).clamp(1, MAX_REVISION_HISTORY_PAGE_SIZE);
+    let cursor = cursor
+        .map(|value| {
+            if !validate_revision_token(value) {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "invalid sync conflict cursor".into(),
+                ));
+            }
+            Ok(value)
+        })
+        .transpose()?;
+    with_db(|conn| {
+        let mut statement = conn.prepare(
+            "SELECT c.conflict_id, c.source_snippet_id, c.conflict_snippet_id, c.detected_at,
+                    c.state, c.resolution_kind, c.resolved_at,
+                    COALESCE(h.deleted, 1), h.revision_id
+             FROM sync_conflicts c
+             LEFT JOIN snippet_heads h ON h.snippet_id=c.source_snippet_id
+             WHERE (?1 IS NULL OR c.state=?1)
+               AND (?2 IS NULL OR (c.detected_at, c.conflict_id) < (
+                    SELECT detected_at, conflict_id FROM sync_conflicts WHERE conflict_id=?2
+               ))
+             ORDER BY c.detected_at DESC, c.conflict_id DESC
+             LIMIT ?3",
+        )?;
+        let rows = statement.query_map(
+            rusqlite::params![state, cursor, (limit + 1) as i64],
+            conflict_summary_from_row,
+        )?;
+        let mut items = rows.collect::<SqliteResult<Vec<_>>>()?;
+        let next_cursor = if items.len() > limit {
+            let cursor = items[limit - 1].conflict_id.clone();
+            items.truncate(limit);
+            Some(cursor)
+        } else {
+            None
+        };
+        Ok(ConflictPage { items, next_cursor })
+    })
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct ConflictPage {
+    pub items: Vec<SyncConflictSummary>,
+    pub next_cursor: Option<String>,
+}
+
+fn conflict_root_revision_id(conn: &Connection, conflict_snippet_id: &str) -> SqliteResult<String> {
+    let root_revision_id: String = conn.query_row(
+        "SELECT revision_id FROM revision_objects
+         WHERE snippet_id=?1 AND parent_revision_id IS NULL
+         ORDER BY revision_time ASC, revision_id ASC LIMIT 1",
+        [conflict_snippet_id],
+        |row| row.get(0),
+    )?;
+    if !validate_revision_token(&root_revision_id) {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "preserved conflict branch is invalid".into(),
+        ));
+    }
+    Ok(root_revision_id)
+}
+
+fn common_ancestor_revision_id(
+    conn: &Connection,
+    snippet_id: &str,
+    left_revision_id: &str,
+    right_revision_id: &str,
+) -> SqliteResult<Option<String>> {
+    let mut left_seen = HashSet::new();
+    let mut current = Some(left_revision_id.to_string());
+    let mut bytes = 0_usize;
+    while let Some(revision_id) = current {
+        if !left_seen.insert(revision_id.clone()) || left_seen.len() > MAX_SYNC_ANCESTRY_OBJECTS {
+            return Ok(None);
+        }
+        let object = load_revision_object_on_connection(conn, snippet_id, &revision_id)?;
+        bytes = bytes.saturating_add(object.payload_bytes);
+        if bytes > MAX_SYNC_ANCESTRY_BYTES {
+            return Ok(None);
+        }
+        current = object.parent_revision_id;
+    }
+
+    let mut right_seen = HashSet::new();
+    let mut current = Some(right_revision_id.to_string());
+    while let Some(revision_id) = current {
+        if !right_seen.insert(revision_id.clone()) || right_seen.len() > MAX_SYNC_ANCESTRY_OBJECTS {
+            return Ok(None);
+        }
+        if left_seen.contains(&revision_id) {
+            return Ok(Some(revision_id));
+        }
+        let object = load_revision_object_on_connection(conn, snippet_id, &revision_id)?;
+        bytes = bytes.saturating_add(object.payload_bytes);
+        if bytes > MAX_SYNC_ANCESTRY_BYTES {
+            return Ok(None);
+        }
+        current = object.parent_revision_id;
+    }
+    Ok(None)
+}
+
+pub fn get_sync_conflict_review(conflict_id: &str) -> SqliteResult<SyncConflictReview> {
+    if !validate_revision_token(conflict_id) {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "invalid sync conflict request".into(),
+        ));
+    }
+    with_db(|conn| {
+        let conflict = conn.query_row(
+            "SELECT c.conflict_id, c.source_snippet_id, c.conflict_snippet_id, c.detected_at,
+                    c.state, c.resolution_kind, c.resolved_at,
+                    COALESCE(h.deleted, 1), h.revision_id
+             FROM sync_conflicts c
+             LEFT JOIN snippet_heads h ON h.snippet_id=c.source_snippet_id
+             WHERE c.conflict_id=?1",
+            [conflict_id],
+            conflict_summary_from_row,
+        )?;
+        let (local_revision_id, incoming_revision_id): (String, String) = conn.query_row(
+            "SELECT local_revision_id, incoming_revision_id FROM sync_conflicts WHERE conflict_id=?1",
+            [conflict_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let incoming = revision_content_from_object(
+            load_revision_object_on_connection(
+                conn,
+                &conflict.source_snippet_id,
+                &incoming_revision_id,
+            )?,
+            conflict.source_current_revision_id.as_deref(),
+        )?;
+        let root_id = conflict_root_revision_id(conn, &conflict.conflict_snippet_id)?;
+        let preserved_local = revision_content_from_object(
+            load_revision_object_on_connection(conn, &conflict.conflict_snippet_id, &root_id)?,
+            None,
+        )?;
+        let common_ancestor = common_ancestor_revision_id(
+            conn,
+            &conflict.source_snippet_id,
+            &local_revision_id,
+            &incoming_revision_id,
+        )
+        .ok()
+        .flatten()
+        .map(|revision_id| {
+            let object = load_revision_object_on_connection(
+                conn,
+                &conflict.source_snippet_id,
+                &revision_id,
+            )?;
+            revision_content_from_object(object, conflict.source_current_revision_id.as_deref())
+        })
+        .transpose()
+        .ok()
+        .flatten();
+        Ok(SyncConflictReview {
+            source_current_revision_id: conflict.source_current_revision_id.clone(),
+            source_deleted: conflict.source_deleted,
+            conflict,
+            incoming,
+            preserved_local,
+            common_ancestor,
+        })
+    })
+}
+
 pub fn list_snippet_revisions(
     snippet_id: &str,
     cursor: Option<&str>,
@@ -1632,6 +1983,209 @@ pub fn restore_snippet_revision(
         .map_err(mutation_into_sqlite)?;
         tx.commit()?;
         Ok(restored)
+    });
+    result.map_err(mutation_from_sqlite)
+}
+
+pub fn resolve_sync_conflict(
+    conflict_id: &str,
+    expected_source_revision_id: Option<&str>,
+    action: SyncConflictResolution,
+) -> Result<SyncConflictResolutionResult, MutationError> {
+    if !validate_revision_token(conflict_id)
+        || expected_source_revision_id.is_some_and(|value| !validate_revision_token(value))
+    {
+        return Err(MutationError::Sqlite(
+            rusqlite::Error::InvalidParameterName(
+                "invalid sync conflict resolution request".into(),
+            ),
+        ));
+    }
+    let result = with_db_mut(|conn| {
+        let tx = conn.transaction()?;
+        let (source_snippet_id, incoming_revision_id, conflict_snippet_id, state): (
+            String,
+            String,
+            String,
+            String,
+        ) = tx.query_row(
+            "SELECT source_snippet_id, incoming_revision_id, conflict_snippet_id, state
+             FROM sync_conflicts WHERE conflict_id=?1",
+            [conflict_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+        if state != "open" {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "sync conflict is not open".into(),
+            ));
+        }
+        let head: Option<(String, bool)> = tx
+            .query_row(
+                "SELECT revision_id, deleted FROM snippet_heads WHERE snippet_id=?1",
+                [&source_snippet_id],
+                |row| Ok((row.get(0)?, decode_bool(row, 1)?)),
+            )
+            .optional()?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let (resolution_kind, resolution_revision_id) = match action {
+            SyncConflictResolution::KeepIncoming => {
+                let Some((head_id, _)) = &head else {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "sync conflict source is unavailable".into(),
+                    ));
+                };
+                if Some(head_id.as_str()) != expected_source_revision_id
+                    || head_id != &incoming_revision_id
+                {
+                    return Err(mutation_into_sqlite(MutationError::StaleRevision {
+                        current_revision_id: head_id.clone(),
+                    }));
+                }
+                ("kept_incoming", None)
+            }
+            SyncConflictResolution::ApplyPreserved => {
+                let Some((head_id, deleted)) = &head else {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "sync conflict source is unavailable".into(),
+                    ));
+                };
+                if *deleted {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "deleted source must be recreated as a new snippet".into(),
+                    ));
+                }
+                if Some(head_id.as_str()) != expected_source_revision_id
+                    || head_id != &incoming_revision_id
+                {
+                    return Err(mutation_into_sqlite(MutationError::StaleRevision {
+                        current_revision_id: head_id.clone(),
+                    }));
+                }
+                let root_id = conflict_root_revision_id(&tx, &conflict_snippet_id)?;
+                let preserved = revision_content_from_object(
+                    load_revision_object_on_connection(&tx, &conflict_snippet_id, &root_id)?,
+                    None,
+                )?
+                .snippet
+                .ok_or_else(|| {
+                    rusqlite::Error::InvalidParameterName(
+                        "preserved conflict branch has no live content".into(),
+                    )
+                })?;
+                let mut resolved = preserved;
+                let current = get_snippet_on_connection(&tx, &source_snippet_id)?;
+                resolved.id = source_snippet_id.clone();
+                resolved.created_at = current.created_at;
+                resolved.updated_at = now.clone();
+                resolved.revision_id = uuid::Uuid::new_v4().to_string();
+                validate_snippet(&resolved).map_err(rusqlite::Error::InvalidParameterName)?;
+                let payload = canonical_revision_payload(&resolved, false)?;
+                let hash = sha256_hex(payload.as_bytes());
+                let device_id = local_device_id(&tx)?;
+                write_snippet_row(&tx, &resolved)?;
+                insert_revision(
+                    &tx,
+                    &source_snippet_id,
+                    Some(head_id),
+                    &resolved.revision_id,
+                    &device_id,
+                    &hash,
+                    &resolved.updated_at,
+                    false,
+                    OUTBOX_KIND_UPSERT,
+                    REVISION_ORIGIN_LOCAL,
+                    &payload,
+                    None,
+                    true,
+                )
+                .map_err(mutation_into_sqlite)?;
+                ("applied_preserved", Some(resolved.revision_id))
+            }
+            SyncConflictResolution::RecreatePreserved => {
+                let Some((head_id, deleted)) = &head else {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "sync conflict source is unavailable".into(),
+                    ));
+                };
+                if !deleted {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "live source must apply its preserved branch".into(),
+                    ));
+                }
+                if Some(head_id.as_str()) != expected_source_revision_id
+                    || head_id != &incoming_revision_id
+                {
+                    return Err(mutation_into_sqlite(MutationError::StaleRevision {
+                        current_revision_id: head_id.clone(),
+                    }));
+                }
+                let root_id = conflict_root_revision_id(&tx, &conflict_snippet_id)?;
+                let mut preserved = revision_content_from_object(
+                    load_revision_object_on_connection(&tx, &conflict_snippet_id, &root_id)?,
+                    None,
+                )?
+                .snippet
+                .ok_or_else(|| {
+                    rusqlite::Error::InvalidParameterName(
+                        "preserved conflict branch has no live content".into(),
+                    )
+                })?;
+                preserved.id = uuid::Uuid::new_v4().to_string();
+                preserved.created_at = now.clone();
+                preserved.updated_at = now.clone();
+                preserved.revision_id.clear();
+                validate_snippet(&preserved).map_err(rusqlite::Error::InvalidParameterName)?;
+                let created = create_snippet_on_connection(&tx, &preserved, REVISION_ORIGIN_LOCAL)
+                    .map_err(mutation_into_sqlite)?;
+                ("recreated_preserved", Some(created.revision_id))
+            }
+            SyncConflictResolution::ReviewSuperseded => {
+                let Some((head_id, _)) = &head else {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "sync conflict source is unavailable".into(),
+                    ));
+                };
+                if Some(head_id.as_str()) != expected_source_revision_id {
+                    return Err(mutation_into_sqlite(MutationError::StaleRevision {
+                        current_revision_id: head_id.clone(),
+                    }));
+                }
+                if head_id == &incoming_revision_id {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "current sync conflict has a resolvable canonical source".into(),
+                    ));
+                }
+                ("reviewed_superseded", None)
+            }
+        };
+        let target_state = if resolution_kind == "reviewed_superseded" {
+            "reviewed"
+        } else {
+            "resolved"
+        };
+        let updated = tx.execute(
+            "UPDATE sync_conflicts
+             SET state=?2, resolved_at=?3, resolution_kind=?4, resolution_revision_id=?5
+             WHERE conflict_id=?1 AND state='open'",
+            rusqlite::params![
+                conflict_id,
+                target_state,
+                now,
+                resolution_kind,
+                resolution_revision_id
+            ],
+        )?;
+        if updated != 1 {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "sync conflict was changed concurrently".into(),
+            ));
+        }
+        tx.commit()?;
+        Ok(SyncConflictResolutionResult {
+            state: target_state.to_string(),
+            resolution_kind: resolution_kind.to_string(),
+            resolution_revision_id,
+        })
     });
     result.map_err(mutation_from_sqlite)
 }

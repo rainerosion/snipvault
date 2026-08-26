@@ -24,6 +24,7 @@ import { localizeCommandError } from "../utils/commandErrors";
 import { ACCENT_PRESETS } from "../theme";
 import { Dialog, type DialogHandle } from "./Dialog";
 import { RestoreWizard } from "./RestoreWizard";
+import { DeviceIdentityRecoveryWizard } from "./DeviceIdentityRecoveryWizard";
 import type { LocalSnapshot, SnapshotStatus } from "../types";
 import { ModalSurface } from "./ModalSurface";
 
@@ -37,6 +38,7 @@ interface SettingsPanelProps {
   onClose: () => void;
   onSync: () => Promise<SyncCompletionEvent>;
   onRestoreSnapshot?: (snapshotId: string) => Promise<boolean>;
+  onOpenConflicts?: () => void;
 }
 
 export interface SettingsPanelHandle {
@@ -69,7 +71,7 @@ function isWebDavDraftDirty(
 export const SettingsPanel = forwardRef<
   SettingsPanelHandle,
   SettingsPanelProps
->(function SettingsPanel({ onClose, onSync, onRestoreSnapshot }, ref) {
+> (function SettingsPanel({ onClose, onSync, onRestoreSnapshot, onOpenConflicts }, ref) {
   const { t } = useTranslation();
   const { setLanguage } = useContext(LanguageContext);
   const {
@@ -97,9 +99,11 @@ export const SettingsPanel = forwardRef<
   const [secretInput, setSecretInput] = useState("");
   const [secretAction, setSecretAction] = useState<SecretAction>({ action: "keep" });
   const [showHistory, setShowHistory] = useState(false);
+  const [expandedHistoryIds, setExpandedHistoryIds] = useState<Set<string>>(() => new Set());
   const [snapshotStatus, setSnapshotStatus] = useState<SnapshotStatus | null>(null);
   const [snapshotsLoading, setSnapshotsLoading] = useState(false);
   const [restoreWizardOpen, setRestoreWizardOpen] = useState(false);
+  const [identityRecoveryOpen, setIdentityRecoveryOpen] = useState(false);
   const dialogRef = useRef<DialogHandle>(null);
   const draftRef = useRef<SettingsDraft | null>(null);
   const baselineRef = useRef<SettingsDraft | null>(null);
@@ -184,23 +188,30 @@ export const SettingsPanel = forwardRef<
       t("settings.syncHistoryDirectionOther", { direction }),
     [syncHistoryDirectionLabels, t],
   );
-  const formatHistoryCounts = useCallback(
+  const formatHistorySummary = useCallback(
     (version: {
-      snippet_count: number;
       uploaded_count: number;
       downloaded_count: number;
       deleted_count: number;
       conflict_count: number;
-    }) =>
-      t("settings.syncHistoryCounts", {
-        total: version.snippet_count,
-        uploaded: version.uploaded_count,
-        downloaded: version.downloaded_count,
-        deleted: version.deleted_count,
-        conflicts: version.conflict_count,
-      }),
+    }) => {
+      const changes = [
+        version.uploaded_count > 0 && t("settings.syncHistoryUploaded", { count: version.uploaded_count }),
+        version.downloaded_count > 0 && t("settings.syncHistoryDownloaded", { count: version.downloaded_count }),
+        version.deleted_count > 0 && t("settings.syncHistoryDeleted", { count: version.deleted_count }),
+      ].filter(Boolean);
+      return changes.length > 0 ? changes.join(" · ") : t("settings.syncHistoryNoChanges");
+    },
     [t],
   );
+  const toggleHistoryDetails = useCallback((id: string) => {
+    setExpandedHistoryIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
   const dirty = useMemo(
     () =>
       !!draft &&
@@ -824,28 +835,87 @@ export const SettingsPanel = forwardRef<
               ) : syncHistory.length === 0 ? (
                 <div className="sync-history-empty">{t("settings.noHistory")}</div>
               ) : (
-                syncHistory.map((version) => (
-                  <div key={version.id} className="sync-history-item">
-                    <span className="sync-history-time">
-                      {formatDate(version.synced_at)}
-                    </span>
-                    <span className="sync-history-dir">
-                      {formatHistoryDirection(version.direction)}
-                    </span>
-                    <span className="sync-history-count">
-                      {formatHistoryCounts(version)}
-                    </span>
-                    <span className="sync-history-protocol">
-                      {t("settings.syncHistoryProtocol", {
-                        protocol: version.protocol_version,
-                        generation: version.generation,
-                      })}
-                    </span>
-                    {version.message && (
-                      <span className="sync-history-msg">{version.message}</span>
-                    )}
-                  </div>
-                ))
+                syncHistory.map((version) => {
+                  const expanded = expandedHistoryIds.has(version.id);
+                  const detailsId = `sync-history-details-${version.id}`;
+                  return (
+                    <div key={version.id} className="sync-history-item">
+                      <div className="sync-history-primary">
+                        <div className="sync-history-outcome">
+                          <span className="sync-history-count sr-only">
+                            {t("settings.syncHistoryCounts", {
+                              total: version.snippet_count,
+                              uploaded: version.uploaded_count,
+                              downloaded: version.downloaded_count,
+                              deleted: version.deleted_count,
+                              conflicts: version.conflict_count,
+                            })}
+                          </span>
+                          <span className="sync-history-protocol sr-only">
+                            {t("settings.syncHistoryProtocol", {
+                              protocol: version.protocol_version,
+                              generation: version.generation,
+                            })}
+                          </span>
+                          {version.message && (
+                            <span className="sync-history-msg sr-only">{version.message}</span>
+                          )}
+                          <span className="sync-history-dir">
+                            {formatHistoryDirection(version.direction)}
+                          </span>
+                          <span className="sync-history-summary">
+                            {formatHistorySummary(version)}
+                          </span>
+                        </div>
+                        <time className="sync-history-time" dateTime={version.synced_at}>
+                          {formatDate(version.synced_at)}
+                        </time>
+                      </div>
+                      {version.conflict_count > 0 && (
+                        <span className="sync-history-conflict">
+                          {t("settings.syncHistoryConflicts", { count: version.conflict_count })}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        className="sync-history-details-toggle"
+                        aria-expanded={expanded}
+                        aria-controls={detailsId}
+                        aria-label={t("settings.syncHistoryDetailsLabel", {
+                          time: formatDate(version.synced_at),
+                        })}
+                        onClick={() => toggleHistoryDetails(version.id)}
+                      >
+                        {expanded ? t("settings.syncHistoryHideDetails") : t("settings.syncHistoryShowDetails")}
+                      </button>
+                      {expanded && (
+                        <dl id={detailsId} className="sync-history-details">
+                          <div>
+                            <dt>{t("settings.syncHistoryTimestamp")}</dt>
+                            <dd>{formatDate(version.synced_at)}</dd>
+                          </div>
+                          <div>
+                            <dt>{t("settings.syncHistoryTotal")}</dt>
+                            <dd>{t("settings.syncHistoryTotalValue", { count: version.snippet_count })}</dd>
+                          </div>
+                          <div>
+                            <dt>{t("settings.syncHistoryProtocolLabel")}</dt>
+                            <dd>{t("settings.syncHistoryProtocol", {
+                              protocol: version.protocol_version,
+                              generation: version.generation,
+                            })}</dd>
+                          </div>
+                          {version.message && (
+                            <div className="sync-history-details-message">
+                              <dt>{t("settings.syncHistoryMessage")}</dt>
+                              <dd>{version.message}</dd>
+                            </div>
+                          )}
+                        </dl>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           )}
@@ -918,6 +988,18 @@ export const SettingsPanel = forwardRef<
             <button type="button" className="btn-sync-history" onClick={openSnapshotWizard}>
               {t("settings.manageSnapshots")}
             </button>
+            {onOpenConflicts && (
+              <button type="button" className="about-link" onClick={onOpenConflicts}>
+                {t("conflicts.open")}
+              </button>
+            )}
+            <button
+              type="button"
+              className="about-link"
+              onClick={() => setIdentityRecoveryOpen(true)}
+            >
+              {t("identityRecovery.open")}
+            </button>
             <button
               type="button"
               className="about-link"
@@ -932,8 +1014,14 @@ export const SettingsPanel = forwardRef<
               {t("settings.openSnapshotsFolder")}
             </button>
           </div>
+          <p className="settings-recovery-notice">{t("settings.remoteCompactionUnavailable")}</p>
         </section>
 
+        {identityRecoveryOpen && (
+          <DeviceIdentityRecoveryWizard
+            onClose={() => setIdentityRecoveryOpen(false)}
+          />
+        )}
         {restoreWizardOpen && (
           <RestoreWizard
             snapshots={snapshotStatus?.snapshots ?? []}

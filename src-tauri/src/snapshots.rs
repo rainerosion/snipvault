@@ -15,6 +15,7 @@ const SNAPSHOT_POLL_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const SNAPSHOT_WORKER_FAILURE_BACKOFF: Duration = Duration::from_secs(60 * 60);
 const MAX_SNAPSHOT_LIST: usize = 100;
 const SCHEMA_VERSION: i64 = db::SCHEMA_VERSION;
+const PREVIOUS_SCHEMA_VERSION: i64 = SCHEMA_VERSION - 1;
 
 static SNAPSHOT_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 static RESTORE_WRITE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
@@ -23,6 +24,10 @@ pub fn mutation_guard() -> std::sync::MutexGuard<'static, ()> {
     RESTORE_WRITE_LOCK
         .lock()
         .unwrap_or_else(|error| error.into_inner())
+}
+
+pub fn restore_guard() -> std::sync::MutexGuard<'static, ()> {
+    mutation_guard()
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -136,13 +141,16 @@ fn file_checksum(path: &Path) -> Result<(u64, String), rusqlite::Error> {
     Ok((size, format!("{:x}", hasher.finalize())))
 }
 
-fn validate_snapshot_connection(conn: &Connection) -> Result<(i64, usize), rusqlite::Error> {
+fn validate_snapshot_connection_at_version(
+    conn: &Connection,
+    allowed_schema_version: i64,
+) -> Result<(i64, usize), rusqlite::Error> {
     let integrity: String = conn.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
     if integrity != "ok" {
         return Err(snapshot_error("snapshot integrity validation failed"));
     }
     let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if schema_version != SCHEMA_VERSION {
+    if schema_version != allowed_schema_version {
         return Err(snapshot_error("snapshot schema is unsupported"));
     }
     let snippet_count: i64 = conn.query_row(
@@ -160,12 +168,20 @@ fn validate_snapshot_connection(conn: &Connection) -> Result<(i64, usize), rusql
     Ok((schema_version, snippet_count))
 }
 
-fn inspect_snapshot(path: &Path) -> Result<SnapshotInspection, rusqlite::Error> {
+fn validate_snapshot_connection(conn: &Connection) -> Result<(i64, usize), rusqlite::Error> {
+    validate_snapshot_connection_at_version(conn, SCHEMA_VERSION)
+}
+
+fn inspect_snapshot_at_version(
+    path: &Path,
+    allowed_schema_version: i64,
+) -> Result<SnapshotInspection, rusqlite::Error> {
     let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )?;
-    let (schema_version, snippet_count) = validate_snapshot_connection(&connection)?;
+    let (schema_version, snippet_count) =
+        validate_snapshot_connection_at_version(&connection, allowed_schema_version)?;
     let (byte_count, checksum) = file_checksum(path)?;
     Ok(SnapshotInspection {
         schema_version,
@@ -173,6 +189,10 @@ fn inspect_snapshot(path: &Path) -> Result<SnapshotInspection, rusqlite::Error> 
         snippet_count,
         checksum,
     })
+}
+
+fn inspect_snapshot(path: &Path) -> Result<SnapshotInspection, rusqlite::Error> {
+    inspect_snapshot_at_version(path, SCHEMA_VERSION)
 }
 
 fn local_snapshot_from_catalog(entry: CatalogEntry) -> LocalSnapshot {
@@ -206,7 +226,8 @@ fn decode_catalog_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<CatalogEntr
     if !valid_snapshot_id(&entry.id)
         || entry.filename != filename_for_id(&entry.id)
         || !is_safe_filename(&entry.filename)
-        || entry.schema_version != SCHEMA_VERSION
+        || entry.schema_version < PREVIOUS_SCHEMA_VERSION
+        || entry.schema_version > SCHEMA_VERSION
         || entry.checksum.len() != 64
         || !entry.checksum.bytes().all(|byte| byte.is_ascii_hexdigit())
         || chrono::DateTime::parse_from_rfc3339(&entry.created_at).is_err()
@@ -235,7 +256,14 @@ fn find_catalog_entry(conn: &Connection, id: &str) -> Result<CatalogEntry, rusql
 
 fn verify_catalog_entry(entry: &CatalogEntry) -> Result<PathBuf, rusqlite::Error> {
     let path = snapshot_path(&entry.filename)?;
-    let inspection = inspect_snapshot(&path)?;
+    let allowed_version = if entry.schema_version == SCHEMA_VERSION {
+        SCHEMA_VERSION
+    } else if entry.schema_version == PREVIOUS_SCHEMA_VERSION {
+        PREVIOUS_SCHEMA_VERSION
+    } else {
+        return Err(snapshot_error("snapshot schema is unsupported"));
+    };
+    let inspection = inspect_snapshot_at_version(&path, allowed_version)?;
     if inspection.schema_version != entry.schema_version
         || inspection.byte_count != entry.byte_count
         || inspection.snippet_count != entry.snippet_count
@@ -426,7 +454,15 @@ fn reinsert_catalog_entries(
     transaction.commit()
 }
 
-fn copy_snapshot_to_active_connection(source_path: &Path) -> Result<(), rusqlite::Error> {
+fn copy_snapshot_to_active_connection(
+    source_path: &Path,
+    source_schema_version: i64,
+    expected_checksum: &str,
+) -> Result<(), rusqlite::Error> {
+    let (byte_count, checksum) = file_checksum(source_path)?;
+    if byte_count == 0 || checksum != expected_checksum {
+        return Err(snapshot_error("snapshot changed after verification"));
+    }
     let source = Connection::open_with_flags(
         source_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
@@ -435,6 +471,9 @@ fn copy_snapshot_to_active_connection(source_path: &Path) -> Result<(), rusqlite
         let backup = Backup::new(&source, active)?;
         backup.run_to_completion(128, Duration::from_millis(5), None)?;
         drop(backup);
+        if source_schema_version == PREVIOUS_SCHEMA_VERSION {
+            db::migrate_connection_to_current(active)?;
+        }
         validate_snapshot_connection(active)?;
         Ok(())
     })
@@ -446,9 +485,7 @@ pub fn restore_snapshot(id: &str) -> Result<RestoreResult, rusqlite::Error> {
         .map_err(|_| snapshot_error("snapshot operation unavailable"))?;
     let _sync_guard = crate::webdav::try_exclusive_operation_guard()
         .map_err(|_| snapshot_error("snapshot operation unavailable"))?;
-    let _mutation_guard = RESTORE_WRITE_LOCK
-        .lock()
-        .map_err(|_| snapshot_error("snapshot operation unavailable"))?;
+    let _mutation_guard = restore_guard();
     let target = db::with_db(|conn| find_catalog_entry(conn, id))?;
     let catalog_before_restore = db::with_db(list_catalog_entries)?;
     let target_path = match verify_catalog_entry(&target) {
@@ -473,11 +510,15 @@ pub fn restore_snapshot(id: &str) -> Result<RestoreResult, rusqlite::Error> {
         .map_err(|_| snapshot_error("snapshot restore state could not be saved"))?;
 
     let restore_result = (|| {
-        copy_snapshot_to_active_connection(&target_path)?;
+        copy_snapshot_to_active_connection(&target_path, target.schema_version, &target.checksum)?;
         db::with_db_mut(|conn| reinsert_catalog_entries(conn, &restored_catalog))
     })();
     if let Err(error) = restore_result {
-        let rollback = copy_snapshot_to_active_connection(&emergency_path);
+        let rollback = copy_snapshot_to_active_connection(
+            &emergency_path,
+            emergency_entry.schema_version,
+            &emergency_entry.checksum,
+        );
         if !confirmation_was_required {
             if let Err(reset_error) = crate::settings::confirm_manual_sync() {
                 log::error!("Could not restore the prior sync confirmation state: {reset_error}");

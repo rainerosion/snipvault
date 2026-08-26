@@ -24,7 +24,9 @@ SnipVault 已具备本地 SQLite、immutable revision/outbox、WebDAV v2、CodeM
 | 版本历史、比较与恢复 | 检视同一片段的 immutable 历史，在恢复前审阅精确代码变化 | 从主编辑器打开或复用独立原生工作区；分页只读紧凑时间线，live 预览以标题、language badge、受限 passive tag summary 和只读 favorite state 组成的紧凑 editor chrome 显示，不提供历史 mutation。live 对比使用编辑器同款语法颜色、原始行号和 Git/Beyond Compare 式两路逐行对齐。宽度至少 1200px 时使用弹性双栏；历史窗口最小宽度的 1000–1199px 区间使用已加载比较的“比较基线 / 所选版本”单 pane 切换，默认所选版本且不重新请求或计算 diff。代码不自动换行，不会产生布局强制的外层横向滚动；只有真实长行可在所属 source pane 内横向滚动，详细双栏比较只同步纵向滚动。选中版本保持中性编辑器 surface，以窄 marker 提示变化；本地字符/行数/matrix/时间上限超限时退回完整并排源代码；只能把历史 live revision 恢复为以当前 head 为 parent 的新 local descendant，因此历史对象不被改写且正常进入 outbox；tombstone 可检视/比较但不可恢复；恢复不会自动同步 |
 | 本地 SQLite 快照与完整恢复 | 在此设备建立可验证的完整 vault checkpoint，并可安全回退 | 可手动创建或启用 daily/weekly 策略，保留值仅为 7/30/90；后端创建并验证 SQLite online snapshot，恢复前先创建 emergency checkpoint，并在活动连接中恢复；快照和恢复不包含 `settings.json` 或 OS 凭据 |
 | 恢复后同步确认 | 防止旧 vault 状态被后台同步立即改写 | 完整恢复会暂停 scheduled WebDAV sync；只有工具栏、设置或系统托盘发起且成功的下一次手动同步才解除锁，不会自动同步 |
-| 同步通知中心 | 追溯同步成功、pending、冲突、失败、busy 与恢复后注意事项 | 工具栏铃铛显示未读数；收件箱持久化去标识化终态记录，支持已读、关闭和可重试的 Sync now；与只保留成功技术记录的同步历史分离，background 仍保持非模态 |
+| 同步通知中心 | 追溯同步成功、pending、冲突、失败、busy 与恢复后注意事项 | 工具栏铃铛显示未读数；收件箱持久化去标识化终态记录，支持已读、关闭和可重试的 Sync now；冲突记录可打开本机 Conflict Center，与只保留成功技术记录的同步历史分离，background 仍保持非模态 |
+| 冲突解决中心 | 审阅确定性保留副本并显式选择后续结果 | 设置恢复区或冲突通知打开；比较 preserved/incoming/可用 ancestor，并可保留规范版本、以规范 head 为 parent 应用保留内容，或在 tombstone winner 下从副本新建独立 snippet。管理状态只存本机，真实结果沿普通 revision/outbox 同步；没有自由编辑/semantic merge |
+| 设备身份恢复 | 处理用户已确认的完整 vault 复制/迁移后的未来 author attribution | 设置恢复区的嵌套向导二次确认后只轮换 `sync_identity`；历史/head/outbox 和远端状态保持原样，不自动探测 clone、不自动同步、不进行远端 repair/revocation |
 
 ```mermaid
 flowchart TD
@@ -41,6 +43,9 @@ flowchart TD
     SYNC[工具栏 / 设置 / 托盘 / background 同步] --> TERMINAL[脱敏终态记录]
     TERMINAL --> INBOX[notification inbox]
     INBOX --> BADGE[工具栏未读徽标与通知中心]
+    INBOX --> CONFLICTS[本机 Conflict Center]
+    CONFLICTS -->|选择保留内容| OUTBOX[普通 descendant / outbox]
+    SETTINGS --> IDENTITY[未来本地 revision 的 identity recovery]
 ```
 
 第二阶段的交互与限制以[功能设计](feature-design.md)、[架构设计](architecture.md)和[已知限制](known-limitations.md)为准。
@@ -52,11 +57,9 @@ flowchart TD
 3. **高级搜索与排序**：组合标签、时间、语言、收藏等筛选，按需提供保存搜索；任何相关性排序都必须保持 literal 搜索和 CJK fallback 正确性。
 4. **单片段/多格式分享导出**：支持 Markdown、代码文件和其他受控格式，不暴露任意本地路径给 WebView。
 
-## 规划中：第四阶段 — 多设备协作体验
+## 规划中：第四阶段 — 多设备协作协议演进
 
-1. **冲突解决中心**：展示同步冲突、双方和祖先差异，生成新的解决 revision；不改变既有 immutable remote objects。
-2. **设备身份恢复向导**：帮助处理复制或完整恢复本地数据库导致的设备身份重复问题。
-3. **版本化远端 GC/compaction**：仅在有完整协议、迁移、离线设备和并发兼容策略后考虑，不能手工删除远端 objects 或 tombstones。
+1. **版本化远端 GC/compaction**：仅在 v3 或更高版本提供 device membership/lifecycle、checkpoint lineage、offline acknowledgement 或 expiry、stale-writer fencing、可恢复条件删除和迁移策略后考虑；当前 v2 不得手工删除远端 objects 或 tombstones。
 
 ## 明确不优先的方向
 

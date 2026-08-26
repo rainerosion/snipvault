@@ -153,7 +153,7 @@ src-tauri/
 
 - **可复用展示和局部交互**：优先放到 `src/components/`。
 - **根业务流程、片段选择、跨组件状态**：当前集中在 [App.tsx](../src/App.tsx)；命令 registry、command enabled 状态、当前已加载项的 `Set<string>` 批量选择、dirty-editor guard 和捕获完成后的权威 reload 都必须继续通过该层协调，避免在命令面板/列表中复制业务逻辑。
-- **Tauri IPC 与片段状态**：放在 [useSnippets.ts](../src/hooks/useSnippets.ts)；`updated` 与 `recent` 排序字段都必须进入 request key，`recent` cursor 不得与 `updated` cursor 混用。usage 写入可 best-effort，但批量 mutation 必须直接等待结果。版本历史窗口可用窄的 direct revision IPC wrapper，但不得装载主列表 Hook 状态；新 window command 必须由 Rust 校验调用 window label。
+- **Tauri IPC 与片段状态**：放在 [useSnippets.ts](../src/hooks/useSnippets.ts)；`updated` 与 `recent` 排序字段都必须进入 request key，`recent` cursor 不得与 `updated` cursor 混用。usage 写入可 best-effort，但批量 mutation 必须直接等待结果。版本历史窗口可用窄的 direct revision IPC wrapper，但不得装载主列表 Hook 状态；Conflict Center 的 direct IPC 只可传 conflict ID、expected source head 和枚举 action，关联 snippet/revision 必须由 Rust 从 `sync_conflicts` 导出；新 window command 必须由 Rust 校验调用 window label。
 - **设置、同步状态与设置 IPC**：扩展 [useSettings.ts](../src/hooks/useSettings.ts) 中的 root `SettingsProvider` 和 injectable `SettingsApi`；消费者必须使用 provider，不得重新引入独立 `useSettings()` state 实例或绕过 provider 的 `get_settings` fallback。成功技术历史、持久脱敏 notification inbox 与 snapshot policy/status 都经此 provider 协调；notification reload 必须保留 request generation 保护，read/dismiss mutation 成功后要使旧 reload 失效。
 - **共享协议类型**：更新 [types/index.ts](../src/types/index.ts)，并同步核对 Rust 参数和序列化名称。
 - **外观与界面配色**：深浅偏好与 `sky | violet | emerald | amber | rose | white` 精选界面配色是独立的 persisted Settings 字段；类型、normalizer、启动镜像键和 `data-theme` / `data-accent` 写入集中在 [theme.ts](../src/theme.ts)。`ThemeProvider` 必须只消费根级 `SettingsProvider` 的权威 SettingsView；Settings 面板不得直接写 DOM attribute/localStorage 或成为第二个外观状态来源。六个精选值均须在 `index.css` 提供显式 dark × light 的 12 组完整 semantic token matrix（其中 `white` 的界面名称为“简约白”，并复现初始版本的中性深浅界面）。组件不得加入 palette-dependent raw 色值。不得把 preset 扩展为 raw CSS/hex 输入，也不得改变 syntax token、语言标签或状态语义。
@@ -240,7 +240,7 @@ src-tauri/
 
 ### 6.4 可访问交互约束
 
-Settings 和 Promise Dialog 必须复用 [ModalSurface.tsx](../src/components/ModalSurface.tsx)，不得增加第二套 document/window Tab/Escape trap。命令面板也必须复用它：使用稳定的 dialog label/description、初始搜索框焦点、listbox/option、`aria-activedescendant`、Arrow/Home/End/Enter 和关闭后的触发器焦点恢复；命令执行前先关闭面板。模态必须保留 topmost ownership、背景 inert/ARIA 和焦点恢复。关闭 Settings 的所有入口仍须通过异步 Save/Discard/Cancel guard。
+Settings 和 Promise Dialog 必须复用 [ModalSurface.tsx](../src/components/ModalSurface.tsx)，不得增加第二套 document/window Tab/Escape trap。Conflict Center、Device Identity Recovery、命令面板和恢复向导同样必须复用它：使用稳定的 dialog label/description、确定性初始焦点与 topmost ownership；Device Identity Recovery 的高影响轮换必须把最终确认委托给现有 Promise Dialog，不能由嵌套向导再创建竞争的焦点 trap。命令面板使用初始搜索框焦点、listbox/option、`aria-activedescendant`、Arrow/Home/End/Enter 和关闭后的触发器焦点恢复；命令执行前先关闭面板。模态必须保留背景 inert/ARIA 和焦点恢复。关闭 Settings 的所有入口仍须通过异步 Save/Discard/Cancel guard。
 
 列表项不得通过可点击 `div` 模拟按钮，也不得把收藏/删除嵌套在选择按钮内。批量复选框需要包含片段标题的可访问名称、可见 selected count 和最多 200 个当前已加载项的边界；勾选不应打开详情或干扰脏草稿导航。标签建议沿用 combobox/listbox/option 和 active-descendant 键盘模型；自定义 context menu 只可接管明确支持的可编辑文本目标，其他区域必须保留原生菜单。图标按钮同步中英文名称，二态按钮使用 `aria-pressed`，异步状态按场景使用 `aria-busy`/live region。
 
@@ -262,6 +262,8 @@ Settings 和 Promise Dialog 必须复用 [ModalSurface.tsx](../src/components/Mo
 7. 更新 [架构设计的 IPC 契约](architecture.md#6-ipc-契约) 和相关功能文档。
 
 批量 mutation 的 command 参数必须先受限、排序、去重并验证全部 live ID，再在一个 SQLite transaction 内处理；客户端不可用 `Promise.all` 拼接多个单项调用来伪造“批量”。收藏必须是幂等的显式设值，未改变项不生成 revision/object/outbox；删除为每一有效片段生成独立 tombstone。业务写入成功后，前端只做一次权威 reload；reload 失败应和 mutation 失败分开反馈。
+
+`src-tauri/src/commands.rs` 的新增 conflict/identity command 必须同时出现于 `main.rs` handler、[build.rs](../src-tauri/build.rs) manifest command 表和 main [default capability](../src-tauri/capabilities/default.json) 的最小 allow-list；不应把它们加入 [revision-history capability](../src-tauri/capabilities/revision-history.json)。所有五个 command 都需验证 main window label；`resolve_sync_conflict` 先取得 snapshot mutation guard，`rotate_device_identity` 先取得 WebDAV exclusive guard 再取得 mutation guard。
 
 ### 7.2 原生快速捕获和事件生命周期
 
@@ -317,19 +319,19 @@ Tauri 2 window event 使用 `getCurrentWindow().listen(...)`；异步注册必�
 
 ### 8.2 Schema 变更
 
-数据库使用 `PRAGMA user_version`，当前 schema v7，`initialize_connection()` 只按 `v0→v1→v2→v3→v4→v5→v6→v7` 顺序执行迁移：v1 建立业务表，v2 严格扫描既有行并建立/回填 FTS5 与 triggers，v3 保持 `snippets`/FTS 设计不变并增加稳定设备身份、revision head/tombstone、不可变 durable outbox、remote state、conflict index 和扩展 sync history，v4 增加 durable `revision_objects` 并从 outbox、当前 live heads 和 tombstones 回填 ancestry，v5 增加本机 `snippet_usage`、recent index 和 live-snippet 删除清理 trigger，v6 增加去标识化 `sync_notifications` inbox，v7 增加 `local_snapshots` catalog。既有磁盘 v0/v1/v2/v3/v4/v5/v6 在任何升级步骤前只创建并验证一个来源版本的 `pre-v7` online backup；任一步失败都会保留失败副本、恢复并重新验证原来源版本。真正新库、v7 重开和未来版本拒绝不创建升级备份。
+数据库使用 `PRAGMA user_version`，当前 schema v8，`initialize_connection()` 只按 `v0→v1→v2→v3→v4→v5→v6→v7→v8` 顺序执行迁移：v1 建立业务表，v2 严格扫描既有行并建立/回填 FTS5 与 triggers，v3 保持 `snippets`/FTS 设计不变并增加稳定设备身份、revision head/tombstone、不可变 durable outbox、remote state、conflict index 和扩展 sync history，v4 增加 durable `revision_objects` 并从 outbox、当前 live heads 和 tombstones 回填 ancestry，v5 增加本机 `snippet_usage`、recent index 和 live-snippet 删除清理 trigger，v6 增加去标识化 `sync_notifications` inbox，v7 增加 `local_snapshots` catalog，v8 为 `sync_conflicts` 增加仅本机的 lifecycle/resolution 字段，并为 `sync_identity` 增加 `last_rotated_at`。既有磁盘 v0/v1/v2/v3/v4/v5/v6/v7 在任何升级步骤前只创建并验证一个来源版本的 `pre-v8` online backup；任一步失败都会保留失败副本、恢复并重新验证原来源版本。真正新库、v8 重开和未来版本拒绝不创建升级备份。
 
 `snippet_usage` 只用于本机“最近使用”：打开详情、复制已保存正文和快速捕获可 best-effort 写入 `last_used_at`/计数，但不改变 snippet `updated_at`，也绝不能进入 revision payload/object、outbox、WebDAV、JSON 导出或导入。既有升级片段不伪造使用历史。删除 trigger 只清理本地 usage，不改变 tombstone/revision 语义。
 
 ### 8.3 本地快照、恢复与通知不变量
 
-[snapshots.rs](../src-tauri/src/snapshots.rs) 是完整 vault checkpoint 的唯一业务边界。创建时只能从活动 SQLite connection 执行 online backup 到受控 snapshots 目录中的 pending 文件；候选必须以独立 `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NOFOLLOW` 连接通过 integrity、exact schema、唯一 `sync_identity`、live count、file size 与流式 SHA-256 验证，才可原子 rename、写入 catalog 并在成功后执行 retention。文件名只能是后端生成的 canonical `snapshot-<uuid>.sqlite`，IPC 只返回 opaque ID 和安全摘要，不能暴露 filename、checksum 或绝对路径。
+[snapshots.rs](../src-tauri/src/snapshots.rs) 是完整 vault checkpoint 的唯一业务边界。创建时只能从活动 SQLite connection 执行 online backup 到受控 snapshots 目录中的 pending 文件；候选必须以独立 `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NOFOLLOW` 连接通过 integrity、允许的 current（v8）或紧邻 previous（v7）schema、唯一 `sync_identity`、live count、file size 与流式 SHA-256 验证，才可原子 rename、写入 catalog 并在成功后执行 retention。文件名只能是后端生成的 canonical `snapshot-<uuid>.sqlite`，IPC 只返回 opaque ID 和安全摘要，不能暴露 filename、checksum 或绝对路径。
 
-完整 restore 必须依次取得 snapshot serialization、WebDAV operation 与 restore/write gate，先重新验证目标、建立 verified emergency checkpoint，再由 SQLite `Backup` 写入既有活动 connection；不得以文件 copy/rename 覆盖打开的 DB。所有生产数据库 mutation—including snippet CRUD/import/usage/history restore、quick capture、remote plan/commit 与 notification read/dismiss/write—必须经 `snapshots::mutation_guard()`，避免 emergency checkpoint 与数据库替换之间丢失提交。restore 失败时应通过 emergency checkpoint 复原活动 connection；恢复成功后 catalog reconciliation、retention 失败或记录 `restore_required` 通知失败不能谎报已经提交的 vault restore 为失败。
+完整 restore 必须依次取得 snapshot serialization、WebDAV operation 与 restore/write gate，先重新验证目标、建立 verified emergency checkpoint，再由 SQLite `Backup` 写入既有活动 connection；不得以文件 copy/rename 覆盖打开的 DB。目标和 emergency 文件在每次 reopen/copy 前都要重新计算并比对 catalog 的流式 SHA-256，若验证后的文件被替换则拒绝安装。若源是唯一允许的 v7 snapshot，复制到活动 connection 后必须调用 `db::migrate_connection_to_current()` 执行受控 v7→v8 迁移，并在提交前重新通过 current-schema 验证。所有生产数据库 mutation—including snippet CRUD/import/usage/history restore、quick capture、conflict resolution、identity rotation、remote plan/commit 与 notification read/dismiss/write—必须经 `snapshots::mutation_guard()`，避免 emergency checkpoint 与数据库替换之间丢失提交。设置保存和完整同步（包含手动同步完成时清除 restore confirmation latch）也必须在 restore/write gate 内执行，避免恢复后的 `sync_confirmation_required` 被旧状态覆盖或被恢复前的同步误清除。restore 失败时应通过 emergency checkpoint 复原活动 connection；恢复成功后 catalog reconciliation、retention 失败或记录 `restore_required` 通知失败不能谎报已经提交的 vault restore 为失败。
 
 `sync_notifications` 是与 20 条成功 `sync_versions` 分离的本地隐私边界：只可持久化固定 source/status/category、稳定 error code/retryable、聚合计数、protocol/generation、时间与 read/dismiss metadata；绝不保存自由文本消息、URL、用户名、secret、远端响应、路径、片段正文或 revision/hash。写入最多保留最新 200 条，列表默认 50、上限 100。完整 SQLite snapshot 会包含 inbox 和 catalog；JSON export/import、WebDAV payload 与 OS credential store 均不包含它们。
 
-v2→v3 会为每条 live snippet 以固定 canonical JSON 字段顺序计算 SHA-256，并由 `id + content hash + updated_at` 生成确定性 `legacy-<sha256>` head；这些历史 head 不加入 outbox，避免升级时把整个现有库误当成待发布本地编辑。数据库 singleton device ID 只在 v3 migration 中生成一次，重复初始化必须保持稳定。
+`sync_identity` 在 v3 migration 首次生成；v8 的 Device Identity Recovery 只可由 Rust 生成替换 UUID，并只更新 singleton 的当前 identity/`last_rotated_at`。轮换必须严格取得 `webdav::try_exclusive_operation_guard() → snapshots::mutation_guard() → short db::with_db_mut()`，不发 HTTP、不启动 sync、也不重写 head/object/outbox/remote attribution；后续真实 local mutation 才读取新值。`sync_conflicts` 的 v8 lifecycle 是 local-only：candidate resolution 必须通过 conflict ID 和 expected source revision，由后端派生关联 ID、在一个短 transaction 再次校验 state/head，并确认 lifecycle `UPDATE` 恰好影响一行。保留规范结果不创建 no-op revision；应用/新建只复用正常 object/outbox 写入；source 已前进仅允许 reviewed，不能覆盖更晚内容。
 
 任何后续 schema 变更都必须：
 

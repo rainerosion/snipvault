@@ -135,7 +135,7 @@ flowchart LR
     TRAY -->|open-settings / autostart-toggled| APP
     CAPTURE -->|quick-capture-complete, only source/success/ID| APP
     SYNC -->|typed sync-complete| APP
-    DB --> SQLITE[(snippets.db<br/>v7 data + history + catalog + notifications)]
+    DB --> SQLITE[(snippets.db<br/>v8 data + history + recovery metadata + catalog + notifications)]
     SNAPSHOTS --> SNAPSHOT_FILES[(snapshots/<br/>opaque verified SQLite files)]
     SETTINGS --> JSON[(settings.json<br/>不含 secret)]
     CREDS --> KEYRING[(Windows Credential Manager<br/>macOS Keychain / Linux Secret Service)]
@@ -172,7 +172,8 @@ flowchart LR
 - 当前选中片段、是否新建、表单和原始表单快照。
 - 保存状态与脏数据检测；已有干净表单在 `App` 保存协调器中成功 no-op，不触发更新 IPC、revision 或 outbox。
 - 搜索词、语言筛选、收藏筛选、排序、分页请求和当前已加载项的批量选择。
-- 设置模态层、快照恢复、通知中心、命令面板、同步状态和全局 Dialog。
+- 设置模态层、快照恢复、设备身份恢复、冲突解决中心、通知中心、命令面板、同步状态和全局 Dialog。
+- 冲突中心从 `sync_conflicts` 读取最小摘要并按需加载保留本地副本、规范 incoming revision 与可用共同祖先；所有 action 由 `App` 先完成同一 source 的 dirty guard/最终确认，再以普通 local descendant/outbox（或 tombstone 情况下的新 snippet）提交。
 - 以 `open_revision_history` 打开或复用原生 `revision-history` 子窗口；从该窗口 pull restore request 并在主窗口复用 dirty guard、确认 Dialog 与权威 reconcile。
 - `Ctrl/Meta+N/S/E/K` WebView 快捷键，以及 Rust 原生 `Ctrl/Meta+Shift+V` 快速捕获完成协调。
 - 自定义文本右键菜单和剪贴板操作。
@@ -263,9 +264,9 @@ CodeMirror 的编辑 DOM 由库管理，但当前实现并不依靠 Shadow DOM �
 | [tray.rs](../src-tauri/src/tray.rs) | 托盘句柄、菜单构造/刷新、快速捕获/同步/设置菜单与图标事件、窗口唤醒和 `open-settings` / `autostart-toggled` 通知 |
 | [sync.rs](../src-tauri/src/sync.rs) | 来源标记的同步完成事件、所有终态的脱敏通知持久化、托盘同步适配、自动同步 scheduler、busy 快速重试和失败退避 |
 | [snapshots.rs](../src-tauri/src/snapshots.rs) | 后端派生的本地 SQLite 在线快照、完整验证/catalog、保留策略、恢复前紧急快照、在活动连接中恢复及快照 worker |
-| [commands.rs](../src-tauri/src/commands.rs) | `#[tauri::command]` IPC 边界、Rust-owned singleton history-window target/request/outcome 与 label-gated window commands、revision history/restore 和 snapshot/notification 适配、后端时间戳、usage/bulk/capture completion 适配、设置/凭据/自启动事务、受控 URL/目录打开、托盘状态刷新、导出文件、内部错误映射和启动打点 |
+| [commands.rs](../src-tauri/src/commands.rs) | `#[tauri::command]` IPC 边界、Rust-owned singleton history-window target/request/outcome 与 label-gated window commands、main-only conflict review/resolution 与 device identity recovery、revision history/restore 和 snapshot/notification 适配、后端时间戳、usage/bulk/capture completion 适配、设置/凭据/自启动事务、受控 URL/目录打开、托盘状态刷新、导出文件、内部错误映射和启动打点 |
 | [error.rs](../src-tauri/src/error.rs) | 可序列化 `CommandError`、稳定错误码（含 `snapshot`）、安全 fallback、retryable 与可选安全 details |
-| [db.rs](../src-tauri/src/db.rs) | SQLite v7 顺序迁移、通用升级前备份/失败恢复、严格解码、FTS5、revision head/tombstone/durable objects/outbox/remote state、revision history/compare/descendant restore、local-only usage、snapshot catalog、脱敏通知、双排序分页摘要/详情、原子 mutation/import、v2 sync seams 与成功技术历史 |
+| [db.rs](../src-tauri/src/db.rs) | SQLite v8 顺序迁移、通用升级前备份/失败恢复、严格解码、FTS5、revision head/tombstone/durable objects/outbox/remote state、local-only conflict lifecycle/review/resolution、future-only device identity rotation、revision history/compare/descendant restore、local-only usage、snapshot catalog、脱敏通知、双排序分页摘要/详情、原子 mutation/import、v2 sync seams 与成功技术历史 |
 | [settings.rs](../src-tauri/src/settings.rs) | 无 secret `Settings`、snapshot policy、post-restore `sync_confirmation_required` latch、`SettingsView` / `SettingsInput`、显式 secret action、旧 JSON 迁移、损坏文件恢复和原子持久化 |
 | [credentials.rs](../src-tauri/src/credentials.rs) | 可注入 `CredentialStore`、稳定 service/account、平台 keyring 实现和测试内存 fake |
 | [paths.rs](../src-tauri/src/paths.rs) | 安装模式判断、数据库/设置/导出/后端派生快照路径 |
@@ -290,9 +291,9 @@ CodeMirror 的编辑 DOM 由库管理，但当前实现并不依靠 Shadow DOM �
 - 托盘句柄：由 [tray.rs](../src-tauri/src/tray.rs) 持有的 `OnceCell<Arc<Mutex<Option<TrayIcon>>>>`
 - 启动计时：`OnceCell<Instant>` + `AtomicBool`
 - 同步协调：`Lazy<Mutex<()>>`，覆盖工具栏、设置、托盘和自动同步完整流程，并与完整 vault 恢复互斥
-- 快照协调：`snapshots.rs` 的 `SNAPSHOT_LOCK` 串行创建、验证、catalog 修剪与恢复；`RESTORE_WRITE_LOCK` 使 restore 与所有生产 SQLite mutation 串行
+- 快照协调：`snapshots.rs` 的 `SNAPSHOT_LOCK` 串行创建、验证、catalog 修剪与恢复；`RESTORE_WRITE_LOCK` 使 restore、设置保存与整个同步流程（含完成后的 restore confirmation latch 更新）以及所有生产 SQLite mutation 串行
 
-SQLite 只有一个连接，所有数据库操作通过 `with_db()` / `with_db_mut()` 和 Mutex 串行执行。v2 同步引擎只通过 `V2SyncStore` 调用短时 snapshot、validated remote-plan apply 和 published-revision commit；每次调用返回前已释放连接 guard，随后才可能执行 HTTP，因此网络请求不会持有 DB mutex。同一进程的完整 WebDAV 同步由独立 mutex 排他执行；完整 vault restore 的锁序固定为 snapshot serialization → WebDAV operation → restore/write gate → DB mutex。所有普通 snippet mutation、quick capture、remote plan/commit 以及 notification 写/读/关闭都会先取得 restore/write gate，因此 emergency checkpoint 与活动数据库替换之间不会丢失已提交写入。恢复使用 SQLite `Backup` 将经过 `SQLITE_OPEN_NOFOLLOW` 预验证的来源写入活动连接，绝不以文件替换打开中的数据库；restore 期间 catalog 先重新插入恢复前可见条目和 emergency 条目，再 best-effort 修剪 retention，避免旧 snapshot 覆盖 catalog 后使可用文件不可见。不同设备依靠远端 manifest 的 strong ETag 与 conditional PUT 进行乐观并发控制。
+SQLite 只有一个连接，所有数据库操作通过 `with_db()` / `with_db_mut()` 和 Mutex 串行执行。v2 同步引擎只通过 `V2SyncStore` 调用短时 snapshot、validated remote-plan apply 和 published-revision commit；每次调用返回前已释放连接 guard，随后才可能执行 HTTP，因此网络请求不会持有 DB mutex。同一进程的完整 WebDAV 同步由独立 mutex 排他执行；完整 vault restore 的锁序固定为 snapshot serialization → WebDAV operation → restore/write gate → DB mutex；单独的 device identity rotation 固定为 WebDAV exclusive guard → snapshot mutation guard → short DB transaction。restore/write gate 也覆盖 Settings 保存及完整 sync 的最终状态提交，防止恢复后的 manual-sync confirmation latch 被旧设置写回，或被恢复前已经完成的同步错误清除。所有普通 snippet mutation、quick capture、conflict resolution、remote plan/commit 以及 notification 写/读/关闭都会先取得 restore/write gate，因此 emergency checkpoint 与活动数据库替换之间不会丢失已提交写入。恢复使用 SQLite `Backup` 将经过 `SQLITE_OPEN_NOFOLLOW` 预验证的来源写入活动连接，绝不以文件替换打开中的数据库；每次 reopen/copy 前还会重新比较 catalog 的 SHA-256，验证后发生的文件替换会中止 restore。restore 期间 catalog 先重新插入恢复前可见条目和 emergency 条目，再 best-effort 修剪 retention，避免旧 snapshot 覆盖 catalog 后使可用文件不可见。不同设备依靠远端 manifest 的 strong ETag 与 conditional PUT 进行乐观并发控制。
 
 ## 5. 启动、窗口和托盘生命周期
 
@@ -414,6 +415,9 @@ sequenceDiagram
 | 片段 | `list_snippet_revisions` | 返回按 `(revision_time, revision_id)` 的有界 revision metadata 页与 cursor，不在列表返回正文 |
 | 片段 | `compare_snippet_revisions` | 读取并验证同一片段的两个 immutable revision，用于只读比较；tombstone 保持显式 deleted 状态 |
 | 片段 | `restore_snippet_revision` | 仅对历史 live revision 执行 optimistic-concurrency restore；创建当前 head 的新 local descendant/object/outbox，不重写历史、不自动同步 |
+| 冲突恢复 | `list_sync_conflicts` / `get_sync_conflict_review` | 仅主窗口读取 local-only `sync_conflicts` 摘要及其服务端绑定的 incoming、保留副本与有界共同祖先；通知收件箱仍不含片段/revision 标识 |
+| 冲突恢复 | `resolve_sync_conflict` | 仅主窗口，使用 expected current head 与短 transaction：保留规范结果不造 no-op revision；应用保留内容生成普通 descendant/outbox；tombstone 情况只能新建片段；已过期记录可本地标记 reviewed |
+| 身份恢复 | `get_device_identity_status` / `rotate_device_identity` | 仅主窗口；不暴露原始 UUID，rotation 以 WebDAV exclusive guard → snapshot mutation guard → 短 SQLite transaction 顺序，仅影响未来本地 revision |
 | 片段 | `record_snippet_usage` | 仅本机写入打开/复制后的 usage，不更改 snippet `updated_at` 或 revision/outbox |
 | 片段 | `set_snippets_favorite` | 接受最多 200 个已规范化 ID，以全有或全无 transaction 设为收藏/取消收藏；只有实际变化项写 revision/object/outbox |
 | 片段 | `delete_snippets` | 接受最多 200 个 ID，先验证全部 live row，再在单一 transaction 写各自 tombstone；任一失败完整回滚 |
@@ -559,6 +563,7 @@ erDiagram
         INTEGER singleton PK
         TEXT device_id UK
         TEXT created_at
+        TEXT last_rotated_at
     }
 
     SNIPPET_USAGE {
@@ -626,6 +631,10 @@ erDiagram
         TEXT incoming_revision_id
         TEXT conflict_snippet_id UK
         TEXT detected_at
+        TEXT state
+        TEXT resolved_at
+        TEXT resolution_kind
+        TEXT resolution_revision_id
     }
 
     SYNC_VERSIONS {
@@ -684,9 +693,13 @@ v2 同步 seam 包括一致 snapshot、完整预验证的 remote plan no-echo ap
 
 `sync_notifications` 是独立于成功技术历史的本地 operational inbox：成功、pending、conflict、failure、busy 与 full-vault restore 都只保存固定来源/状态/类别、稳定错误码与可重试性、聚合计数、protocol/generation、发生时间和 read/dismiss 状态。它不保存自由文本消息、URL、用户名、secret、远端响应、本地路径、snippet 内容或 revision/hash。写入 transaction 后按 `(occurred_at, id)` 只保留最新 200 条；IPC 列表只返回未关闭项，默认 50、最多 100。完整 SQLite snapshot 因为覆盖整个数据库而会包含这份本地 inbox，但它不被 JSON export 或 WebDAV 上传。
 
-`local_snapshots` 是 schema v7 的 catalog，不向 WebView 返回 filename/checksum/path。`snapshots.rs` 只接受 native 生成的 UUID/catalog ID，并要求 canonical `snapshot-<uuid>.sqlite` filename。在线 backup 先写入 snapshots directory 的 pending file，独立的 read-only/no-follow connection 验证 integrity、exact v7 schema、唯一 `sync_identity`、live count、size 和 SHA-256 后才 rename 发布并写 catalog。保留策略仅删除该受控目录中已 catalog 的旧 verified 文件，始终保留至少一个。恢复前重新验证目标，创建/验证 emergency checkpoint，置位 settings 中后端拥有的 sync latch，以 `Backup` 写入活动 SQLite connection 并验证；后续 failure 会尝试用 emergency checkpoint 恢复。快照是完整数据库 checkpoint，覆盖 snippets、FTS、revision/outbox/remote/conflict state、usage、identity、sync history/catalog/notifications，但不覆盖 `settings.json` 或 OS credential-store contents。
+`sync_conflicts` 保留 v2 reconcile 产生的 immutable revision references；v8 的 `state`、`resolved_at`、`resolution_kind` 与 `resolution_revision_id` 只描述本机 review lifecycle，不进入 revision payload/outbox/WebDAV。Conflict Center 先以 cursor 读取摘要，再按 conflict ID 加载 incoming、冲突副本 root 和有界共同祖先。resolution transaction 从 conflict record 导出所有 snippet/revision reference 并再次验证 current source head：保留 canonical 或 deletion 只更新 lifecycle；live canonical 可以产生带 canonical parent 的 local descendant；canonical tombstone 只可从保留内容创建 fresh snippet。source 已前进时不得覆盖，只能 reviewed；lifecycle update 必须恰好影响一个 open row。缺失、损坏、循环或超过对象/字节上限的 ancestor 只会让比较显示不可用，绝不推断 merge base。
 
-数据库通过 `PRAGMA user_version` 维护 schema 版本，当前为 v7。`initialize_connection()` 严格按 v0→v1→v2→v3→v4→v5→v6→v7 顺序迁移：v0→v1 创建业务表并保留“真正新库才 seed”的规则；v1→v2 严格扫描并建立 FTS；v2→v3 创建稳定 device identity、heads/outbox/remote/conflict side tables，扩展 history，并确定性回填 live heads；v3→v4 创建 `revision_objects` 并从 pending outbox、当前 live heads 和 tombstones 回填 durable immutable revision objects；v4→v5 创建 local-only `snippet_usage`、recent 索引和删除清理 trigger；v5→v6 创建脱敏 `sync_notifications` inbox；v6→v7 创建 `local_snapshots` catalog。任何既有磁盘 v0/v1/v2/v3/v4/v5/v6 文件在第一步写入前都通过 SQLite online backup 创建和验证唯一 `pre-v7` 同级备份；链中任一步失败会 rollback、保留失败数据库副本并恢复/校验原始版本。新建库和重复打开 v7 不创建升级备份，未来 `user_version` 会在不写入的情况下拒绝。
+`sync_identity` 仍是数据库 singleton，普通 local mutation 在写 revision 时读取 current ID。v8 轮换不接受 WebView UUID，也不公开旧/新 UUID；只在 `webdav::try_exclusive_operation_guard() → snapshots::mutation_guard() → short SQLite transaction` 中更新 singleton 当前 ID 和 `last_rotated_at`。既有 head/object/outbox、revision ID/parent/time 和 remote manifest/marker/vault identity 不改写、不产生 synthetic revision、不自动同步或发 HTTP，所以下一个真实 local mutation 才使用新 attribution。
+
+`local_snapshots` 是 schema v7 的 catalog，不向 WebView 返回 filename/checksum/path。`snapshots.rs` 只接受 native 生成的 UUID/catalog ID，并要求 canonical `snapshot-<uuid>.sqlite` filename。在线 backup 先写入 snapshots directory 的 pending file，独立的 read-only/no-follow connection 验证 integrity、唯一 `sync_identity`、live count、size 和 SHA-256 后才 rename 发布并写 catalog：当前 v8 snapshot 必须是 exact v8；在唯一紧邻过渡中，先前已验证的 v7 snapshot 也可保持在 catalog。恢复 v7 source 时，`Backup` 写入活动连接后通过 `db::migrate_connection_to_current()` 受控升级到 v8，并重新进行 current-schema 验证；更旧、未来或损坏 schema 仍拒绝。恢复前重新验证目标，创建/验证 emergency checkpoint，置位 settings 中后端拥有的 sync latch，以 `Backup` 写入活动 SQLite connection 并验证；后续 failure 会尝试用 emergency checkpoint 恢复。快照是完整数据库 checkpoint，覆盖 snippets、FTS、revision/outbox/remote/conflict state、usage、identity、sync history/catalog/notifications，但不覆盖 `settings.json` 或 OS credential-store contents。
+
+数据库通过 `PRAGMA user_version` 维护 schema 版本，当前为 v8。`initialize_connection()` 严格按 v0→v1→v2→v3→v4→v5→v6→v7→v8 顺序迁移：v0→v1 创建业务表并保留“真正新库才 seed”的规则；v1→v2 严格扫描并建立 FTS；v2→v3 创建稳定 device identity、heads/outbox/remote/conflict side tables，扩展 history，并确定性回填 live heads；v3→v4 创建 `revision_objects` 并从 pending outbox、当前 live heads 和 tombstones 回填 durable immutable revision objects；v4→v5 创建 local-only `snippet_usage`、recent 索引和删除清理 trigger；v5→v6 创建脱敏 `sync_notifications` inbox；v6→v7 创建 `local_snapshots` catalog；v7→v8 给 `sync_conflicts` 增加本机 state/resolution metadata，并为 `sync_identity` 增加 `last_rotated_at`。任何既有磁盘 v0/v1/v2/v3/v4/v5/v6/v7 文件在第一步写入前都通过 SQLite online backup 创建和验证唯一 `pre-v8` 同级备份；链中任一步失败会 rollback、保留失败数据库副本并恢复/校验原始版本。新建库和重复打开 v8 不创建升级备份，未来 `user_version` 会在不写入的情况下拒绝。
 
 ### 7.2 设置、凭据与恢复模型
 
@@ -891,15 +904,39 @@ flowchart TD
 - 同一 revision：直接收敛并只确认仍在 pending outbox 中的确切 revision ID。
 - 一端 head 是另一端祖先：后代获胜；远端后代通过带 expected-local-revision guard 的 validated plan 应用，本地后代发布为新 remote head。
 - 无祖先关系的并发分支：已发布的远端 original 确定性保留为 canonical head；本地落败 revision 仍作为 immutable object 发布，并在 manifest durable 后按 exact revision ID 确认。
-- 远端覆盖本地且落败分支仍是 live 内容时，本地事务用 source snippet + 两端 revision 生成幂等 conflict copy/index；本地 tombstone 没有正文可复制。当前没有属性级 semantic merge，也没有完整的冲突比较、解决或归档 UI。
+- 远端覆盖本地且落败分支仍是 live 内容时，本地事务用 source snippet + 两端 revision 生成幂等 conflict copy/index；本地 tombstone 没有正文可复制。冲突中心以本地 `sync_conflicts` lifecycle 记录待处理/已解决/已查看状态，读取保留副本、规范 incoming revision 与有界共同祖先；它不进行属性级/语义 merge，也不跨设备同步行政状态。应用保留分支会生成以当前规范 head 为 parent 的普通 local descendant/outbox；规范 tombstone 获胜时只能显式新建片段，绝不暗中复活原片段。
 - Delete 是 `deleted: true`、无 live snippet、带 canonical tombstone hash 的普通 immutable revision。同步后删除会传播并保留 ancestry；tombstone 和其他 revision objects 当前无限期保留，没有远端 GC/compaction。
 - Manifest 只指向每个 snippet 的当前 head，但 engine 会沿 parent links 验证完整 ancestry；缺失对象、cycle、snippet-ID 不一致或 hash/payload 不一致均 hard-stop。
 
 立即 `SyncResult` 契约使用 `protocol_version` 与 `manifest_generation`，并携带 uploaded/downloaded/deleted/conflict/pending/total 计数；Settings 成功状态结构化显示 protocol/generation、所有计数和 pending。`sync_versions` history 使用 `protocol_version` 与 `generation`，保存除 pending 外的业务计数，并本地化 `publish`、兼容历史 `merge` 与未知方向。完整限制见 [已知限制](known-limitations.md#1-webdav-v2-协议与多设备并发)。
 
+### 9.5 冲突与设备身份恢复数据流
+
+```mermaid
+flowchart LR
+    CONFLICT[Conflict Center] --> REVIEW[只读 conflict review\nincoming / preserved / ancestor]
+    REVIEW --> GUARD{当前 source 有脏草稿?}
+    GUARD -- 是 --> DRAFT[App Save / Discard / Cancel]
+    GUARD -- 否 --> CONFIRM[最终确认]
+    DRAFT --> CONFIRM
+    CONFIRM --> RESOLVE[短 SQLite resolution transaction]
+    RESOLVE -->|保留规范结果| LOCAL_STATE[仅本机 resolved/reviewed 状态]
+    RESOLVE -->|应用保留内容| DESCENDANT[新 local descendant + object + outbox]
+    RESOLVE -->|规范 tombstone| NEW_SNIPPET[新 snippet + object + outbox]
+    DESCENDANT --> V2[既有 WebDAV v2 publish / CAS]
+    NEW_SNIPPET --> V2
+
+    IDENTITY[Device Identity Recovery] --> SYNC_LOCK[WebDAV exclusive guard]
+    SYNC_LOCK --> RESTORE_LOCK[snapshot mutation guard]
+    RESTORE_LOCK --> ROTATE[短 SQLite identity rotation]
+    ROTATE --> FUTURE[仅未来 local revision 使用新 identity]
+```
+
+冲突 lifecycle 是 `sync_conflicts` 内的本机行政元数据，不进入 v2 wire；产生的普通 revision 才会进入既有 outbox。身份轮换同样不访问网络、不改变 remote vault identity 或重写既有 head/object/outbox。v2 没有此图中的 remote delete/GC 分支：安全 compaction 仍要求未来独立协议版本。
+
 ## 10. Tauri 权限与安全边界
 
-[default capability](../src-tauri/capabilities/default.json) 只绑定 `main` 窗口，开放现有窗口的关闭、最小化、最大化/还原、显示/隐藏/解除最小化/聚焦/查询最大化状态，以及剪贴板文本读写。构建期 [build.rs](../src-tauri/build.rs) 为全部注册的应用 command 生成 `__app-acl__` permission manifest；main 显式获授其现有 command 集合，避免“已注册即所有 WebView 可调用”。[revision-history capability](../src-tauri/capabilities/revision-history.json) 只获授 titlebar 所需的窗口控制、启动 Settings/语言读取，以及 `get_revision_history_target` / `get_revision_history_restore_outcome` / history metadata、内容、比较读取和 `request_revision_history_restore`。它不拥有任何 snippet/settings/sync/snapshot/import/export/notification/受控打开 mutation 或读取权限；`WebviewWindow.label()` 检查仍是 history handoff 的第二道边界。WebView 不再拥有 Shell open、窗口创建/改标题或直接 autostart enable/disable/query 权限。
+[default capability](../src-tauri/capabilities/default.json) 只绑定 `main` 窗口，开放现有窗口的关闭、最小化、最大化/还原、显示/隐藏/解除最小化/聚焦/查询最大化状态，以及剪贴板文本读写。构建期 [build.rs](../src-tauri/build.rs) 为全部注册的应用 command 生成 `__app-acl__` permission manifest；main 显式获授其现有 command 集合（包括 conflict review/resolution 与 identity recovery），避免“已注册即所有 WebView 可调用”。[revision-history capability](../src-tauri/capabilities/revision-history.json) 只获授 titlebar 所需的窗口控制、启动 Settings/语言读取，以及 `get_revision_history_target` / `get_revision_history_restore_outcome` / history metadata、内容、比较读取和 `request_revision_history_restore`。它不拥有 conflict/identity、任何 snippet/settings/sync/snapshot/import/export/notification/受控打开 mutation 或读取权限；`WebviewWindow.label()` 检查仍是 history handoff 的第二道边界。WebView 不再拥有 Shell open、窗口创建/改标题或直接 autostart enable/disable/query 权限。
 
 通用前端 Shell API 与 Rust/前端 Shell 依赖已移除。外部打开只有两个 IPC 边界：
 
