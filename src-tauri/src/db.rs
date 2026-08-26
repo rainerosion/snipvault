@@ -4853,7 +4853,7 @@ mod tests {
             .unwrap()
             .file_name()
             .to_string_lossy()
-            .contains("new.db.pre-v7")));
+            .contains("new.db.pre-v8")));
 
         let current_path = directory.join("current.db");
         {
@@ -4865,7 +4865,7 @@ mod tests {
             .unwrap()
             .file_name()
             .to_string_lossy()
-            .contains("current.db.pre-v7")));
+            .contains("current.db.pre-v8")));
 
         let high_path = directory.join("future.db");
         {
@@ -4878,7 +4878,7 @@ mod tests {
             .unwrap()
             .file_name()
             .to_string_lossy()
-            .contains("future.db.pre-v7")));
+            .contains("future.db.pre-v8")));
 
         let corrupt_v1_path = directory.join("corrupt-v1.db");
         {
@@ -4904,7 +4904,7 @@ mod tests {
             .unwrap()
             .file_name()
             .to_string_lossy()
-            .contains("corrupt-v1.db.pre-v7")));
+            .contains("corrupt-v1.db.pre-v8")));
         drop(restored_v1);
 
         let corrupt_v2_path = directory.join("corrupt-v2.db");
@@ -4931,7 +4931,7 @@ mod tests {
             .unwrap()
             .file_name()
             .to_string_lossy()
-            .contains("corrupt-v2.db.pre-v7")));
+            .contains("corrupt-v2.db.pre-v8")));
 
         drop(restored_v2);
         fs::remove_dir_all(directory).unwrap();
@@ -4969,6 +4969,8 @@ mod tests {
         migrate_to_v6(&mut conn).unwrap();
         assert_eq!(schema_version(&conn).unwrap(), 6);
         migrate_to_v7(&mut conn).unwrap();
+        assert_eq!(schema_version(&conn).unwrap(), 7);
+        migrate_to_v8(&mut conn).unwrap();
         assert_eq!(schema_version(&conn).unwrap(), SCHEMA_VERSION);
         let first_device = local_device_id(&conn).unwrap();
         assert!(uuid::Uuid::parse_str(&first_device).is_ok());
@@ -5072,6 +5074,8 @@ mod tests {
         migrate_to_v6(&mut conn).unwrap();
         assert_eq!(schema_version(&conn).unwrap(), 6);
         migrate_to_v7(&mut conn).unwrap();
+        assert_eq!(schema_version(&conn).unwrap(), 7);
+        migrate_to_v8(&mut conn).unwrap();
         assert_eq!(schema_version(&conn).unwrap(), SCHEMA_VERSION);
         assert_eq!(local_device_id(&conn).unwrap(), device_id);
         for (revision_id, expected_payload, deleted) in [
