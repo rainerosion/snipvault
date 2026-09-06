@@ -16,6 +16,18 @@ const requiredPngs = new Map([
   ["128x128@2x.png", [256, 256]],
   ["icon.png", [512, 512]],
 ]);
+const requiredWindowsPackagePngs = new Map([
+  ["StoreLogo.png", [50, 50]],
+  ["Square30x30Logo.png", [30, 30]],
+  ["Square44x44Logo.png", [44, 44]],
+  ["Square71x71Logo.png", [71, 71]],
+  ["Square89x89Logo.png", [89, 89]],
+  ["Square107x107Logo.png", [107, 107]],
+  ["Square142x142Logo.png", [142, 142]],
+  ["Square150x150Logo.png", [150, 150]],
+  ["Square284x284Logo.png", [284, 284]],
+  ["Square310x310Logo.png", [310, 310]],
+]);
 
 function read(relativePath) {
   const file = path.join(repositoryRoot, relativePath);
@@ -63,7 +75,12 @@ for (const duplicate of [
 }
 
 await assertPng("assets/app-icon.png", 512, 512);
+await assertPng("assets/logo-1080.png", 1080, 1080);
+await assertPng("assets/microsoft-store/app-tile-icon-300.png", 300, 300);
 for (const [file, [width, height]] of requiredPngs) {
+  await assertPng(path.join("src-tauri", "icons", file), width, height);
+}
+for (const [file, [width, height]] of requiredWindowsPackagePngs) {
   await assertPng(path.join("src-tauri", "icons", file), width, height);
 }
 assertHeader("src-tauri/icons/icon.ico", "00000100");
@@ -82,5 +99,5 @@ for (const icon of configuredIcons) {
 }
 
 console.log(
-  "Icon check passed: canonical source and generated Tauri icons are valid.",
+  "Icon check passed: canonical source, promotional and Store-listing exports, and generated Tauri package icons are valid.",
 );

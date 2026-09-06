@@ -1,4 +1,4 @@
-import { ensureSyntaxTree } from "@codemirror/language";
+import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
 import { highlightTree, type Highlighter } from "@lezer/highlight";
 import type { LanguageId } from "../utils/languages";
@@ -16,10 +16,36 @@ export function normalizeLanguage(language: string): LanguageId {
   return language in LANGUAGE_SUPPORT ? (language as LanguageId) : "plaintext";
 }
 
+function rangesFromTree(
+  tree: ReturnType<typeof syntaxTree>,
+  documentLength: number,
+  highlightStyle: Highlighter,
+): SyntaxHighlightRange[] {
+  const ranges: SyntaxHighlightRange[] = [];
+  highlightTree(tree, highlightStyle, (from, to, className) => {
+    if (from >= to || from >= documentLength) return;
+    ranges.push({
+      from,
+      to: Math.min(to, documentLength),
+      className,
+    });
+  });
+
+  return ranges;
+}
+
+/** Uses the editable CodeMirror view's current incremental syntax tree. */
+export function getSyntaxHighlightRangesFromState(
+  state: EditorState,
+  highlightStyle: Highlighter,
+): SyntaxHighlightRange[] {
+  if (state.doc.length === 0) return [];
+  return rangesFromTree(syntaxTree(state), state.doc.length, highlightStyle);
+}
+
 /**
- * Builds syntax-highlight ranges with the same language extension and
- * HighlightStyle used by the editable CodeMirror view. Parsing is bounded so
- * the Canvas codeglance remains a progressive enhancement for large snippets.
+ * Builds syntax-highlight ranges for renderers without a live EditorView.
+ * Parsing is bounded so read-only views remain responsive for large snippets.
  */
 export function getSyntaxHighlightRanges(
   content: string,
@@ -39,16 +65,5 @@ export function getSyntaxHighlightRanges(
   );
 
   if (!tree) return [];
-
-  const ranges: SyntaxHighlightRange[] = [];
-  highlightTree(tree, highlightStyle, (from, to, className) => {
-    if (from >= to || from >= state.doc.length) return;
-    ranges.push({
-      from,
-      to: Math.min(to, state.doc.length),
-      className,
-    });
-  });
-
-  return ranges;
+  return rangesFromTree(tree, state.doc.length, highlightStyle);
 }

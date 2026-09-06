@@ -479,6 +479,19 @@ export const SettingsPanel = forwardRef<
 
           <label className="settings-row">
             <div className="settings-row-info">
+              <span className="settings-row-label">{t("settings.codeCompletion")}</span>
+              <span className="settings-row-desc">{t("settings.codeCompletionDesc")}</span>
+            </div>
+            <input
+              type="checkbox"
+              className="settings-toggle"
+              checked={draft.editor_code_completion}
+              onChange={(event) => updateDraft("editor_code_completion", event.target.checked)}
+            />
+          </label>
+
+          <label className="settings-row">
+            <div className="settings-row-info">
               <span className="settings-row-label">{t("settings.minimizeToTray")}</span>
               <span className="settings-row-desc">{t("settings.minimizeToTrayDesc")}</span>
             </div>

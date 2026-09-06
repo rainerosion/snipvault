@@ -69,8 +69,8 @@ npm run tauri build
 | `npm run format:check` | Prettier 检查维护中的配置、测试、完整性脚本和普通 CI workflow；当前有意不要求一次性格式化既有业务源码/文档 |
 | `npm run docs:check` | 检查 `README.md`、`CLAUDE.md` 和 `docs/**/*.md` 的相对文件链接与 Markdown anchor |
 | `npm run versions:check` | 比较 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json` 和 Vite 注入的 Settings/UI 版本；设置 `SNIPVAULT_RELEASE_TAG` 时还校验 tag |
-| `npm run icons` | 用 Tauri icon generator 从 [assets/app-icon.png](../assets/app-icon.png) 生成 [src-tauri/icons/](../src-tauri/icons/) |
-| `npm run icons:check` | 校验 canonical icon source、生成 PNG/ICO/ICNS magic 与尺寸、Tauri 配置引用，并拒绝旧重复图标生成器/输出 |
+| `npm run icons` | 用 Tauri icon generator 从 [assets/app-icon.png](../assets/app-icon.png) 生成 [src-tauri/icons/](../src-tauri/icons/)，并从同一 canonical source 生成 1080×1080 [logo-1080.png](../assets/logo-1080.png) |
+| `npm run icons:check` | 校验 canonical icon source、1080×1080 logo、生成 PNG/ICO/ICNS magic 与尺寸、Tauri 配置引用，并拒绝旧重复图标生成器/输出 |
 
 前端测试使用 Vitest、jsdom、React Testing Library、`user-event` 和 `jest-axe`。共享 [setup.ts](../src/test/setup.ts) 提供 Testing Library 清理、jest-dom/axe 断言，以及 Tauri core invoke、event、clipboard 和 window API mock。测试现在覆盖窗口控制、列表/工具栏语义与名称、嵌套模态焦点、Settings 关闭 guard、标签 combobox、文本菜单范围/导航、HTML `lang` 同步、语言扩展穷尽分类，以及既有片段/设置/同步/安全工作流；它们仍不是应用级 E2E。命令面板、原生全局快捷键、托盘捕获、真实剪贴板可用性、recent cursor 和批量 mutation 的新增生产路径没有新测试代码（遵循本任务不新增测试代码的约束），必须通过对应的现有 gate 和隔离的真实 Tauri smoke 补充验证。
 
@@ -200,14 +200,16 @@ src-tauri/
 
 ## 6. CodeMirror 和 MiniMap 开发
 
-核心文件：[SnippetEditor.tsx](../src/components/SnippetEditor.tsx)、[languageExtensions.ts](../src/components/languageExtensions.ts)。
+核心文件：[SnippetEditor.tsx](../src/components/SnippetEditor.tsx)、[completion.ts](../src/components/completion.ts)、[languageExtensions.ts](../src/components/languageExtensions.ts)。
 
 ### 6.1 复用现有扩展入口
 
-- 新增语言：先在 [utils/languages.ts](../src/utils/languages.ts) 增加 metadata/`LanguageId`，再在 [languageExtensions.ts](../src/components/languageExtensions.ts) 的 `LANGUAGE_SUPPORT` 和 `getLanguageExtensions()` 增加穷尽分支，并更新 [LanguageExtensions.test.ts](../src/test/LanguageExtensions.test.ts)。
+- 新增语言：先在 [utils/languages.ts](../src/utils/languages.ts) 增加 metadata/`LanguageId`，再在 [languageExtensions.ts](../src/components/languageExtensions.ts) 的 `LANGUAGE_SUPPORT` 和 `getLanguageExtensions()` 增加穷尽分支，并更新 [LanguageExtensions.test.ts](../src/test/LanguageExtensions.test.ts)。还必须在 [completion.ts](../src/components/completion.ts) 为该 ID 保留关键词 fallback；仅在有成熟、普适的离线模板时才添加 snippet catalog 项。
+- 本地补全的 controller 只能由 `completion.ts` 的一个 `autocompletion()` extension 安装，`SnippetEditor` 的 UIW `basicSetup.autocompletion` 必须保持关闭，避免竞争 controller。不要设置 `override`：应用 source 通过 `EditorState.languageData` 注册，CodeMirror 会并列运行 parser package 的上下文 completion 和本地 source，并保留各自异步、replacement range、`validFor` 和 dedupe 语义。不得手写 `Promise.all` 合并 language provider，也不得让 registered source 再枚举 `languageDataAt("autocomplete", ...)`，否则会递归调用自身。
+- 本地 source 必须无网络、无 LSP、无 IPC：静态关键词/有 placeholder 的 snippet、以光标为中心最多 120,000 字符扫描出的当前文档标识符，以及当前已加载同语言摘要的 title/description/tag 分词（至多 80 个）按低优先级提供。不得在输入时请求完整 snippet、传递 `content_preview`、绝对路径或任何 secret；最多返回 160 个本地候选。隐式触发至少需要一个 identifier 字符，`Ctrl/Cmd+Space` 可在空 token 显式触发。
 - 优先使用官方 CodeMirror 6/维护中的 Lezer language package；若只存在 reviewed legacy mode，可使用 `StreamLanguage.define()`，但文档和 UI 不得把它描述为完整 Lezer parser。
 - Plaintext 以及有意不支持的兼容 ID 必须显式返回空 `Extension`，不要通过漏掉 switch 分支获得隐式 fallback。
-- 修改编辑器主题、光标、选区、滚动或换行：更新 `buildMainExtensions()` 中的 `EditorView.theme()` / `HighlightStyle`。编辑器 surface/gutter/active gutter、光标、选区、匹配括号和 MiniMap viewport 必须只使用 `--editor-*` / `--minimap-*` 语义 token，不能重新硬编码 preset 色。Canvas 的背景色应从 `.minimap-pane` 的计算 token 读取，并在有效深浅模式或精选配色变化时重绘；syntax highlighter 仍必须先注册项目复合 `HighlightStyle`，再注册 UIW GitHub 主题，使它与 Codeglance 共用的 class 颜色在真实编辑区中具有最终级联优先级；不得额外添加会覆盖该顺序的 syntax highlighter。
+- 修改编辑器主题、光标、选区、滚动或换行：更新 `buildMainExtensions()` 中的 `EditorView.theme()` / `HighlightStyle`。编辑器只能安装 [codeHighlightTheme.ts](../src/components/codeHighlightTheme.ts) 的一个 non-fallback syntax highlighter；UIW wrapper 必须保持 `theme="none"`，不得再加入会注册另一套 highlighter 的完整 UIW theme。GitHub 兼容 tag 规则属于共享 `HighlightStyle`，view chrome 属于 `EditorView.theme()` 和语义 CSS token。编辑器 surface/gutter/active gutter、光标、选区、匹配括号和 MiniMap viewport 必须只使用 `--editor-*` / `--minimap-*` 语义 token，不能重新硬编码 preset 色。Canvas 背景色应从 `.minimap-pane` 的计算 token 读取，并在有效深浅模式或精选配色变化时重绘。
 - 修改 Codeglance：复用 `MiniMap` 与 [syntaxHighlight.ts](../src/components/syntaxHighlight.ts) 的共享语言/语法高亮范围适配器；不要再建立独立正则 tokenizer 或硬编码 token 调色板。
 - 版本历史 live preview/diff 必须通过 [LazyRevisionCodePreview.tsx](../src/components/LazyRevisionCodePreview.tsx) / [LazyRevisionDiffViewer.tsx](../src/components/LazyRevisionDiffViewer.tsx) 按需加载，不能因 [RevisionHistory.tsx](../src/components/RevisionHistory.tsx) 被 App 静态引用而把 parser/highlighter 提前纳入启动图。它们重用 [codeHighlightTheme.ts](../src/components/codeHighlightTheme.ts) 的 editor token palette 和 [syntaxHighlight.ts](../src/components/syntaxHighlight.ts) 范围；plain DOM `<span>` 使用生成 class 前须调用 `StyleModule.mount(document, HighlightStyle.module)`，绝不能用 `dangerouslySetInnerHTML`。逐行比较由 [lineDiff.ts](../src/components/lineDiff.ts) 本地执行，必须保留字符/行数/matrix/渲染行数/时间上限与完整并排源码 fallback；历史 code review 固定 `white-space: pre` 和行号，弹性双栏不得为布局制造外层横向滚动，只有真实超出单个 source pane 的长行可在所属 pane 内横向滚动，详细对齐仅同步垂直位置。
 - 修改滚动：以 `EditorView.scrollDOM` 为主滚动源，不额外截获 wheel 事件。
@@ -231,12 +233,15 @@ src-tauri/
 
 ### 6.3 MiniMap 约束
 
-- 预览的 token 范围和颜色与编辑器共用 CodeMirror 语言扩展与 `HighlightStyle`；受限解析预算未完成、无 token 或 plaintext 的文本使用编辑器默认前景色。空白字符只占用缩略图水平位置而不绘制色条。
+- 活动 Codeglance 必须从可编辑 CodeMirror 的 live `EditorState` 同时取得正文与 `syntaxTree(state)`，再通过 [syntaxHighlight.ts](../src/components/syntaxHighlight.ts) 的共享 tree-to-range adapter 和 [codeHighlightTheme.ts](../src/components/codeHighlightTheme.ts) 的唯一 `HighlightStyle` 绘制；不得为每次输入建立独立 parser、增大 parse timeout、轮询、调用 forced parsing 或挂载第二个 editor。
+- 只在 document identity 或 syntax-tree identity 改变时发布 Canvas 输入。这样普通输入/粘贴、受控内容或语言重配置以及 CodeMirror background parser 发布新树都会重绘，而 selection/focus-only transaction 不会；正文和 parser snapshot 不得来自不同生命周期。
+- 独立 `EditorState` + 50 ms `ensureSyntaxTree()` 只保留给没有 live `EditorView` 的版本历史只读 renderer。活动 Codeglance 对当前树尚未覆盖、无 token 或 plaintext 的文本使用编辑器默认前景色，并等待 CodeMirror 自身的后续 tree publication。
+- Canvas 按生成 class 测量颜色前必须先挂载共享 `HighlightStyle.module`；有效深浅模式或精选配色变化时清空 class-color cache。空白字符只占用缩略图水平位置而不绘制色条。
 - Canvas 高度随行数增长，大文件可能有性能和浏览器 Canvas 尺寸限制。
 - viewport 比例依赖主 scroller 的 `scrollHeight/clientHeight`。
 - 宽度 state 当前不持久化。
 
-若引入真正 parser token 或第三方 minimap，应先明确是否替换现有实现，并同步更新功能文档和候选遗留依赖说明。
+若引入第三方 minimap，应先明确是否替换现有实现，并同步更新功能文档和候选遗留依赖说明。
 
 ### 6.4 可访问交互约束
 

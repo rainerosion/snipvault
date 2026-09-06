@@ -33,6 +33,33 @@ const EMPTY_FORM: SnippetForm = {
   is_favorite: false,
 };
 
+const COMPLETION_TERM = /[A-Za-z_$\p{L}\p{Nl}][\w$\-\p{L}\p{Nl}\p{Mn}\p{Mc}\p{Nd}\p{Pc}]*/gu;
+const MAX_COMPLETION_TERMS = 160;
+
+function completionTermsFromSummaries(
+  summaries: readonly SnippetSummary[],
+  language: string,
+  selectedId: string | undefined,
+): string[] {
+  const terms: string[] = [];
+  const seen = new Set<string>();
+
+  for (const summary of summaries) {
+    if (summary.id === selectedId || summary.language !== language) continue;
+    for (const field of [summary.title, summary.description, ...summary.tags]) {
+      for (const term of field.match(COMPLETION_TERM) ?? []) {
+        const key = term.toLocaleLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        terms.push(term);
+        if (terms.length === MAX_COMPLETION_TERMS) return terms;
+      }
+    }
+  }
+
+  return terms;
+}
+
 interface RevisionHistoryRestoreRequest {
   generation: number;
   snippet_id: string;
@@ -126,6 +153,11 @@ export default function App() {
   const quickCaptureStatusTimerRef = useRef<number | undefined>(undefined);
   const [refreshStatus, setRefreshStatus] = useState<"applied" | "stale" | null>(null);
   const lineWrap = settings?.editor_line_wrap ?? true;
+  const codeCompletion = settings?.editor_code_completion ?? true;
+  const completionTerms = useMemo(
+    () => completionTermsFromSummaries(snippets, form.language, selected?.id),
+    [form.language, selected?.id, snippets],
+  );
   const [textMenu, setTextMenu] = useState<{ visible: boolean; x: number; y: number; isEditorContext: boolean }>({ visible: false, x: 0, y: 0, isEditorContext: false });
   const textMenuRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -1545,6 +1577,8 @@ export default function App() {
                   theme={theme}
                   accentPreset={accentPreset}
                   lineWrap={lineWrap}
+                  codeCompletion={codeCompletion}
+                  completionTerms={completionTerms}
                   saving={saving}
                   isDirty={isDirty}
                   tagOptions={allTagOptions}

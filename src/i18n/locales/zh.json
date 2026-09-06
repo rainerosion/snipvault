@@ -157,6 +157,8 @@
     "about": "关于",
     "autoStart": "开机自启",
     "autoStartDesc": "登录 Windows 时自动启动应用",
+    "codeCompletion": "代码补全",
+    "codeCompletionDesc": "编辑时显示离线关键词、代码片段、当前文件和片段库词汇建议",
     "minimizeToTray": "关闭时最小化到托盘",
     "minimizeToTrayDesc": "点击关闭按钮时最小化到系统托盘",
     "theme": "主题",

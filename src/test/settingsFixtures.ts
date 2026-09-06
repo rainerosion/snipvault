@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS: Settings = {
   auto_sync: false,
   sync_interval_minutes: 30,
   editor_line_wrap: true,
+  editor_code_completion: true,
   last_sync_at: "2026-01-01T00:00:00Z",
   webdav_secret_configured: true,
   credential_status: { kind: "configured", action_required: false },

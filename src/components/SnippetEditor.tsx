@@ -1,11 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useContext,
+} from "react";
 import { useTranslation } from "react-i18next";
 import CodeMirror from "@uiw/react-codemirror";
 import { EditorView } from "@codemirror/view";
-import { type HighlightStyle } from "@codemirror/language";
-import { getSyntaxHighlightRanges, type SyntaxHighlightRange } from "./syntaxHighlight";
+import type { EditorState, Extension } from "@codemirror/state";
+import { syntaxTree, type HighlightStyle } from "@codemirror/language";
+import { localCompletionExtension } from "./completion";
+import {
+  getSyntaxHighlightRangesFromState,
+  type SyntaxHighlightRange,
+} from "./syntaxHighlight";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
 import { Snippet, SnippetForm } from "../types";
 import { LANGUAGES, type LanguageId } from "../utils/languages";
 import type { AccentPreset } from "../hooks/useSettings";
@@ -15,6 +27,7 @@ import {
   darkHighlightStyle,
   getCodeHighlightExtension,
   lightHighlightStyle,
+  mountCodeHighlightStyle,
 } from "./codeHighlightTheme";
 import { LanguageContext } from "../context/LanguageContext";
 import { getLanguageExtensions } from "./languageExtensions";
@@ -32,6 +45,8 @@ interface SnippetEditorProps {
   theme: "dark" | "light";
   accentPreset: AccentPreset;
   lineWrap: boolean;
+  codeCompletion?: boolean;
+  completionTerms?: readonly string[];
   saving: boolean;
   isDirty: boolean;
   tagOptions: string[];
@@ -40,65 +55,124 @@ interface SnippetEditorProps {
 const darkHighlight = getCodeHighlightExtension("dark");
 const lightHighlight = getCodeHighlightExtension("light");
 
-function buildMainExtensions(isDark: boolean, lang: string, lineWrap: boolean) {
-  const cmLayout = EditorView.theme({
-    "&": {
-      height: "100%",
-      minHeight: "0",
-      fontSize: "13.5px",
+function buildMainExtensions(
+  isDark: boolean,
+  language: LanguageId,
+  lineWrap: boolean,
+  codeCompletion: boolean,
+  completionTerms: readonly string[],
+  onCodeglanceState: (state: EditorState) => void,
+): Extension[] {
+  const cmLayout = EditorView.theme(
+    {
+      "&": {
+        height: "100%",
+        minHeight: "0",
+        fontSize: "13.5px",
+        color: isDark ? DARK_SYNTAX_COLORS.plain : LIGHT_SYNTAX_COLORS.plain,
+        backgroundColor: "var(--editor-surface)",
+      },
+      ".cm-scroller": {
+        height: "100%",
+        minHeight: "0",
+        minWidth: "0",
+        width: "100%",
+        fontFamily:
+          "ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace",
+        overflowY: "auto !important",
+        overflowX: lineWrap ? "hidden !important" : "auto !important",
+      },
+      ".cm-content": {
+        fontFamily:
+          "ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace",
+        caretColor: "var(--editor-cursor)",
+        whiteSpace: lineWrap ? "pre-wrap" : "pre",
+        width: lineWrap ? "auto" : "max-content",
+        minWidth: lineWrap ? "0" : "100%",
+        maxWidth: lineWrap ? "100%" : "none",
+        wordBreak: lineWrap ? "break-word" : "normal",
+        overflowWrap: lineWrap ? "anywhere" : "normal",
+        boxSizing: "border-box",
+      },
+      ".cm-line": {
+        whiteSpace: lineWrap ? "pre-wrap" : "pre",
+        wordBreak: lineWrap ? "break-word" : "normal",
+        overflowWrap: lineWrap ? "anywhere" : "normal",
+        maxWidth: lineWrap ? "100%" : "none",
+        boxSizing: "border-box",
+      },
+      ".cm-activeLine": {
+        backgroundColor:
+          "color-mix(in srgb, var(--editor-gutter-active-surface) 44%, transparent)",
+      },
+      ".cm-tooltip-autocomplete": {
+        maxWidth: "min(30rem, calc(100vw - 2rem))",
+        backgroundColor: "var(--bg-elevated)",
+        border: "1px solid var(--border)",
+        borderRadius: "8px",
+        boxShadow: "0 12px 32px color-mix(in srgb, #000 26%, transparent)",
+        color: "var(--text-primary)",
+        overflow: "hidden",
+      },
+      ".cm-tooltip-autocomplete > ul": {
+        maxWidth: "100%",
+        maxHeight: "min(18rem, 42vh)",
+      },
+      ".cm-tooltip-autocomplete > ul > li": {
+        maxWidth: "100%",
+      },
+      ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
+        backgroundColor: "var(--bg-hover)",
+        color: "var(--text-primary)",
+      },
+      ".cm-completionLabel": {
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+      },
+      ".cm-completionDetail": {
+        color: "var(--text-muted)",
+      },
+      ".cm-completionMatchedText": {
+        color: "var(--accent)",
+        textDecoration: "none",
+      },
+      ".cm-selectionMatch": {
+        backgroundColor: "var(--editor-selection)",
+      },
+
+      "&.cm-focused .cm-selectionBackground": {
+        background: "var(--editor-selection-focused)",
+      },
     },
-    ".cm-editor": {
-      minWidth: "0",
-    },
-    ".cm-scroller": {
-      height: "100%",
-      minHeight: "0",
-      minWidth: "0",
-      width: "100%",
-      fontFamily: "ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace",
-      overflowY: "auto !important",
-      overflowX: lineWrap ? "hidden !important" : "auto !important",
-    },
-    ".cm-content": {
-      fontFamily: "ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace",
-      caretColor: "var(--editor-cursor)",
-      whiteSpace: lineWrap ? "pre-wrap" : "pre",
-      width: lineWrap ? "auto" : "max-content",
-      minWidth: lineWrap ? "0" : "100%",
-      maxWidth: lineWrap ? "100%" : "none",
-      wordBreak: lineWrap ? "break-word" : "normal",
-      overflowWrap: lineWrap ? "anywhere" : "normal",
-      boxSizing: "border-box",
-    },
-    ".cm-line": {
-      whiteSpace: lineWrap ? "pre-wrap" : "pre",
-      wordBreak: lineWrap ? "break-word" : "normal",
-      overflowWrap: lineWrap ? "anywhere" : "normal",
-      maxWidth: lineWrap ? "100%" : "none",
-      boxSizing: "border-box",
-    },
-    ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--editor-cursor)" },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { background: "var(--editor-selection)" },
-    "&.cm-focused .cm-selectionBackground": { background: "var(--editor-selection-focused)" },
+    { dark: isDark },
+  );
+
+  const codeglanceUpdates = EditorView.updateListener.of((update) => {
+    const previousTree = syntaxTree(update.startState);
+    const nextTree = syntaxTree(update.state);
+    if (
+      update.startState.doc !== update.state.doc ||
+      previousTree !== nextTree
+    ) {
+      onCodeglanceState(update.state);
+    }
   });
 
   return [
     ...(lineWrap ? [EditorView.lineWrapping] : []),
     isDark ? darkHighlight : lightHighlight,
-    isDark ? githubDark : githubLight,
-    getLanguageExtensions(
-      LANGUAGES.some((language) => language.id === lang)
-        ? (lang as LanguageId)
-        : "plaintext",
-    ),
+    getLanguageExtensions(language),
+    ...(codeCompletion
+      ? [localCompletionExtension(language, completionTerms)]
+      : []),
     cmLayout,
-    isDark ? darkHighlight : lightHighlight,
+    codeglanceUpdates,
   ];
 }
 
 interface MiniMapProps {
-  content: string;
-  language: string;
+  editorState: EditorState | null;
   highlightStyle: HighlightStyle;
   isDark: boolean;
   accentPreset: AccentPreset;
@@ -132,7 +206,8 @@ function colorForHighlightClass(
   const sample = document.createElement("span");
   sample.className = className;
   sample.textContent = "x";
-  sample.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;";
+  sample.style.cssText =
+    "position:absolute;visibility:hidden;pointer-events:none;";
   parent.appendChild(sample);
   const color = getComputedStyle(sample).color || fallbackColor;
   sample.remove();
@@ -183,8 +258,7 @@ function getLineHighlightSegments(
 }
 
 function MiniMap({
-  content,
-  language,
+  editorState,
   highlightStyle,
   isDark,
   accentPreset,
@@ -197,7 +271,10 @@ function MiniMap({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const syncingFromMiniRef = useRef(false);
-  const draggingViewportRef = useRef<{ pointerId: number; pointerOffsetInViewport: number } | null>(null);
+  const draggingViewportRef = useRef<{
+    pointerId: number;
+    pointerOffsetInViewport: number;
+  } | null>(null);
   const suppressClickRef = useRef(false);
 
   const [isViewportDragging, setIsViewportDragging] = useState(false);
@@ -206,18 +283,24 @@ function MiniMap({
   const [fallbackColor, setFallbackColor] = useState("");
   const [backgroundColor, setBackgroundColor] = useState("");
   const colorCacheRef = useRef(new Map<string, string>());
+  const document = editorState?.doc ?? null;
+  const content = useMemo(() => document?.toString() ?? "", [document]);
   const highlightRanges = useMemo(
-    () => getSyntaxHighlightRanges(content, language, highlightStyle),
-    [content, language, highlightStyle],
+    () =>
+      editorState
+        ? getSyntaxHighlightRangesFromState(editorState, highlightStyle)
+        : [],
+    [editorState, highlightStyle],
   );
-  useEffect(() => {
+  useLayoutEffect(() => {
+    mountCodeHighlightStyle(isDark ? "dark" : "light");
     colorCacheRef.current.clear();
     const contentElement = editorView?.contentDOM;
-    setFallbackColor(contentElement ? getComputedStyle(contentElement).color : "");
+    setFallbackColor(
+      contentElement ? getComputedStyle(contentElement).color : "",
+    );
     setBackgroundColor(
-      paneRef.current
-        ? getComputedStyle(paneRef.current).backgroundColor
-        : "",
+      paneRef.current ? getComputedStyle(paneRef.current).backgroundColor : "",
     );
   }, [accentPreset, editorView, isDark]);
 
@@ -226,7 +309,8 @@ function MiniMap({
       colorForHighlightClass(
         editorView,
         className,
-        fallbackColor || (isDark ? DARK_SYNTAX_COLORS.plain : LIGHT_SYNTAX_COLORS.plain),
+        fallbackColor ||
+          (isDark ? DARK_SYNTAX_COLORS.plain : LIGHT_SYNTAX_COLORS.plain),
         colorCacheRef.current,
       ),
     [editorView, fallbackColor, isDark],
@@ -235,7 +319,10 @@ function MiniMap({
   const bg = backgroundColor || (isDark ? "#0d1117" : "#ffffff");
 
   const lines = useMemo(() => content.split("\n"), [content]);
-  const lineContentH = useMemo(() => Math.max(lines.length * GLANCE_LINE_H, 1), [lines.length]);
+  const lineContentH = useMemo(
+    () => Math.max(lines.length * GLANCE_LINE_H, 1),
+    [lines.length],
+  );
   const totalH = useMemo(() => {
     if (mainCanScroll && lineContentH <= paneClientHeight) {
       return paneClientHeight + 1;
@@ -245,7 +332,7 @@ function MiniMap({
 
   const lineLens = useMemo(
     () => lines.map((l) => l.length).filter((len) => len > 0),
-    [lines]
+    [lines],
   );
   const maxLen = useMemo(() => Math.max(...lineLens, 1), [lineLens]);
 
@@ -254,14 +341,23 @@ function MiniMap({
 
     const sorted = [...lineLens].sort((a, b) => a - b);
     const q1 = sorted[Math.floor((sorted.length - 1) * 0.25)] ?? sorted[0];
-    const q3 = sorted[Math.floor((sorted.length - 1) * 0.75)] ?? sorted[sorted.length - 1];
+    const q3 =
+      sorted[Math.floor((sorted.length - 1) * 0.75)] ??
+      sorted[sorted.length - 1];
     const iqr = Math.max(0, q3 - q1);
-    const outlierThreshold = q3 + Math.max(GLANCE_MIN_OUTLIER_GAP, iqr * GLANCE_IQR_MULTIPLIER);
+    const outlierThreshold =
+      q3 + Math.max(GLANCE_MIN_OUTLIER_GAP, iqr * GLANCE_IQR_MULTIPLIER);
 
     const normalLens = sorted.filter((len) => len <= outlierThreshold);
-    const normalMax = normalLens.length > 0 ? normalLens[normalLens.length - 1] : sorted[sorted.length - 1];
+    const normalMax =
+      normalLens.length > 0
+        ? normalLens[normalLens.length - 1]
+        : sorted[sorted.length - 1];
 
-    return Math.min(GLANCE_MAX_CHARS_FOR_SCALING, Math.max(GLANCE_MIN_BASELINE, normalMax));
+    return Math.min(
+      GLANCE_MAX_CHARS_FOR_SCALING,
+      Math.max(GLANCE_MIN_BASELINE, normalMax),
+    );
   }, [lineLens]);
 
   const hasExtremeLine = maxLen > effectiveMaxLen;
@@ -311,7 +407,11 @@ function MiniMap({
         }
       }
 
-      if (hasExtremeLine && lineText.length > effectiveMaxLen && x < width - GLANCE_PADDING_X) {
+      if (
+        hasExtremeLine &&
+        lineText.length > effectiveMaxLen &&
+        x < width - GLANCE_PADDING_X
+      ) {
         const remainW = width - GLANCE_PADDING_X - x;
         ctx.fillStyle = resolveColor(null);
         ctx.fillRect(x, y + 1, remainW, GLANCE_LINE_H - 2);
@@ -354,7 +454,10 @@ function MiniMap({
       return;
     }
 
-    const vpH = Math.max(24, Math.min(180, (main.clientHeight / main.scrollHeight) * totalH));
+    const vpH = Math.max(
+      24,
+      Math.min(180, (main.clientHeight / main.scrollHeight) * totalH),
+    );
     const vpTop = ratio * Math.max(0, totalH - vpH);
 
     viewport.style.display = "";
@@ -386,52 +489,70 @@ function MiniMap({
     return () => main.removeEventListener("scroll", onMainScroll);
   }, [mainScrollEl, syncViewportFromMain]);
 
-  const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (suppressClickRef.current) {
-      suppressClickRef.current = false;
-      return;
-    }
+  const handleClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (suppressClickRef.current) {
+        suppressClickRef.current = false;
+        return;
+      }
 
-    const pane = paneRef.current;
-    const main = mainScrollEl;
-    if (!pane || !main) return;
+      const pane = paneRef.current;
+      const main = mainScrollEl;
+      if (!pane || !main) return;
 
-    const rect = pane.getBoundingClientRect();
-    const clickY = e.clientY - rect.top;
-    const mainScrollable = Math.max(0, main.scrollHeight - main.clientHeight);
-    if (mainScrollable <= 0) {
-      scrollMainTo(0);
+      const rect = pane.getBoundingClientRect();
+      const clickY = e.clientY - rect.top;
+      const mainScrollable = Math.max(0, main.scrollHeight - main.clientHeight);
+      if (mainScrollable <= 0) {
+        scrollMainTo(0);
+        syncViewportFromMain();
+        return;
+      }
+
+      const vpH = Math.max(
+        24,
+        Math.min(180, (main.clientHeight / main.scrollHeight) * totalH),
+      );
+      const visibleTrackH = Math.max(
+        1,
+        pane.clientHeight - Math.min(vpH, pane.clientHeight),
+      );
+      const ratio = Math.max(
+        0,
+        Math.min(1, (clickY - vpH / 2) / visibleTrackH),
+      );
+      scrollMainTo(ratio * mainScrollable);
+
       syncViewportFromMain();
-      return;
-    }
+    },
+    [mainScrollEl, scrollMainTo, syncViewportFromMain, totalH],
+  );
 
-    const vpH = Math.max(24, Math.min(180, (main.clientHeight / main.scrollHeight) * totalH));
-    const visibleTrackH = Math.max(1, pane.clientHeight - Math.min(vpH, pane.clientHeight));
-    const ratio = Math.max(0, Math.min(1, (clickY - vpH / 2) / visibleTrackH));
-    scrollMainTo(ratio * mainScrollable);
+  const handleViewportPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const main = mainScrollEl;
+      const pane = paneRef.current;
+      const viewport = viewportRef.current;
+      if (!main || !pane || !viewport) return;
+      e.preventDefault();
+      e.stopPropagation();
+      suppressClickRef.current = false;
 
-    syncViewportFromMain();
-  }, [mainScrollEl, scrollMainTo, syncViewportFromMain, totalH]);
+      const viewportRect = viewport.getBoundingClientRect();
+      const pointerOffsetInViewport = Math.max(
+        0,
+        Math.min(viewportRect.height, e.clientY - viewportRect.top),
+      );
 
-  const handleViewportPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const main = mainScrollEl;
-    const pane = paneRef.current;
-    const viewport = viewportRef.current;
-    if (!main || !pane || !viewport) return;
-    e.preventDefault();
-    e.stopPropagation();
-    suppressClickRef.current = false;
-
-    const viewportRect = viewport.getBoundingClientRect();
-    const pointerOffsetInViewport = Math.max(0, Math.min(viewportRect.height, e.clientY - viewportRect.top));
-
-    draggingViewportRef.current = {
-      pointerId: e.pointerId,
-      pointerOffsetInViewport,
-    };
-    setIsViewportDragging(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }, [mainScrollEl]);
+      draggingViewportRef.current = {
+        pointerId: e.pointerId,
+        pointerOffsetInViewport,
+      };
+      setIsViewportDragging(true);
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    [mainScrollEl],
+  );
 
   useEffect(() => {
     const onPointerMove = (ev: PointerEvent) => {
@@ -450,11 +571,20 @@ function MiniMap({
         return;
       }
 
-      const vpH = Math.max(24, Math.min(180, (main.clientHeight / main.scrollHeight) * totalH));
-      const visibleTrackH = Math.max(1, pane.clientHeight - Math.min(vpH, pane.clientHeight));
+      const vpH = Math.max(
+        24,
+        Math.min(180, (main.clientHeight / main.scrollHeight) * totalH),
+      );
+      const visibleTrackH = Math.max(
+        1,
+        pane.clientHeight - Math.min(vpH, pane.clientHeight),
+      );
       const pointerYInPane = ev.clientY - pane.getBoundingClientRect().top;
       const viewportTopInPane = pointerYInPane - drag.pointerOffsetInViewport;
-      const nextRatio = Math.max(0, Math.min(1, viewportTopInPane / visibleTrackH));
+      const nextRatio = Math.max(
+        0,
+        Math.min(1, viewportTopInPane / visibleTrackH),
+      );
       const targetTop = nextRatio * mainScrollable;
 
       syncingFromMiniRef.current = true;
@@ -466,7 +596,9 @@ function MiniMap({
       }
 
       syncViewportFromMain();
-      requestAnimationFrame(() => { syncingFromMiniRef.current = false; });
+      requestAnimationFrame(() => {
+        syncingFromMiniRef.current = false;
+      });
     };
 
     const endDrag = (ev: PointerEvent) => {
@@ -489,23 +621,28 @@ function MiniMap({
 
   return (
     <div className="minimap-wrap" style={{ width }} aria-hidden="true">
-      <div
-        ref={paneRef}
-        className="minimap-pane"
-        onClick={handleClick}
-      >
-        <div className="minimap-content" style={{ height: totalH, minHeight: "100%" }}>
-          <canvas ref={canvasRef} className="minimap-canvas" style={{ display: "block" }} />
+      <div ref={paneRef} className="minimap-pane" onClick={handleClick}>
+        <div
+          className="minimap-content"
+          style={{ height: totalH, minHeight: "100%" }}
+        >
+          <canvas
+            ref={canvasRef}
+            className="minimap-canvas"
+            style={{ display: "block" }}
+          />
 
           <div
             ref={viewportRef}
             className={`minimap-viewport ${isViewportDragging ? "dragging" : ""}`}
-            style={{ background: "var(--minimap-viewport-bg)", borderColor: "var(--minimap-viewport-border)" }}
+            style={{
+              background: "var(--minimap-viewport-bg)",
+              borderColor: "var(--minimap-viewport-border)",
+            }}
             onPointerDown={handleViewportPointerDown}
           />
         </div>
       </div>
-
     </div>
   );
 }
@@ -695,8 +832,23 @@ function TagCombobox({
 export const SnippetTagCombobox = TagCombobox;
 
 export function SnippetEditor({
-  snippet, isNew, form, onChange, onSave, onCancel, onOpenHistory, onCopied, onClipboardError,
-  theme, accentPreset, lineWrap, saving, isDirty, tagOptions,
+  snippet,
+  isNew,
+  form,
+  onChange,
+  onSave,
+  onCancel,
+  onOpenHistory,
+  onCopied,
+  onClipboardError,
+  theme,
+  accentPreset,
+  lineWrap,
+  codeCompletion = true,
+  completionTerms = [],
+  saving,
+  isDirty,
+  tagOptions,
 }: SnippetEditorProps) {
   const { t } = useTranslation();
   const { language } = useContext(LanguageContext);
@@ -704,6 +856,9 @@ export function SnippetEditor({
   const cmRef = useRef<EditorView | null>(null);
   const [mainScrollEl, setMainScrollEl] = useState<HTMLElement | null>(null);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
+  const [codeglanceState, setCodeglanceState] = useState<EditorState | null>(
+    null,
+  );
 
   const splitRef = useRef<HTMLDivElement | null>(null);
   const [copied, setCopied] = useState(false);
@@ -711,9 +866,31 @@ export function SnippetEditor({
   const [isDragging, setIsDragging] = useState(false);
 
   const isDark = theme === "dark";
+  const editorLanguage = LANGUAGES.some((entry) => entry.id === form.language)
+    ? (form.language as LanguageId)
+    : "plaintext";
+  const publishCodeglanceState = useCallback((state: EditorState) => {
+    setCodeglanceState(state);
+  }, []);
+
   const mainExtensions = useMemo(
-    () => buildMainExtensions(isDark, form.language, lineWrap),
-    [isDark, form.language, lineWrap]
+    () =>
+      buildMainExtensions(
+        isDark,
+        editorLanguage,
+        lineWrap,
+        codeCompletion,
+        completionTerms,
+        publishCodeglanceState,
+      ),
+    [
+      codeCompletion,
+      completionTerms,
+      editorLanguage,
+      isDark,
+      lineWrap,
+      publishCodeglanceState,
+    ],
   );
 
   const scrollMainTo = useCallback((scrollTop: number) => {
@@ -722,29 +899,32 @@ export function SnippetEditor({
     }
   }, []);
 
-  const handleDividerPointerDown = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-    const startX = e.clientX;
-    const startWidth = minimapWidth;
+  const handleDividerPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      setIsDragging(true);
+      const startX = e.clientX;
+      const startWidth = minimapWidth;
 
-    const onMove = (ev: PointerEvent) => {
-      const delta = startX - ev.clientX;
-      const next = startWidth + delta;
-      const splitWidth = splitRef.current?.clientWidth ?? 0;
-      const dynamicMax = splitWidth > 0 ? Math.floor(splitWidth * 0.45) : 360;
-      const maxWidth = Math.max(96, Math.min(360, dynamicMax));
-      setMinimapWidth(Math.min(maxWidth, Math.max(96, next)));
-    };
-    const onUp = () => {
-      setIsDragging(false);
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
-    };
+      const onMove = (ev: PointerEvent) => {
+        const delta = startX - ev.clientX;
+        const next = startWidth + delta;
+        const splitWidth = splitRef.current?.clientWidth ?? 0;
+        const dynamicMax = splitWidth > 0 ? Math.floor(splitWidth * 0.45) : 360;
+        const maxWidth = Math.max(96, Math.min(360, dynamicMax));
+        setMinimapWidth(Math.min(maxWidth, Math.max(96, next)));
+      };
+      const onUp = () => {
+        setIsDragging(false);
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+      };
 
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp);
-  }, [minimapWidth]);
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+    },
+    [minimapWidth],
+  );
 
   const handleCopy = useCallback(async () => {
     if (!form.content) return;
@@ -760,7 +940,10 @@ export function SnippetEditor({
 
   const formatDate = (iso: string) => {
     try {
-      return new Date(iso).toLocaleString(language === "zh" ? "zh-CN" : "en-US", { hour12: false });
+      return new Date(iso).toLocaleString(
+        language === "zh" ? "zh-CN" : "en-US",
+        { hour12: false },
+      );
     } catch {
       return iso;
     }
@@ -769,7 +952,14 @@ export function SnippetEditor({
   if (!snippet && !isNew) {
     return (
       <div className="editor-empty">
-        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
+        <svg
+          width="64"
+          height="64"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1"
+        >
           <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
         </svg>
         <p>{t("snippet.selectHint")}</p>
@@ -789,19 +979,41 @@ export function SnippetEditor({
           autoFocus={isNew}
         />
         <div className="editor-header-right">
-          {isDirty && <span className="unsaved-dot" title={t("snippet.unsaved")} />}
-          <select className="lang-select-sm" value={form.language} onChange={(e) => onChange({ language: e.target.value })}>
-            {LANGUAGES.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          {isDirty && (
+            <span className="unsaved-dot" title={t("snippet.unsaved")} />
+          )}
+          <select
+            className="lang-select-sm"
+            value={form.language}
+            onChange={(e) => onChange({ language: e.target.value })}
+          >
+            {LANGUAGES.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+              </option>
+            ))}
           </select>
           <button
             type="button"
             className={`fav-toggle ${form.is_favorite ? "active" : ""}`}
             onClick={() => onChange({ is_favorite: !form.is_favorite })}
-            title={form.is_favorite ? t("snippet.unfavorite") : t("snippet.favorite")}
-            aria-label={form.is_favorite ? t("snippet.unfavorite") : t("snippet.favorite")}
+            title={
+              form.is_favorite ? t("snippet.unfavorite") : t("snippet.favorite")
+            }
+            aria-label={
+              form.is_favorite ? t("snippet.unfavorite") : t("snippet.favorite")
+            }
             aria-pressed={form.is_favorite}
           >
-            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill={form.is_favorite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+            <svg
+              aria-hidden="true"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill={form.is_favorite ? "currentColor" : "none"}
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
             </svg>
           </button>
@@ -816,7 +1028,14 @@ export function SnippetEditor({
       />
 
       <div className="tags-row">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
           <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
           <line x1="7" y1="7" x2="7.01" y2="7" />
         </svg>
@@ -831,22 +1050,24 @@ export function SnippetEditor({
         <div className="cm-main-pane">
           <CodeMirror
             value={form.content}
+            theme="none"
             className="snippet-codemirror"
             style={{ height: "100%" }}
             height="100%"
             extensions={mainExtensions}
             onChange={(val) => onChange({ content: val })}
-            onCreateEditor={(view) => {
+            onCreateEditor={(view, state) => {
               cmRef.current = view;
               setEditorView(view);
               setMainScrollEl(view.scrollDOM as HTMLElement);
+              publishCodeglanceState(state);
             }}
             basicSetup={{
               lineNumbers: true,
               drawSelection: true,
               highlightActiveLine: true,
               highlightSelectionMatches: true,
-              autocompletion: true,
+              autocompletion: false,
               bracketMatching: true,
               closeBrackets: true,
               foldGutter: true,
@@ -863,8 +1084,7 @@ export function SnippetEditor({
         />
 
         <MiniMap
-          content={form.content}
-          language={form.language}
+          editorState={codeglanceState}
           highlightStyle={isDark ? darkHighlightStyle : lightHighlightStyle}
           isDark={isDark}
           accentPreset={accentPreset}
@@ -879,7 +1099,11 @@ export function SnippetEditor({
         <div className="footer-hint">
           {snippet && (
             <span className={`last-saved ${isDirty ? "unsaved-text" : ""}`}>
-              {isDirty ? t("snippet.unsaved") : t("snippet.savedAt", { time: formatDate(snippet.updated_at) })}
+              {isDirty
+                ? t("snippet.unsaved")
+                : t("snippet.savedAt", {
+                    time: formatDate(snippet.updated_at),
+                  })}
             </span>
           )}
           <span className="shortcut-hint">{t("snippet.shortcutSave")}</span>
@@ -896,7 +1120,13 @@ export function SnippetEditor({
             </button>
           )}
           {form.content && (
-            <button type="button" className={`btn-copy ${copied ? "copied" : ""}`} onClick={handleCopy} title={t("snippet.copy")} aria-live="polite">
+            <button
+              type="button"
+              className={`btn-copy ${copied ? "copied" : ""}`}
+              onClick={handleCopy}
+              title={t("snippet.copy")}
+              aria-live="polite"
+            >
               {copied ? t("snippet.copied") : t("snippet.copy")}
             </button>
           )}
@@ -905,8 +1135,18 @@ export function SnippetEditor({
               {isNew ? t("snippet.cancel") : t("snippet.cancelEdit")}
             </button>
           )}
-          <button type="button" className="btn-save" onClick={onSave} disabled={saving || (!isNew && !isDirty)} aria-busy={saving}>
-            {saving ? t("snippet.saveInProgress") : isNew ? t("snippet.create") : t("snippet.save")}
+          <button
+            type="button"
+            className="btn-save"
+            onClick={onSave}
+            disabled={saving || (!isNew && !isDirty)}
+            aria-busy={saving}
+          >
+            {saving
+              ? t("snippet.saveInProgress")
+              : isNew
+                ? t("snippet.create")
+                : t("snippet.save")}
           </button>
         </div>
       </div>

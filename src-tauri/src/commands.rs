@@ -1182,6 +1182,7 @@ mod tests {
             local_snapshot_frequency: current.local_snapshot_frequency.clone(),
             local_snapshot_retention: current.local_snapshot_retention,
             editor_line_wrap: current.editor_line_wrap,
+            editor_code_completion: current.editor_code_completion,
         }
         .apply_to(current)
     }

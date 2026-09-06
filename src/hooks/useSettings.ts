@@ -65,6 +65,7 @@ export interface SettingsView {
   /** Backend-owned latch set by a full-vault restore until a user sync succeeds. */
   sync_confirmation_required?: boolean;
   editor_line_wrap: boolean;
+  editor_code_completion: boolean;
   last_sync_at: string;
   webdav_secret_configured: boolean;
   credential_status: CredentialStatus;
@@ -87,6 +88,7 @@ export interface SettingsDraft {
   local_snapshot_frequency: LocalSnapshotFrequency;
   local_snapshot_retention: LocalSnapshotRetention;
   editor_line_wrap: boolean;
+  editor_code_completion: boolean;
 }
 
 export type SecretAction =
@@ -246,6 +248,7 @@ export function settingsToDraft(settings: SettingsView): SettingsDraft {
     local_snapshot_frequency: settings.local_snapshot_frequency ?? "daily",
     local_snapshot_retention: settings.local_snapshot_retention ?? 7,
     editor_line_wrap: settings.editor_line_wrap,
+    editor_code_completion: settings.editor_code_completion ?? true,
   };
 }
 

@@ -1,6 +1,6 @@
 # SnipVault 架构设计
 
-> 本文描述当前 v2.5.2 架构，截至 2026-08-26。已发现但尚未修复的问题集中记录在 [已知限制](known-limitations.md)。
+> 本文描述当前 v2.6.0 架构，截至 2026-09-07。已发现但尚未修复的问题集中记录在 [已知限制](known-limitations.md)。
 
 ## 1. 系统定位与边界
 
@@ -40,11 +40,12 @@ flowchart LR
         SETTINGS_PROVIDER[SettingsProvider<br/>权威设置、同步历史与通知]
         RESTORE[RestoreWizard / SyncNotificationCenter<br/>受控恢复与通知模态]
         HISTORY_VIEW[LazyRevisionCodePreview / LazyRevisionDiffViewer<br/>语法预览与有界逐行 diff]
-        HISTORY_SYNTAX[codeHighlightTheme / syntaxHighlight / lineDiff<br/>共享 token 样式与本地对齐]
+        HISTORY_DIFF[lineDiff.ts<br/>有界本地对齐]
+        HIGHLIGHT_THEME[codeHighlightTheme.ts<br/>唯一共享 HighlightStyle]
         MODAL[ModalSurface<br/>模态栈与焦点所有权]
         EDITOR_BOUNDARY[SnippetEditorLoadBoundary<br/>编辑器失败隔离与手动重试]
-        EDITOR[SnippetEditor<br/>CodeMirror + Canvas MiniMap]
-        SYNTAX_HIGHLIGHT[syntaxHighlight.ts<br/>共享语法范围适配器]
+        EDITOR[SnippetEditor<br/>CodeMirror live EditorState + Canvas MiniMap]
+        SYNTAX_HIGHLIGHT[syntaxHighlight.ts<br/>live tree / 有界只读范围适配器]
         LANGUAGE_META[languages.ts<br/>轻量语言元数据]
         LANGUAGE_EXT[languageExtensions.ts<br/>编辑器 parser / stream factory]
         UI --> APP
@@ -58,14 +59,17 @@ flowchart LR
         APP -- native target / restore handoff --> HISTORY_WINDOW
         HISTORY_WINDOW --> HISTORY
         HISTORY -. 按需加载 .-> HISTORY_VIEW
-        HISTORY_VIEW --> HISTORY_SYNTAX
+        HISTORY_VIEW --> HISTORY_DIFF
+        HISTORY_VIEW -- 独立 EditorState / 50 ms ensure --> SYNTAX_HIGHLIGHT
+        HISTORY_VIEW --> HIGHLIGHT_THEME
         APP --> PALETTE
         APP --> EDITOR_BOUNDARY
         EDITOR_BOUNDARY --> EDITOR
         UI --> MODAL
         EDITOR --> LANGUAGE_META
         EDITOR --> LANGUAGE_EXT
-        EDITOR --> SYNTAX_HIGHLIGHT
+        EDITOR -- live EditorState / syntaxTree 更新 --> SYNTAX_HIGHLIGHT
+        EDITOR --> HIGHLIGHT_THEME
         SYNTAX_HIGHLIGHT --> LANGUAGE_EXT
         LANGUAGE_EXT --> LANGUAGE_META
     end
@@ -227,7 +231,8 @@ flowchart LR
 | [CommandPalette.tsx](../src/components/CommandPalette.tsx) | 基于共享 ModalSurface 的本地命令过滤、方向键/Home/End/Enter 操作与焦点恢复 |
 | [LazySnippetEditor.tsx](../src/components/LazySnippetEditor.tsx) | 将按尝试生成的 React.lazy editor identity 保持在组件边界；开发 retry 使用独立 Vite query URL |
 | [SnippetEditorLoadBoundary.tsx](../src/components/SnippetEditorLoadBoundary.tsx) | 仅隔离懒加载编辑器的 import/render 失败；保留 App 草稿并提供显式 retry |
-| [SnippetEditor.tsx](../src/components/SnippetEditor.tsx) | 表单、可访问标签 combobox、CodeMirror、主题高亮、复制、Canvas minimap |
+| [SnippetEditor.tsx](../src/components/SnippetEditor.tsx) | 表单、可访问标签 combobox、CodeMirror、主题高亮、离线补全、复制、Canvas minimap |
+| [completion.ts](../src/components/completion.ts) | 本地关键词/snippet/当前文档/已加载摘要词汇补全 source、容量边界与 CodeMirror controller |
 | [languageExtensions.ts](../src/components/languageExtensions.ts) | 编辑器专用的 parser-backed、StreamLanguage 和 plaintext 扩展分类/factory |
 | [ModalSurface.tsx](../src/components/ModalSurface.tsx) | 共享模态栈、topmost Tab/Escape、背景 inert/ARIA、初始与恢复焦点 |
 | [Dialog.tsx](../src/components/Dialog.tsx) | 基于共享模态 surface 的 Promise 化 `alert`、`confirm`、`ask` 对话框 |
@@ -245,9 +250,13 @@ flowchart LR
 └── .minimap-wrap
 ```
 
-CodeMirror 的语言扩展由 [languageExtensions.ts](../src/components/languageExtensions.ts) 隔离：它从轻量 [languages.ts](../src/utils/languages.ts) 的 `LanguageId` 建立 exhaustively typed 分类和 factory；元数据文件不导入编辑器包。`buildMainExtensions()` 继续负责换行、GitHub 主题、`EditorView.theme()` 和来自 [codeHighlightTheme.ts](../src/components/codeHighlightTheme.ts) 的共享 `HighlightStyle`，并先注册项目复合 highlighter、后注册 UIW GitHub 主题，以确保项目复合样式是编辑器中实际生效的 token 色彩来源。编辑器 surface、gutter、光标、选区和匹配括号使用 [index.css](../src/index.css) 的完整界面配色语义 token，而不改变 syntax token palette。[syntaxHighlight.ts](../src/components/syntaxHighlight.ts) 使用同一语言 factory、受限 `ensureSyntaxTree()` 和共享 `HighlightStyle` 导出有序 token 范围；[SnippetEditor.tsx](../src/components/SnippetEditor.tsx) 的 `MiniMap` 再读取编辑区实际计算的 class 前景色绘制 Canvas，并从 minimap pane 读取计算后的 surface token 作为 Canvas 背景。因此编辑区和 codeglance 共用语法语义与最终颜色，解析未完成、无 token 与 plaintext 区域统一使用编辑器默认前景色；MiniMap viewport 同样使用语义 token，仍只负责 Canvas 几何、主滚动同步和 viewport 拖拽。
+CodeMirror 的语言扩展由 [languageExtensions.ts](../src/components/languageExtensions.ts) 隔离：它从轻量 [languages.ts](../src/utils/languages.ts) 的 `LanguageId` 建立 exhaustively typed 分类和 factory；元数据文件不导入编辑器包。[completion.ts](../src/components/completion.ts) 通过一个显式 `autocompletion()` controller 和 `EditorState.languageData` source 实现全语言离线补全。它不使用 `override`，所以 CodeMirror 会保留 parser package 的 contextual providers（例如 JS/TS、Python、Go、HTML、CSS、SQL 和 Markdown 在实际语言包具备时），并独立处理异步结果、range、`validFor` 与去重；本地 source 只补充每个 `LanguageId` 的有界关键词/placeholder snippet、光标周围最多 120,000 字符内的文档标识符，以及 App 已有的同语言已加载 summary 的 title/description/tag 分词。它不请求详情、不读取 `content_preview`、不启动 LSP/语言服务、不发送网络请求，也不会接触绝对路径或 credentials。`editor_code_completion` 作为默认开启的非敏感设置，按 Rust `Settings` → `SettingsView`/`SettingsInput` → `SettingsProvider` → `App` → `SnippetEditor` 数据流生效。
 
-历史 live preview 与 revision comparison 不挂载第二个可编辑 CodeMirror view。它们经 `LazyRevisionCodePreview` / `LazyRevisionDiffViewer` 才请求 parser/highlighter chunk；`RevisionCodeView` 在 plain DOM 中以 React text/span 安全渲染 token，先通过 `StyleModule.mount()` 注册共享 `HighlightStyle.module`。`lineDiff.ts` 仅消费 already-validated 的两份 `RevisionComparison` 内容，不增加 IPC：在字符、行数、matrix、渲染行数和短工作时间上限内生成二路逐行对齐；超限时明确退回为有行号、语法高亮、无自动换行的并排完整源代码，而不是无限计算或伪造 partial diff。历史窗口是由 chronology rail、固定 review command/context band 和剩余高度唯一 code stage 组成的 owned-height workspace；live preview 以只读 editor-chrome header 显示标题、language badge、受限 passive tag summary 和不可变 favorite state，不提供该处 mutation，时间线和 source panes 各自承担正常纵向滚动，不再有右侧外层 document scroll。紧凑时间线使用与主列表一致的中性 active surface/边框与左侧 accent rail；宽度至少 1200px 的比较使用弹性双 pane，1000–1199px 的最小窗口区间改用不重新 fetch/recompute 的 Baseline / Selected 单 pane 呈现，inactive pane 以 `display: none` 离开交互和辅助技术树。代码本身从不自动换行，只有单个真实长行在其所属 source pane 内可以横向滚动；双 pane 详细对齐模式只同步两侧的垂直滚动。
+`buildMainExtensions()` 只安装 [codeHighlightTheme.ts](../src/components/codeHighlightTheme.ts) 的一个 non-fallback `HighlightStyle`，并设置 UIW wrapper `theme="none"`，避免 UIW GitHub theme 再注册第二个语法 highlighter。GitHub 风格 tag 规则已经合并进该共享 style；`EditorView.theme()` 只负责编辑器高度、字体、深浅 facet、surface、滚动、光标、选区、换行与补全浮层 chrome。编辑器 surface、gutter、光标、选区和匹配括号使用 [index.css](../src/index.css) 的完整界面配色语义 token，不改变 syntax token palette。
+
+活动编辑器的 Codeglance 不再创建一次性 parser state。[SnippetEditor.tsx](../src/components/SnippetEditor.tsx) 保留 CodeMirror 当前的 `EditorState`；update listener 只在 document identity 或 `syntaxTree(state)` identity 变化时发布新快照，所以输入、粘贴、受控正文/语言重配置以及 background parser 发布新树都会触发 Canvas 重绘，selection/focus-only transaction 不会。其数据流为 `CodeMirror live EditorState → persistent syntaxTree → syntaxHighlight.ts tree-to-range adapter → shared HighlightStyle class → Canvas`。[syntaxHighlight.ts](../src/components/syntaxHighlight.ts) 不为这条活动路径 force parse；MiniMap 从同一 state 同时取得正文和当前可用 token 范围，先挂载共享 `StyleModule`，再读取编辑区实际计算的 class 前景色，并从 minimap pane 读取计算后的 surface token 作为 Canvas 背景。未被当前树覆盖、无 token 与 plaintext 区域统一使用编辑器默认前景色；后续 background tree publication 无需下一次按键即可补绘。MiniMap viewport 仍只负责 Canvas 几何、主滚动同步和 viewport 拖拽。
+
+历史 live preview 与 revision comparison 不挂载第二个可编辑 CodeMirror view。它们经 `LazyRevisionCodePreview` / `LazyRevisionDiffViewer` 才请求 parser/highlighter chunk；`RevisionCodeView` 在 plain DOM 中以 React text/span 安全渲染 token，先通过 `StyleModule.mount()` 注册共享 `HighlightStyle.module`。由于该只读 renderer 没有 live `EditorView`，它仍以独立 `EditorState` 和最长 50 ms 的 `ensureSyntaxTree()` 有界解析生成范围；预算未完成时退回默认前景色，不影响活动编辑器的增量 parser 生命周期。`lineDiff.ts` 仅消费 already-validated 的两份 `RevisionComparison` 内容，不增加 IPC：在字符、行数、matrix、渲染行数和短工作时间上限内生成二路逐行对齐；超限时明确退回为有行号、语法高亮、无自动换行的并排完整源代码，而不是无限计算或伪造 partial diff。历史窗口是由 chronology rail、固定 review command/context band 和剩余高度唯一 code stage 组成的 owned-height workspace；live preview 以只读 editor-chrome header 显示标题、language badge、受限 passive tag summary 和不可变 favorite state，不提供该处 mutation，时间线和 source panes 各自承担正常纵向滚动，不再有右侧外层 document scroll。紧凑时间线使用与主列表一致的中性 active surface/边框与左侧 accent rail；宽度至少 1200px 的比较使用弹性双 pane，1000–1199px 的最小窗口区间改用不重新 fetch/recompute 的 Baseline / Selected 单 pane 呈现，inactive pane 以 `display: none` 离开交互和辅助技术树。代码本身从不自动换行，只有单个真实长行在其所属 source pane 内可以横向滚动；双 pane 详细对齐模式只同步两侧的垂直滚动。
 
 语言 factory 分三类：官方/维护包提供的 parser-backed 扩展；基于 `@codemirror/legacy-modes` 的 `StreamLanguage` 语法着色；以及 plaintext 的显式空扩展。Stream mode 只提供 token stream 高亮，不是完整 Lezer parser，不能假定具备 parser-backed 折叠、结构选择或语言服务语义。
 
@@ -965,6 +974,6 @@ flowchart LR
 
 Release job 只有在所有平台构建成功后才继续：Windows x64/ARM64、macOS Universal、Linux amd64/ARM64 jobs 先将架构专属文件名的产物合并下载，再生成 `SHA256SUMS`，检查完整 artifact set（包括 ARM64 MSI/NSIS/portable、DEB/AppImage），拒绝 `.app` 目录 asset。Tag 发布会用 GitHub artifact attestations 生成 provenance，再通过 `softprops/action-gh-release` 发布 MSI/EXE/DMG/DEB/AppImage 和 checksum。手动 workflow dispatch 不发布，只保留 dry-run artifact set。
 
-图标链路以 [assets/app-icon.png](../assets/app-icon.png) 为唯一 canonical source；`npm run icons` 调用 Tauri icon generator 输出 [src-tauri/icons/](../src-tauri/icons/)，`npm run icons:check` 校验 PNG/ICO/ICNS magic、关键尺寸、`tauri.conf.json` 引用和旧重复生成器/输出是否已清理。前端标题栏也从同一 canonical source 通过 Vite asset import 获取图标。
+图标链路以 [assets/app-icon.png](../assets/app-icon.png) 为唯一 canonical source；`npm run icons` 以它生成 [src-tauri/icons/](../src-tauri/icons/) 及供宣传/品牌物料使用的独立 Lanczos 放大 1080×1080 PNG [assets/logo-1080.png](../assets/logo-1080.png)。1080px 文件不是 Tauri icon 输入，也不宣称是 vector 或无损原始图；`npm run icons:check` 校验 canonical source、logo、生成 PNG/ICO/ICNS magic、关键尺寸、`tauri.conf.json` 引用和旧重复生成器/输出是否已清理。前端标题栏也从同一 canonical source 通过 Vite asset import 获取图标。
 
 仓库当前仍没有应用内 updater，也没有完整 Windows Authenticode、macOS Developer ID signing/notarization 或真实签名产物验证；这些能力需要维护者提供真实密钥/证书和外部发布环境。普通 CI full gate 仍只运行于 Linux；release workflow 的 Universal/checksum/attestation 路径需要在 GitHub Actions tag 或 dry-run 中实际验证。

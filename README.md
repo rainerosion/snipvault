@@ -33,11 +33,11 @@ Snippet data is stored locally in SQLite and remains available offline. Optional
 
 ### Features
 
-> **Release status:** v2.5.2 is the current release. It adds Windows ARM64 and Linux ARM64 release packaging while retaining the existing productivity, recovery, synchronization, and revision-history workflows described below.
+> **Release status:** v2.6.0 is the current release. It adds offline all-language completion, keeps live CodeMirror and Canvas Codeglance highlighting aligned, and adds generated promotional/Microsoft Store image assets while retaining Windows/Linux ARM64 packaging.
 
 - **Local snippet management** — Create, edit, delete, favorite, tag, browse, and select up to 200 currently loaded snippets for one all-or-nothing favorite, unfavorite, or delete action.
 - **Scalable local search** — Backend-composed substring-compatible search over title, content, description, and tags, with language/favorites filters, selectable Recently Updated/Recently Used ordering, bounded summary pages, Load More, CJK support, and lazy full-detail loading.
-- **CodeMirror editing** — Line numbers, bracket matching, completion, folding, light/dark highlighting, and persistent line wrapping.
+- **CodeMirror editing** — Line numbers, bracket matching, folding, light/dark highlighting, persistent line wrapping, and enabled-by-default offline code completion. Every selectable language has bounded keyword/snippet/current-file/local-summary fallback suggestions; available language-package completions remain additive. It does not provide cloud AI, LSP, type inference, or project-wide semantic IntelliSense.
 - **Language labels** — Around 30 selectable language labels. Parser-backed highlighting covers JavaScript/TypeScript/JSX/TSX, Python, Rust, Go, Java, C/C++, C#, PHP, SQL, HTML, CSS, JSON, YAML, XML, Markdown, and Elixir. Ruby, Swift, Kotlin, Bash, Dockerfile, TOML, Lua, R, and Scala use legacy stream syntax highlighting rather than full Lezer parsers; plaintext intentionally has no parser.
 - **Tags and favorites** — Add tags with an accessible keyboard/mouse combobox (Enter/comma, arrows, Escape), reuse suggestions, and mark important snippets.
 - **Canvas codeglance** — Click to jump, drag the viewport, and resize the minimap.
@@ -50,12 +50,19 @@ Snippet data is stored locally in SQLite and remains available offline. Optional
 - **WebDAV synchronization** — Auto, Basic, Digest, Bearer, and no-auth modes; revision ancestry, cross-device deletion tombstones, deterministic conflict copies, a local Conflict Center for choosing preserved/canonical candidates, manifest CAS, HTTPS for remote servers, and OS credential-store protection for passwords/tokens.
 - **Future-only device identity recovery** — After an intentional full-vault copy or migration, review the local-only scope and explicitly generate a fresh author identity for future local revisions. Historic heads, immutable objects, pending work, and remote state are never rewritten; the app does not detect clones, repair/revoke remote identities, or synchronize automatically.
 - **Desktop integration** — Custom titlebar, system tray with quick capture, single-instance behavior, minimize-to-tray, autostart, a native quick-capture shortcut, and backend-controlled trusted-folder/repository opening.
+- **Application logo assets** — The 512×512 [assets/app-icon.png](assets/app-icon.png) is the canonical application artwork. [assets/logo-1080.png](assets/logo-1080.png) is a generated 1080×1080 PNG for promotional/branding use, and [assets/microsoft-store/app-tile-icon-300.png](assets/microsoft-store/app-tile-icon-300.png) is the generated 300×300 1:1 Microsoft Partner Center app-tile listing upload. The generated [src-tauri/icons/](src-tauri/icons/) tree includes package-oriented Windows outputs such as 71px and 150px icons; they are not separately managed listing uploads. This does not add an MSIX/AppX visual-asset manifest or make the project Store-submission-ready.
 - **Revision history and safe recovery** — Open or reuse a dedicated native workspace for a saved snippet’s compact immutable revision timeline; inspect syntax-highlighted live/tombstone states in a compact, read-only editor-chrome header with title, language, bounded tag summary, and historical favorite state; and review two live revisions in a Git/Beyond Compare-style, line-aligned diff with original line numbers. The selected revision keeps an editor-like surface with restrained change markers. Source never wraps to preserve alignment, but normal layouts do not force an outer horizontal scrollbar: only intrinsically long source lines scroll inside their own pane, and detailed live panes synchronize vertically only. Restore a historic live revision only as a new local descendant of the current head. The local diff is bounded and clearly falls back to complete side-by-side source for oversized or highly divergent pairs; historical objects are never rewritten, tombstones are not restorable, and restoration does not start a sync.
 - **Verified local snapshots and full-vault restore** — Create a full local SQLite checkpoint now or enable daily/weekly snapshots with 7/30/90 retained checkpoints. Every candidate is verified before publication and restore first creates an emergency checkpoint, leaves Settings and OS credentials untouched, then pauses scheduled WebDAV synchronization until a later successful manual sync from the toolbar, Settings, or system tray.
 - **Sync notification center** — A toolbar unread badge opens a persistent, de-identified local inbox for terminal synchronization outcomes. Entries can be marked read or dismissed, and retryable entries offer Sync Now; no server address, credential, snippet content, revision identifier, path, remote response, or free-form sync message is stored.
 - **Sync history** — The latest 20 successful technical synchronization records, kept separately from the notification inbox.
 
 > WebDAV v2 requires server support for strong ETags and conditional PUT. Its one-way cutover, immutable-object retention, conflict UI, and verification boundaries are documented in [Known limitations](docs/known-limitations.md). Keep an independent backup before activating a v1 directory and do not use old clients against it afterward.
+
+### What's New in v2.6.0
+
+- Added enabled-by-default, configurable offline code completion for every selectable language, combining bounded language keywords/snippets, current-document identifiers, and loaded same-language snippet metadata without network, LSP, or typing-time IPC.
+- Made the editable CodeMirror view and Canvas Codeglance use one syntax `HighlightStyle` and the same live incremental parser state, including redraws after newly typed/pasted content and background tree publication.
+- Added generated 1080×1080 promotional and 300×300 Microsoft Partner Center listing PNGs, with icon-generation and integrity checks for the existing Windows package-size set.
 
 ### What's New in v2.5.2
 
@@ -246,11 +253,11 @@ Feature design and development changes must update the relevant development docu
 
 ### 功能特性
 
-> **发布状态：**v2.5.2 是当前正式版本，新增 Windows ARM64 与 Linux ARM64 发布打包，同时保留下文所述的效率工作流、恢复、同步和版本历史能力。
+> **发布状态：**v2.6.0 是当前正式版本，新增全语言离线代码补全、CodeMirror 与 Canvas Codeglance 的实时高亮对齐，以及宣传/微软应用商店图片资源，同时保留 Windows/Linux ARM64 打包。
 
 - **本地片段管理** — 新建、编辑、删除、收藏、标签和 SQLite 持久化；可在当前已加载结果中选择最多 200 项，执行全有或全无的批量收藏、取消收藏或删除。
 - **可扩展本地搜索** — 后端组合标题、代码、描述和标签的子串兼容搜索与语言/收藏筛选；工具栏将筛选与排序分开显示，默认按“最近更新”排序，也可切换“最近使用”，并提供有界摘要页、加载更多、CJK 支持和完整详情懒加载。
-- **CodeMirror 编辑器** — 行号、括号匹配、补全、折叠、深浅主题和持久化自动换行。
+- **CodeMirror 编辑器** — 行号、括号匹配、折叠、深浅主题高亮、持久化自动换行和默认开启的离线代码补全。所有可选语言均有有界关键词/代码片段/当前文件/本地摘要词汇 fallback，已有语言包补全会叠加保留；不提供云端 AI、LSP、类型推断或项目级语义 IntelliSense。
 - **语言标签与高亮** — UI 可选择约 30 种语言；JavaScript/TypeScript/JSX/TSX、Python、Rust、Go、Java、C/C++、C#、PHP、SQL、HTML、CSS、JSON、YAML、XML、Markdown、Elixir 使用对应 parser-backed 扩展。Ruby、Swift、Kotlin、Bash、Dockerfile、TOML、Lua、R、Scala 使用 legacy stream 语法着色而非完整 Lezer parser；plaintext 有意不使用 parser。
 - **标签与收藏** — 使用支持键盘/鼠标的可访问 combobox 添加标签（Enter/逗号、方向键、Escape）、复用已有建议和收藏标记。
 - **Canvas Codeglance** — 点击跳转、拖拽视窗和调整宽度。
@@ -262,12 +269,19 @@ Feature design and development changes must update the relevant development docu
 - **WebDAV synchronization** — Auto、Basic、Digest、Bearer、无认证；基于 revision ancestry 合并、跨设备删除 tombstone、确定性冲突副本，以及可选择保留/规范候选的本机冲突解决中心，配合 manifest CAS；远端服务器要求 HTTPS，并通过操作系统凭据库保护密码/token。
 - **仅面向未来的设备身份恢复** — 在有意完整复制或迁移 vault 后，审阅本机操作范围并明确生成只供之后本地 revision 使用的新作者身份。已有 head、immutable object、待同步工作和远端状态绝不改写；应用不会检测 clone、修复/撤销远端身份或自动同步。
 - **桌面集成** — 自定义标题栏、含快速捕获入口的系统托盘、单实例、最小化到托盘、开机自启、原生快速捕获快捷键，以及后端受控打开可信目录/仓库。
+- **应用 Logo 资源** — 512×512 的 [assets/app-icon.png](assets/app-icon.png) 是应用图标的 canonical artwork。[assets/logo-1080.png](assets/logo-1080.png) 是生成的 1080×1080 PNG，用于宣传和品牌物料；[assets/microsoft-store/app-tile-icon-300.png](assets/microsoft-store/app-tile-icon-300.png) 是生成的 300×300 1:1 Microsoft Partner Center 应用磁贴 listing 上传图。生成的 [src-tauri/icons/](src-tauri/icons/) 目录包含 71px、150px 等面向 Windows 包的图标输出，它们不是独立维护的 listing 上传图。本变更不添加 MSIX/AppX visual-asset manifest，也不代表项目已经具备 Store 提交条件。
 - **版本历史与安全恢复** — 从主编辑器打开或复用独立原生工作区，浏览已保存片段紧凑的 immutable revision 时间线、在包含标题、language、受限 tag 摘要和历史 favorite 状态的紧凑只读 editor chrome 中检视带语法高亮的 live/tombstone 状态，并以 Git/Beyond Compare 风格的原始行号逐行对齐方式比较两个 live 版本；所选版本保持编辑器式中性 surface，以克制 marker 标识变化。代码不自动换行以保持对齐，但正常布局不强制产生外层横向滚动，只有真正超出其 source pane 的长行可在该 pane 内横向滚动，详细双栏只同步纵向滚动。只能把历史 live revision 恢复为当前 head 的新本地 descendant。超出本地大小或差异计算上限时会明确退回完整并排源码；历史对象不被改写，tombstone 不可恢复，恢复也不会自动同步。
 - **已验证本地快照与完整恢复** — 可立即创建完整本地 SQLite checkpoint，或启用 daily/weekly 与 7/30/90 保留策略。候选在发布前均需验证；恢复会先创建 emergency checkpoint，保持设置和 OS 凭据不变，并暂停计划 WebDAV 同步，直到之后从工具栏、设置或系统托盘成功完成一次手动同步。
 - **同步通知中心** — 工具栏未读徽标打开持久、去标识化的本地同步收件箱，可标为已读、关闭，且 retryable 条目支持 Sync Now；不会保存服务器地址、凭据、片段内容、revision 标识、路径、远端响应或自由文本同步消息。
 - **同步历史** — 仍单独保留最近 20 条成功同步技术记录，与通知收件箱分离。
 
 > WebDAV v2 要求服务器支持 strong ETag 和 conditional PUT。单向升级、不可变对象保留、冲突 UI 与验证边界见[已知限制](docs/known-limitations.md)。激活 v1 目录前请保留独立备份，激活后不要再让旧客户端访问该目录。
+
+### v2.6.0 更新内容
+
+- 为所有可选语言新增默认开启且可配置的离线代码补全，组合有界语言关键词/模板、当前文档标识符和已加载同语言片段元数据；不使用网络、LSP 或逐字 IPC。
+- 让可编辑 CodeMirror 与 Canvas Codeglance 使用唯一共享语法 `HighlightStyle` 和同一个实时增量 parser state；新输入/粘贴内容及后台语法树发布都会重绘。
+- 新增生成的 1080×1080 宣传 PNG 与 300×300 Microsoft Partner Center listing PNG，并对既有 Windows package 尺寸集加入生成和完整性校验。
 
 ### v2.5.2 更新内容
 

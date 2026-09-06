@@ -157,6 +157,8 @@
     "about": "About",
     "autoStart": "Start with Windows",
     "autoStartDesc": "Automatically launch when you log in",
+    "codeCompletion": "Code completion",
+    "codeCompletionDesc": "Show offline keyword, snippet, current-file, and vault-term suggestions while editing",
     "minimizeToTray": "Minimize to tray on close",
     "minimizeToTrayDesc": "Clicking the close button minimizes to the system tray",
     "theme": "Theme",
